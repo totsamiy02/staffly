@@ -1,0 +1,42 @@
+.header {
+  width: 100%;
+  background-color: #f7f7f7;
+}
+
+.header__container {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 120px;
+}
+
+.header__logo {
+  display: flex;
+  flex-shrink: 0;
+
+  img {
+    display: block;
+    width: 150px;
+    height: auto;
+  }
+}
+
+.header__buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+@media (max-width: 600px) {
+  .header__container {
+    min-height: 76px;
+  }
+
+  .header__logo img {
+    width: 105px;
+  }
+
+  .header__buttons {
+    gap: 2px;
+  }
+}

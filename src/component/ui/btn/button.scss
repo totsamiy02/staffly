@@ -1,0 +1,43 @@
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 52px;
+  padding: 0 20px;
+  border: 0;
+  border-radius: 12px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease,
+    opacity 0.2s ease;
+
+  &--white {
+    background-color: transparent;
+    color: #111;
+
+    &:hover {
+      background-color: #ebebeb;
+    }
+  }
+
+  &--black {
+    background-color: #111;
+    color: #fff;
+
+    &:hover {
+      background-color: #333;
+    }
+  }
+}
+
+@media (max-width: 600px) {
+  .button {
+    height: 42px;
+    padding: 0 14px;
+    border-radius: 10px;
+    font-size: 14px;
+  }
+}
