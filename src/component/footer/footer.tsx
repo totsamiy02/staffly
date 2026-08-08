@@ -5,10 +5,10 @@ const footerLinks = [
   {
     title: 'Продукт',
     links: [
-      { label: 'О сервисе', href: '#about' },
-      { label: 'Возможности', href: '#benefits' },
-      { label: 'Тарифы', href: '#pricing' },
-      { label: 'Начало страницы', href: '#top' },
+      { label: 'О сервисе', href: '/#about' },
+      { label: 'Возможности', href: '/#benefits' },
+      { label: 'Тарифы', href: '/#pricing' },
+      { label: 'Начало страницы', href: '/#top' },
     ],
   },
   {
@@ -23,7 +23,7 @@ const footerLinks = [
   {
     title: 'Информация',
     links: [
-      { label: 'Политика cookie', href: '/cookie-policy' },
+      { label: 'Политика cookie', href: '/privacy-policy#cookies' },
       { label: 'Оплата и отмена подписки', href: '/payment-and-refunds' },
       { label: 'Реквизиты', href: '/company-details' },
       { label: 'Контакты', href: '/contacts' },
@@ -52,7 +52,7 @@ function Footer() {
     <footer className="footer">
       <div className="container footer__container">
         <div className="footer__brand">
-          <a href="#top" aria-label="Staffly — начало страницы">
+          <a href="/" aria-label="Staffly — главная">
             <img src={logo} alt="Staffly" />
           </a>
           <p>Удобный инструмент для управления персоналом малого бизнеса</p>

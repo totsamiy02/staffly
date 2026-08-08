@@ -6,7 +6,7 @@ function Header() {
   return (
     <header className="header" id="top">
       <div className="container header__container">
-        <a className="header__logo" href="#" aria-label="Staffly — главная">
+        <a className="header__logo" href="/" aria-label="Staffly — главная">
           <img src={logo} alt="Staffly" />
         </a>
 

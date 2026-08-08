@@ -39,7 +39,7 @@ function CookieConsent() {
       <p>
         Необходимые cookie обеспечивают работу сайта. Дополнительные cookie можно
         использовать для аналитики только после вашего согласия. Подробнее — в{' '}
-        <a href="/cookie-policy">политике cookie</a>.
+        <a href="/privacy-policy#cookies">политике cookie</a>.
       </p>
     </Modal>
   )
