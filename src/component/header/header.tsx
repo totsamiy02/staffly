@@ -1,6 +1,6 @@
 import './header.scss'
 import logo from '../../assets/images/logo/staffly-logo.svg'
-import { BlackButton, WhiteButton } from '../ui/btn/button'
+import { Link } from 'react-router-dom'
 
 function Header() {
   return (
@@ -11,8 +11,8 @@ function Header() {
         </a>
 
         <div className="header__buttons">
-          <WhiteButton>Вход</WhiteButton>
-          <BlackButton>Регистрация</BlackButton>
+          <Link className="button button--white" to="/auth?mode=login">Вход</Link>
+          <Link className="button button--black" to="/auth?mode=register">Регистрация</Link>
         </div>
       </div>
     </header>

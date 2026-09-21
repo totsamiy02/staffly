@@ -90,6 +90,23 @@
   font-size: 13px;
 }
 
+.footer__database-check {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-top: 56px;
+  padding: 16px 20px;
+  border: 1px solid #d9e4dc;
+  border-radius: 12px;
+  background: #fff;
+  color: #444;
+  font-size: 14px;
+}
+
+.footer__database-check strong {
+  color: #111;
+}
+
 @media (max-width: 900px) {
   .footer__container {
     grid-template-columns: 1fr;

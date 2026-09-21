@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import Header from './component/header/header.tsx'
 import Hero from './component/hero/hero.tsx'
 import Benefits from './component/benefits/benefits.tsx'
@@ -9,6 +9,7 @@ import PrivacyPolicy from './pages/legal/privacy-policy.tsx'
 import PersonalDataConsent from './pages/legal/personal-data-consent.tsx'
 import Terms from './pages/legal/terms.tsx'
 import Offer from './pages/legal/offer.tsx'
+import AuthPage from './pages/auth/auth.tsx'
 
 function HomePage() {
   return (
@@ -21,12 +22,15 @@ function HomePage() {
 }
 
 function App() {
+  const isAuthPage = useLocation().pathname === '/auth'
+
   return (
     <>
-      <Header />
+      {!isAuthPage && <Header />}
 
       <Routes>
         <Route path="/" element={<HomePage />} />
+        <Route path="/auth" element={<AuthPage />} />
         <Route path="/privacy-policy" element={<PrivacyPolicy />} />
         <Route path="/personal-data-consent" element={<PersonalDataConsent />} />
         <Route path="/terms" element={<Terms />} />
@@ -35,8 +39,8 @@ function App() {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
 
-      <Footer />
-      <CookieConsent />
+      {!isAuthPage && <Footer />}
+      {!isAuthPage && <CookieConsent />}
     </>
   )
 }

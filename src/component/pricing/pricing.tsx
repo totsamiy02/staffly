@@ -1,4 +1,5 @@
 import { BlackButton, WhiteButton } from '../ui/btn/button'
+import { useNavigate } from 'react-router-dom'
 import './pricing.scss'
 
 const plans = [
@@ -38,6 +39,7 @@ const plans = [
 ]
 
 function Pricing() {
+  const navigate = useNavigate()
   return (
     <section className="pricing" id="pricing">
       <div className="container">
@@ -67,9 +69,9 @@ function Pricing() {
 
               <div className="pricing-card__action">
                 {plan.featured ? (
-                  <BlackButton>Попробовать</BlackButton>
+                  <BlackButton onClick={() => navigate('/auth?mode=register')}>Попробовать</BlackButton>
                 ) : (
-                  <WhiteButton>Попробовать</WhiteButton>
+                  <WhiteButton onClick={() => navigate('/auth?mode=register')}>Попробовать</WhiteButton>
                 )}
               </div>
             </article>
