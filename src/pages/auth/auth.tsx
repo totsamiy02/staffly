@@ -37,6 +37,8 @@ function AuthPage() {
   const { login } = useAuth()
   const [searchParams, setSearchParams] = useSearchParams()
   const mode: Mode = searchParams.get('mode') === 'register' ? 'register' : 'login'
+  const requestedReturnTo = searchParams.get('returnTo')
+  const returnTo = requestedReturnTo?.startsWith('/app') ? requestedReturnTo : '/app'
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
@@ -55,7 +57,7 @@ function AuthPage() {
   const confirmError = !confirm ? 'Повторите пароль.' : confirm !== password ? 'Пароли не совпадают.' : ''
 
   function switchMode(next: Mode) {
-    setSearchParams({ mode: next })
+    setSearchParams({ mode: next, ...(requestedReturnTo ? { returnTo: requestedReturnTo } : {}) })
     setAttempted(false)
     setTouched({})
     setServerError('')
@@ -72,10 +74,10 @@ function AuthPage() {
     try {
       if (mode === 'register') {
         await authPost('register', { email, password, confirmPassword: confirm, consentData, consentTerms })
-        navigate('/verify-email', { state: { email: email.trim().toLowerCase(), cooldownUntil: Date.now() + 60_000 } })
+        navigate('/verify-email', { state: { email: email.trim().toLowerCase(), cooldownUntil: Date.now() + 60_000, returnTo } })
       } else {
         await login(email, password)
-        navigate('/workspace', { replace: true })
+        navigate(returnTo, { replace: true })
       }
     } catch (error) {
       setServerError(error instanceof Error ? error.message : 'Не удалось выполнить запрос.')

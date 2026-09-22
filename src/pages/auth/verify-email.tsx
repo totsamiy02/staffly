@@ -10,6 +10,8 @@ function VerifyEmailPage() {
   const { verifyEmail } = useAuth()
   const [email, setEmail] = useState(() => (location.state as { email?: string } | null)?.email ?? '')
   const initialEmail = (location.state as { email?: string } | null)?.email
+  const requestedReturnTo = (location.state as { returnTo?: string } | null)?.returnTo
+  const returnTo = requestedReturnTo?.startsWith('/app') ? requestedReturnTo : '/app'
   const [code, setCode] = useState('')
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -29,7 +31,7 @@ function VerifyEmailPage() {
     setError('')
     try {
       await verifyEmail(email, code)
-      navigate('/workspace', { replace: true })
+      navigate(returnTo, { replace: true })
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'Не удалось подтвердить почту.')
     } finally { setBusy(false) }

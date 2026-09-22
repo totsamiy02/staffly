@@ -110,9 +110,9 @@ async function createSession(user: { id: string; email: string }, request: Reque
   return { user: publicUser(user), accessToken: await accessToken(user.id, session.id) }
 }
 
-type AuthenticatedRequest = Request & { auth?: { userId: string; sessionId: string; email: string } }
+export type AuthenticatedRequest = Request & { auth?: { userId: string; sessionId: string; email: string } }
 
-async function requireAuth(request: AuthenticatedRequest, response: Response, next: NextFunction) {
+export async function requireAuth(request: AuthenticatedRequest, response: Response, next: NextFunction) {
   const bearer = request.get('authorization')?.match(/^Bearer (.+)$/)
   if (!bearer) { response.status(401).json({ message: 'Требуется вход в аккаунт.' }); return }
   try {

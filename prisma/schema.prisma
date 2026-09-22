@@ -8,20 +8,128 @@ datasource db {
 }
 
 model User {
+  id                  String    @id @default(uuid()) @db.Uuid
+  email               String    @unique @db.VarChar(254)
+  passwordHash        String    @map("password_hash") @db.Text
+  emailVerifiedAt     DateTime? @map("email_verified_at") @db.Timestamptz(3)
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt           DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt           DateTime? @map("deleted_at") @db.Timestamptz(3)
+  lastSecurityEmailAt DateTime? @map("last_security_email_at") @db.Timestamptz(3)
+
+  sessions                 AuthSession[]
+  emailVerificationTokens  EmailVerificationToken[]
+  passwordResetTokens      PasswordResetToken[]
+  createdOrganizations     Organization[]           @relation("OrganizationCreator")
+  organizationMemberships  OrganizationMember[]
+  organizationInvites      OrganizationInvite[]     @relation("InvitationCreator")
+  acceptedInvites          OrganizationInvite[]     @relation("InvitationAcceptor")
+  sensitiveActions         SensitiveActionToken[]   @relation("SensitiveActionOwner")
+  targetedSensitiveActions SensitiveActionToken[]   @relation("SensitiveActionTarget")
+
+  @@map("users")
+}
+
+enum OrganizationRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum OrganizationInviteType {
+  EMAIL
+  CODE
+}
+
+enum SensitiveActionType {
+  TRANSFER_OWNERSHIP
+  DELETE_ORGANIZATION
+}
+
+model Organization {
   id              String    @id @default(uuid()) @db.Uuid
-  email           String    @unique @db.VarChar(254)
-  passwordHash    String    @map("password_hash") @db.Text
-  emailVerifiedAt DateTime? @map("email_verified_at") @db.Timestamptz(3)
+  name            String    @db.VarChar(120)
+  description     String?   @db.VarChar(1000)
+  timezone        String    @db.VarChar(64)
+  createdByUserId String    @map("created_by_user_id") @db.Uuid
   createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
   deletedAt       DateTime? @map("deleted_at") @db.Timestamptz(3)
-  lastSecurityEmailAt DateTime? @map("last_security_email_at") @db.Timestamptz(3)
 
-  sessions                AuthSession[]
-  emailVerificationTokens EmailVerificationToken[]
-  passwordResetTokens     PasswordResetToken[]
+  createdBy        User                   @relation("OrganizationCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  members          OrganizationMember[]
+  invitations      OrganizationInvite[]
+  sensitiveActions SensitiveActionToken[]
 
-  @@map("users")
+  @@index([createdByUserId])
+  @@index([deletedAt])
+  @@map("organizations")
+}
+
+model OrganizationMember {
+  id             String           @id @default(uuid()) @db.Uuid
+  organizationId String           @map("organization_id") @db.Uuid
+  userId         String           @map("user_id") @db.Uuid
+  role           OrganizationRole @default(MEMBER)
+  joinedAt       DateTime         @default(now()) @map("joined_at") @db.Timestamptz(3)
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@index([organizationId])
+  @@index([userId])
+  @@index([organizationId, role])
+  @@map("organization_members")
+}
+
+model OrganizationInvite {
+  id               String                 @id @default(uuid()) @db.Uuid
+  organizationId   String                 @map("organization_id") @db.Uuid
+  invitedByUserId  String                 @map("invited_by_user_id") @db.Uuid
+  type             OrganizationInviteType
+  invitedEmail     String?                @map("invited_email") @db.VarChar(254)
+  tokenHash        String                 @unique @map("token_hash") @db.VarChar(64)
+  expiresAt        DateTime               @map("expires_at") @db.Timestamptz(3)
+  acceptedByUserId String?                @map("accepted_by_user_id") @db.Uuid
+  acceptedAt       DateTime?              @map("accepted_at") @db.Timestamptz(3)
+  rejectedAt       DateTime?              @map("rejected_at") @db.Timestamptz(3)
+  revokedAt        DateTime?              @map("revoked_at") @db.Timestamptz(3)
+  createdAt        DateTime               @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  invitedBy    User         @relation("InvitationCreator", fields: [invitedByUserId], references: [id], onDelete: Restrict)
+  acceptedBy   User?        @relation("InvitationAcceptor", fields: [acceptedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, createdAt])
+  @@index([invitedEmail, type, expiresAt])
+  @@index([invitedByUserId])
+  @@index([acceptedByUserId])
+  @@map("organization_invites")
+}
+
+model SensitiveActionToken {
+  id             String              @id @default(uuid()) @db.Uuid
+  userId         String              @map("user_id") @db.Uuid
+  organizationId String              @map("organization_id") @db.Uuid
+  action         SensitiveActionType
+  targetUserId   String?             @map("target_user_id") @db.Uuid
+  codeHash       String              @unique @map("code_hash") @db.VarChar(64)
+  expiresAt      DateTime            @map("expires_at") @db.Timestamptz(3)
+  usedAt         DateTime?           @map("used_at") @db.Timestamptz(3)
+  attempts       Int                 @default(0)
+  createdAt      DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user         User         @relation("SensitiveActionOwner", fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  targetUser   User?        @relation("SensitiveActionTarget", fields: [targetUserId], references: [id], onDelete: Restrict)
+
+  @@index([userId, organizationId, action, usedAt])
+  @@index([organizationId])
+  @@index([targetUserId])
+  @@map("sensitive_action_tokens")
 }
 
 model AuthSession {

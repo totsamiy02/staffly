@@ -10,10 +10,13 @@ import PersonalDataConsent from './pages/legal/personal-data-consent.tsx'
 import Terms from './pages/legal/terms.tsx'
 import Offer from './pages/legal/offer.tsx'
 import AuthPage from './pages/auth/auth.tsx'
-import { useAuth } from './app/auth/auth-context.tsx'
 import VerifyEmailPage from './pages/auth/verify-email.tsx'
 import ResetPasswordPage from './pages/auth/reset-password.tsx'
 import ForgotPasswordPage from './pages/auth/forgot-password.tsx'
+import ProtectedRoute from './pages/app/protected-route.tsx'
+import OrganizationsPage from './pages/app/organizations-page.tsx'
+import CreateOrganizationPage from './pages/app/create-organization-page.tsx'
+import OrganizationLayout from './pages/app/organization-layout.tsx'
 
 function HomePage() {
   return (
@@ -25,19 +28,15 @@ function HomePage() {
   )
 }
 
-function WorkspacePage() {
-  const { user, loading } = useAuth()
-  if (loading) return <main className="workspace" />
-  if (!user) return <Navigate to="/" replace />
-  return <main className="workspace" aria-label="Рабочее пространство" />
-}
-
 function App() {
-  const isAuthPage = ['/auth', '/verify-email', '/forgot-password', '/reset-password'].includes(useLocation().pathname)
+  const pathname = useLocation().pathname
+  const isAuthPage = ['/auth', '/verify-email', '/forgot-password', '/reset-password'].includes(pathname)
+  const isAppPage = pathname === '/app' || pathname.startsWith('/app/')
+  const hidePublicFrame = isAuthPage || isAppPage
 
   return (
     <>
-      {!isAuthPage && <Header />}
+      {!hidePublicFrame && <Header />}
 
       <Routes>
         <Route path="/" element={<HomePage />} />
@@ -45,7 +44,10 @@ function App() {
         <Route path="/verify-email" element={<VerifyEmailPage />} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />
-        <Route path="/workspace" element={<WorkspacePage />} />
+        <Route path="/workspace" element={<Navigate to="/app" replace />} />
+        <Route path="/app" element={<ProtectedRoute><OrganizationsPage /></ProtectedRoute>} />
+        <Route path="/app/organizations/new" element={<ProtectedRoute><CreateOrganizationPage /></ProtectedRoute>} />
+        <Route path="/app/organizations/:organizationId/*" element={<ProtectedRoute><OrganizationLayout /></ProtectedRoute>} />
         <Route path="/privacy-policy" element={<PrivacyPolicy />} />
         <Route path="/personal-data-consent" element={<PersonalDataConsent />} />
         <Route path="/terms" element={<Terms />} />
@@ -54,8 +56,8 @@ function App() {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
 
-      {!isAuthPage && <Footer />}
-      {!isAuthPage && <CookieConsent />}
+      {!hidePublicFrame && <Footer />}
+      {!hidePublicFrame && <CookieConsent />}
     </>
   )
 }

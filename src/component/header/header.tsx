@@ -14,7 +14,7 @@ function Header() {
 
         {loading ? null : user ? (
           <div className="header__profile">
-            <Link className="header__profile-link" to="/workspace" aria-label={`Профиль ${user.displayName}`}>
+            <Link className="header__profile-link" to="/app" aria-label={`Организации пользователя ${user.displayName}`}>
               <span className="header__avatar" aria-hidden="true" />
               <span>{user.displayName}</span>
             </Link>
