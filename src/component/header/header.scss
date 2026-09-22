@@ -27,6 +27,34 @@
   gap: 8px;
 }
 
+.header__profile {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.header__profile-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+}
+
+.header__avatar {
+  width: 36px;
+  height: 36px;
+  border: 1px solid #ccc;
+  border-radius: 50%;
+  background: #e8e8e8;
+}
+
+.header__logout {
+  color: #555;
+  cursor: pointer;
+}
+
+.header__logout:hover { color: #111; }
+
 @media (max-width: 600px) {
   .header__container {
     min-height: 76px;
@@ -39,4 +67,7 @@
   .header__buttons {
     gap: 2px;
   }
+
+  .header__profile { gap: 10px; font-size: 14px; }
+  .header__avatar { width: 32px; height: 32px; }
 }

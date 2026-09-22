@@ -1,12 +1,12 @@
 import { useState, type FormEvent } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { authPost, useAuth } from '../../app/auth/auth-context.tsx'
 import './auth.scss'
 
 type Mode = 'login' | 'register'
 type Field = 'email' | 'password' | 'confirm'
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-const passwordPattern = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d\s])\S{8,24}$/
 
 function FieldIcon({ kind }: { kind: 'email' | 'password' }) {
   return kind === 'email' ? (
@@ -34,6 +34,7 @@ function EyeIcon({ visible }: { visible: boolean }) {
 
 function AuthPage() {
   const navigate = useNavigate()
+  const { login } = useAuth()
   const [searchParams, setSearchParams] = useSearchParams()
   const mode: Mode = searchParams.get('mode') === 'register' ? 'register' : 'login'
   const [email, setEmail] = useState('')
@@ -41,28 +42,59 @@ function AuthPage() {
   const [confirm, setConfirm] = useState('')
   const [consentData, setConsentData] = useState(false)
   const [consentTerms, setConsentTerms] = useState(false)
-  const [remember, setRemember] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [serverError, setServerError] = useState('')
+  const [notice, setNotice] = useState('')
   const [visible, setVisible] = useState<Record<'password' | 'confirm', boolean>>({ password: false, confirm: false })
   const [touched, setTouched] = useState<Partial<Record<Field, boolean>>>({})
   const [attempted, setAttempted] = useState(false)
 
   const emailError = !email.trim() ? 'Укажите электронную почту.' : !emailPattern.test(email.trim()) ? 'Введите корректный адрес почты.' : ''
-  const passwordError = !password ? 'Укажите пароль.' : mode === 'register' && !passwordPattern.test(password)
-    ? 'От 8 до 24 символов: заглавная и строчная буквы, цифра и специальный символ.'
-    : mode === 'login' && (password.length < 8 || password.length > 24) ? 'Пароль должен содержать от 8 до 24 символов.' : ''
+  const passwordError = !password ? 'Укажите пароль.' : mode === 'register' && (password.length < 10 || password.length > 128)
+    ? 'Пароль должен содержать от 10 до 128 символов.' : ''
   const confirmError = !confirm ? 'Повторите пароль.' : confirm !== password ? 'Пароли не совпадают.' : ''
 
   function switchMode(next: Mode) {
     setSearchParams({ mode: next })
     setAttempted(false)
     setTouched({})
+    setServerError('')
+    setNotice('')
   }
 
-  function submit(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setAttempted(true)
     if (emailError || passwordError || (mode === 'register' && (confirmError || !consentData || !consentTerms))) return
-    navigate('/')
+    setSubmitting(true)
+    setServerError('')
+    setNotice('')
+    try {
+      if (mode === 'register') {
+        await authPost('register', { email, password, confirmPassword: confirm, consentData, consentTerms })
+        navigate('/verify-email', { state: { email: email.trim().toLowerCase(), cooldownUntil: Date.now() + 60_000 } })
+      } else {
+        await login(email, password)
+        navigate('/workspace', { replace: true })
+      }
+    } catch (error) {
+      setServerError(error instanceof Error ? error.message : 'Не удалось выполнить запрос.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  async function resendVerification() {
+    setSubmitting(true)
+    try {
+      const result = await authPost<{ message: string }>('resend-verification', { email })
+      setNotice(result.message)
+      setServerError('')
+    } catch (error) {
+      setServerError(error instanceof Error ? error.message : 'Не удалось выполнить запрос.')
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   function input(name: Field, placeholder: string, value: string, setValue: (value: string) => void, error: string) {
@@ -100,6 +132,7 @@ function AuthPage() {
   return (
     <main className="auth">
       <div className="auth__panel">
+        <Link className="auth__back" to="/" aria-label="На главную"><span>На главную</span></Link>
         <a className="auth__brand" href="/">Staffly</a>
         <p className="auth__tagline">Управление командой становится проще</p>
 
@@ -121,8 +154,7 @@ function AuthPage() {
 
             {mode === 'login' ? (
               <div className="auth__options">
-                <label className="auth__check"><input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} /><span>Запомнить меня</span></label>
-                <button type="button" className="auth__forgot">Забыли пароль?</button>
+                <button type="button" className="auth__forgot" onClick={() => navigate('/forgot-password')}>Забыли пароль?</button>
               </div>
             ) : (
               <div className="auth__consents">
@@ -139,7 +171,10 @@ function AuthPage() {
               </div>
             )}
 
-            <button className="auth__submit" type="submit">{mode === 'login' ? 'Войти' : 'Зарегистрироваться'}</button>
+            {serverError && <p className="auth__error" role="alert">{serverError}</p>}
+            {serverError.includes('Подтвердите email') && <><button className="auth__text-button" type="button" onClick={() => { void resendVerification() }} disabled={submitting}>Отправить код повторно</button><br /><Link className="auth__text-button" to="/verify-email" state={{ email: email.trim().toLowerCase() }}>Ввести код</Link></>}
+            {notice && <p className="auth__notice" role="status">{notice}</p>}
+            <button className="auth__submit" type="submit" disabled={submitting}>{submitting ? 'Подождите…' : mode === 'login' ? 'Войти' : 'Зарегистрироваться'}</button>
           </form>
         </div>
 

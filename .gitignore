@@ -23,4 +23,12 @@ dist-ssr
 
 .env
 .env.*
+!src/server/.env.example
 .DS_Store
+/src/generated/prisma
+
+# Local AI editor skills are not part of the application.
+/.agents/
+/.claude/
+/.windsurf/
+/skills-lock.json

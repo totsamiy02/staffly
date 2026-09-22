@@ -10,6 +10,10 @@ import PersonalDataConsent from './pages/legal/personal-data-consent.tsx'
 import Terms from './pages/legal/terms.tsx'
 import Offer from './pages/legal/offer.tsx'
 import AuthPage from './pages/auth/auth.tsx'
+import { useAuth } from './app/auth/auth-context.tsx'
+import VerifyEmailPage from './pages/auth/verify-email.tsx'
+import ResetPasswordPage from './pages/auth/reset-password.tsx'
+import ForgotPasswordPage from './pages/auth/forgot-password.tsx'
 
 function HomePage() {
   return (
@@ -21,8 +25,15 @@ function HomePage() {
   )
 }
 
+function WorkspacePage() {
+  const { user, loading } = useAuth()
+  if (loading) return <main className="workspace" />
+  if (!user) return <Navigate to="/" replace />
+  return <main className="workspace" aria-label="Рабочее пространство" />
+}
+
 function App() {
-  const isAuthPage = useLocation().pathname === '/auth'
+  const isAuthPage = ['/auth', '/verify-email', '/forgot-password', '/reset-password'].includes(useLocation().pathname)
 
   return (
     <>
@@ -31,6 +42,10 @@ function App() {
       <Routes>
         <Route path="/" element={<HomePage />} />
         <Route path="/auth" element={<AuthPage />} />
+        <Route path="/verify-email" element={<VerifyEmailPage />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
+        <Route path="/workspace" element={<WorkspacePage />} />
         <Route path="/privacy-policy" element={<PrivacyPolicy />} />
         <Route path="/personal-data-consent" element={<PersonalDataConsent />} />
         <Route path="/terms" element={<Terms />} />

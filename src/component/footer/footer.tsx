@@ -59,6 +59,7 @@ function Footer() {
   const [databaseStatus, setDatabaseStatus] = useState<DatabaseStatus | null>(null)
 
   useEffect(() => {
+    if (!import.meta.env.DEV) return
     fetch('/api/database-status')
       .then(async (response) => setDatabaseStatus((await response.json()) as DatabaseStatus))
       .catch(() => setDatabaseStatus({ connected: false, message: 'API не отвечает' }))
@@ -99,7 +100,7 @@ function Footer() {
         </nav>
       </div>
 
-      <div className="container footer__database-check" aria-live="polite">
+      {import.meta.env.DEV && <div className="container footer__database-check" aria-live="polite">
         <strong>Проверка БД</strong>
         {databaseStatus === null ? (
           <span>Проверяем соединение…</span>
@@ -108,7 +109,7 @@ function Footer() {
         ) : (
           <span>Подключение не удалось: {databaseStatus.message}</span>
         )}
-      </div>
+      </div>}
 
       <div className="container footer__bottom">
         <p>© {new Date().getFullYear()} Staffly. Все права защищены.</p>
