@@ -6,7 +6,8 @@ import { hash, verify, argon2id } from 'argon2'
 import { SignJWT, jwtVerify } from 'jose'
 import { z } from 'zod'
 import { prisma } from './db.ts'
-import { deliverSecurityCode } from './mail.ts'
+import { deliverPasswordChanged, deliverSecurityCode } from './mail.ts'
+import { mediaUrl } from './storage/image-service.ts'
 
 const jwtSecret = process.env.JWT_SECRET
 if (!jwtSecret || jwtSecret.length < 32) throw new Error('JWT_SECRET must contain at least 32 characters')
@@ -24,6 +25,11 @@ const invalidCredentials = 'Неверная почта или пароль.'
 
 const email = z.string().trim().toLowerCase().email().max(254)
 const password = z.string().min(10).max(128)
+  .refine((value) => /[a-zа-яё]/u.test(value), 'Добавьте строчную букву.')
+  .refine((value) => /[A-ZА-ЯЁ]/u.test(value), 'Добавьте заглавную букву.')
+  .refine((value) => /\d/.test(value), 'Добавьте цифру.')
+  .refine((value) => /[^\p{L}\p{N}\s]/u.test(value), 'Добавьте специальный символ.')
+  .refine((value) => !/\s/u.test(value), 'Пароль не должен содержать пробелы.')
 const registerBody = z.object({ email, password, confirmPassword: z.string(), consentData: z.literal(true), consentTerms: z.literal(true) })
   .refine((body) => body.password === body.confirmPassword, { path: ['confirmPassword'], message: 'Пароли не совпадают' })
 const loginBody = z.object({ email, password: z.string() })
@@ -80,8 +86,9 @@ function clearRefreshCookie(response: Response) {
   response.clearCookie(COOKIE_NAME, { path: COOKIE_PATH, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' })
 }
 
-function publicUser(user: { id: string; email: string }) {
-  return { id: user.id, email: user.email, displayName: user.email.split('@')[0] }
+function publicUser(user: { id: string; email: string; firstName?: string | null; lastName?: string | null; middleName?: string | null; phone?: string | null; bio?: string | null; avatarFileId?: string | null }) {
+  const displayName = [user.lastName, user.firstName].filter(Boolean).join(' ') || user.email.split('@')[0]
+  return { id: user.id, email: user.email, displayName, firstName: user.firstName ?? null, lastName: user.lastName ?? null, middleName: user.middleName ?? null, phone: user.phone ?? null, bio: user.bio ?? null, avatarUrl: mediaUrl(user.avatarFileId) }
 }
 
 async function accessToken(userId: string, sessionId: string) {
@@ -124,6 +131,7 @@ export async function requireAuth(request: AuthenticatedRequest, response: Respo
       response.status(401).json({ message: 'Сессия завершена.' }); return
     }
     request.auth = { userId: session.userId, sessionId: session.id, email: session.user.email }
+    if (session.lastUsedAt.getTime() < now.getTime() - 60_000) void prisma.authSession.updateMany({ where: { id: session.id, revokedAt: null }, data: { lastUsedAt: now } })
     next()
   } catch {
     response.status(401).json({ message: 'Сессия завершена.' })
@@ -236,8 +244,37 @@ router.post('/logout-all', requireAuth, async (request: AuthenticatedRequest, re
   response.status(204).end()
 })
 
-router.get('/me', requireAuth, (request: AuthenticatedRequest, response) => {
-  response.json({ user: publicUser({ id: request.auth!.userId, email: request.auth!.email }) })
+function deviceDetails(userAgent: string | null) {
+  const value = userAgent ?? ''
+  const device = /iPhone/i.test(value) ? 'iPhone' : /iPad/i.test(value) ? 'iPad' : /Android/i.test(value) ? 'Android' : /Macintosh|Mac OS X/i.test(value) ? 'Mac' : /Windows/i.test(value) ? 'Windows' : /Linux/i.test(value) ? 'Linux' : 'Неизвестное устройство'
+  const browser = /Edg\//i.test(value) ? 'Microsoft Edge' : /OPR\//i.test(value) ? 'Opera' : /Chrome\//i.test(value) ? 'Google Chrome' : /Firefox\//i.test(value) ? 'Firefox' : /Safari\//i.test(value) ? 'Safari' : 'Браузер'
+  const kind = /iPhone|iPad|Android|Mobile/i.test(value) ? 'mobile' : 'desktop'
+  return { device, browser, kind }
+}
+
+router.get('/sessions', requireAuth, async (request: AuthenticatedRequest, response) => {
+  const now = new Date()
+  const sessions = await prisma.authSession.findMany({ where: { userId: request.auth!.userId, revokedAt: null, idleExpiresAt: { gt: now }, absoluteExpiresAt: { gt: now } }, orderBy: { lastUsedAt: 'desc' } })
+  response.json({ sessions: sessions.map((session) => ({ id: session.id, ...deviceDetails(session.userAgent), ipAddress: session.ipAddress, createdAt: session.createdAt, lastUsedAt: session.lastUsedAt, current: session.id === request.auth!.sessionId })) })
+})
+
+router.delete('/sessions/:sessionId', requireAuth, async (request: AuthenticatedRequest, response) => {
+  const parsed = z.string().uuid().safeParse(request.params.sessionId)
+  if (!parsed.success) { response.status(400).json({ message: 'Некорректный идентификатор сеанса.' }); return }
+  const revoked = await prisma.authSession.updateMany({ where: { id: parsed.data, userId: request.auth!.userId, revokedAt: null }, data: { revokedAt: new Date() } })
+  if (!revoked.count) { response.status(404).json({ message: 'Активный сеанс не найден.' }); return }
+  if (parsed.data === request.auth!.sessionId) clearRefreshCookie(response)
+  response.status(204).end()
+})
+
+router.post('/sessions/revoke-others', requireAuth, async (request: AuthenticatedRequest, response) => {
+  await prisma.authSession.updateMany({ where: { userId: request.auth!.userId, id: { not: request.auth!.sessionId }, revokedAt: null }, data: { revokedAt: new Date() } })
+  response.status(204).end()
+})
+
+router.get('/me', requireAuth, async (request: AuthenticatedRequest, response) => {
+  const user = await prisma.user.findUniqueOrThrow({ where: { id: request.auth!.userId } })
+  response.json({ user: publicUser(user) })
 })
 
 router.post('/forgot-password', accountLimiter, async (request, response) => {
@@ -278,19 +315,22 @@ router.post('/reset-password', accountLimiter, async (request, response) => {
   })
   if (!changed) { response.status(400).json({ message: 'Неверный или истёкший код.' }); return }
   clearRefreshCookie(response)
+  void deliverPasswordChanged(user.email).catch((error) => console.error('Password-reset email failed:', error))
   response.json({ message: 'Пароль обновлён. Войдите снова.' })
 })
 
 router.post('/change-password', loginLimiter, requireAuth, async (request: AuthenticatedRequest, response) => {
   const parsed = changeBody.safeParse(request.body)
-  if (!parsed.success) { response.status(400).json({ message: 'Новый пароль должен содержать от 10 до 128 символов.' }); return }
+  if (!parsed.success) { response.status(400).json({ message: 'Новый пароль не соответствует требованиям безопасности.' }); return }
   const user = await prisma.user.findUniqueOrThrow({ where: { id: request.auth!.userId } })
-  if (!await verify(user.passwordHash, parsed.data.currentPassword)) { response.status(401).json({ message: invalidCredentials }); return }
+  if (!await verify(user.passwordHash, parsed.data.currentPassword)) { response.status(401).json({ message: 'Текущий пароль указан неверно.' }); return }
+  if (parsed.data.currentPassword === parsed.data.newPassword) { response.status(400).json({ message: 'Новый пароль должен отличаться от текущего.' }); return }
   const nextHash = await passwordHash(parsed.data.newPassword)
   await prisma.$transaction([
     prisma.user.update({ where: { id: user.id }, data: { passwordHash: nextHash } }),
     prisma.authSession.updateMany({ where: { userId: user.id, id: { not: request.auth!.sessionId }, revokedAt: null }, data: { revokedAt: new Date() } }),
   ])
+  void deliverPasswordChanged(user.email).catch((error) => console.error('Password-changed email failed:', error))
   response.json({ message: 'Пароль обновлён. Другие сеансы завершены.' })
 })
 

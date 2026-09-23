@@ -1,5 +1,6 @@
 import { BlackButton, WhiteButton } from '../ui/btn/button'
 import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../../app/auth/auth-context.tsx'
 import './pricing.scss'
 
 const plans = [
@@ -40,6 +41,8 @@ const plans = [
 
 function Pricing() {
   const navigate = useNavigate()
+  const { user } = useAuth()
+  const tryPlan = () => navigate(user ? '/app/organizations/new' : '/auth?mode=register&returnTo=%2Fapp%2Forganizations%2Fnew')
   return (
     <section className="pricing" id="pricing">
       <div className="container">
@@ -69,9 +72,9 @@ function Pricing() {
 
               <div className="pricing-card__action">
                 {plan.featured ? (
-                  <BlackButton onClick={() => navigate('/auth?mode=register')}>Попробовать</BlackButton>
+                  <BlackButton onClick={tryPlan}>Попробовать</BlackButton>
                 ) : (
-                  <WhiteButton onClick={() => navigate('/auth?mode=register')}>Попробовать</WhiteButton>
+                  <WhiteButton onClick={tryPlan}>Попробовать</WhiteButton>
                 )}
               </div>
             </article>

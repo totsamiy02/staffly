@@ -22,7 +22,7 @@ export async function createEmailInvitation(actorUserId: string, organizationId:
   const actorUser = await prisma.user.findUniqueOrThrow({ where: { id: actorUserId } })
   if (actorUser.email === invitedEmail) throw new ApiError(400, 'CANNOT_INVITE_SELF', 'Нельзя пригласить самого себя.')
   const existingUser = await prisma.user.findUnique({ where: { email: invitedEmail } })
-  if (existingUser && await prisma.organizationMember.findUnique({ where: { organizationId_userId: { organizationId, userId: existingUser.id } } })) {
+  if (existingUser && await prisma.organizationMember.findFirst({ where: { organizationId, userId: existingUser.id, leftAt: null } })) {
     throw new ApiError(409, 'ALREADY_MEMBER', 'Пользователь уже состоит в организации.')
   }
 
@@ -107,7 +107,7 @@ export async function previewCodeInvitation(userId: string, code: string) {
   const invite = await prisma.organizationInvite.findUnique({ where: { tokenHash: digest(code) }, include: { organization: true } })
   validateInvitation(invite, 'CODE')
   const membership = await prisma.organizationMember.findUnique({ where: { organizationId_userId: { organizationId: invite.organizationId, userId } } })
-  if (membership) throw new ApiError(409, 'ALREADY_MEMBER', 'Вы уже состоите в этой организации.')
+  if (membership && !membership.leftAt) throw new ApiError(409, 'ALREADY_MEMBER', 'Вы уже состоите в этой организации.')
   return { organization: { id: invite.organization.id, name: invite.organization.name }, expiresAt: invite.expiresAt }
 }
 
@@ -138,13 +138,14 @@ async function acceptInvitation(userId: string, userEmail: string, lookup: { id:
     validateInvitation(invite, expectedType)
     if (expectedType === 'EMAIL' && invite.invitedEmail !== userEmail) throw new ApiError(403, 'INVITATION_EMAIL_MISMATCH', 'Приглашение предназначено для другого аккаунта.')
     const existing = await tx.organizationMember.findUnique({ where: { organizationId_userId: { organizationId: invite.organizationId, userId } } })
-    if (existing) throw new ApiError(409, 'ALREADY_MEMBER', 'Вы уже состоите в этой организации.')
+    if (existing && !existing.leftAt) throw new ApiError(409, 'ALREADY_MEMBER', 'Вы уже состоите в этой организации.')
     const claimed = await tx.organizationInvite.updateMany({
       where: { id: invite.id, acceptedAt: null, rejectedAt: null, revokedAt: null, expiresAt: { gt: new Date() } },
       data: { acceptedAt: new Date(), acceptedByUserId: userId },
     })
     if (!claimed.count) throw new ApiError(409, 'INVITATION_ALREADY_USED', 'Приглашение уже использовано.')
-    await tx.organizationMember.create({ data: { organizationId: invite.organizationId, userId, role: 'MEMBER' } })
+    if (existing) await tx.organizationMember.update({ where: { id: existing.id }, data: { leftAt: null, role: 'MEMBER' } })
+    else await tx.organizationMember.create({ data: { organizationId: invite.organizationId, userId, role: 'MEMBER' } })
     return { organizationId: invite.organizationId }
   }, { isolationLevel: 'Serializable' })
 }

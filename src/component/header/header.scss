@@ -28,32 +28,50 @@
 }
 
 .header__profile {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 18px;
 }
 
-.header__profile-link {
+.header__profile-trigger {
   display: flex;
   align-items: center;
   gap: 10px;
+  padding: 6px 9px 6px 6px;
+  border-radius: 12px;
+  cursor: pointer;
   font-weight: 600;
+  transition: background .2s;
 }
 
+.header__profile-trigger:hover, .header__profile-trigger[aria-expanded='true'] { background: #ececec; }
+.header__profile-trigger > svg { width: 16px; color: #777; transition: transform .2s; }
+.header__profile-trigger[aria-expanded='true'] > svg { transform: rotate(180deg); }
+
 .header__avatar {
+  display: grid;
   width: 36px;
   height: 36px;
+  place-items: center;
   border: 1px solid #ccc;
   border-radius: 50%;
   background: #e8e8e8;
+  font-size: 12px;
+  font-weight: 700;
 }
 
-.header__logout {
-  color: #555;
-  cursor: pointer;
-}
-
-.header__logout:hover { color: #111; }
+.header__profile-menu { position: absolute; z-index: 30; top: calc(100% + 10px); right: 0; width: min(310px, calc(100vw - 28px)); overflow: hidden; border: 1px solid #d8d8d8; border-radius: 16px; background: #fff; box-shadow: 0 22px 65px rgb(0 0 0 / 14%); }
+.header__profile-menu > div { display: flex; align-items: center; gap: 12px; padding: 19px; }
+.header__profile-menu-avatar { display: grid; width: 46px; height: 46px; flex: 0 0 46px; place-items: center; border-radius: 50%; background: #111; color: #fff; font-size: 14px; font-weight: 700; }
+.header__profile-menu p { display: grid; min-width: 0; }
+.header__profile-menu strong, .header__profile-menu small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.header__profile-menu strong { font-size: 14px; }
+.header__profile-menu small { color: #818181; font-size: 10px; }
+.header__profile-menu nav { display: grid; padding: 7px; border-block: 1px solid #ececec; }
+.header__profile-menu nav a, .header__profile-menu > button { padding: 11px 12px; border-radius: 9px; color: #555; cursor: pointer; font-size: 12px; text-align: left; }
+.header__profile-menu nav a:hover, .header__profile-menu > button:hover { background: #f2f2f2; color: #111; }
+.header__profile-menu > button { width: calc(100% - 14px); margin: 7px; color: #843f3f; }
 
 @media (max-width: 600px) {
   .header__container {
@@ -69,5 +87,7 @@
   }
 
   .header__profile { gap: 10px; font-size: 14px; }
+  .header__profile-trigger > span:nth-child(2) { display: none; }
+  .header__profile-trigger > svg { display: none; }
   .header__avatar { width: 32px; height: 32px; }
 }

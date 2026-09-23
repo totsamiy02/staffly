@@ -1,0 +1,9 @@
+.status-page { display: grid; min-height: 62dvh; place-items: center; padding: 60px 24px 100px; background: #f7f7f7; color: #111; }
+.status-page section { width: min(100%, 620px); text-align: center; }
+.status-page section > span { display: block; color: #c7c7c7; font-size: clamp(76px, 15vw, 150px); font-weight: 800; letter-spacing: -.08em; line-height: .9; }
+.status-page section > p:first-of-type { margin-top: 24px; color: #777; font-size: 11px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
+.status-page h1 { margin-top: 10px; font-size: clamp(30px, 5vw, 48px); letter-spacing: -.05em; }
+.status-page h1 + p { max-width: 460px; margin: 12px auto 0; color: #737373; line-height: 1.6; }
+.status-page section > div { display: flex; justify-content: center; gap: 10px; margin-top: 30px; }
+.status-page__secondary { display: inline-flex; min-height: 48px; align-items: center; padding: 0 22px; border: 1px solid #d4d4d4; border-radius: 9px; background: #fff; font-size: 13px; font-weight: 700; }
+@media (max-width: 480px) { .status-page section > div { align-items: stretch; flex-direction: column; } .status-page__secondary { justify-content: center; } }

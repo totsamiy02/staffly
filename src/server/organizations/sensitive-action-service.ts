@@ -3,6 +3,7 @@ import { prisma } from '../db.ts'
 import type { Prisma } from '../../generated/prisma/client.ts'
 import { ApiError } from '../api-error.ts'
 import { getMembership, requireOrganizationRole } from './permissions.ts'
+import { deliverRoleChanged } from '../mail.ts'
 
 const configuredSecret = process.env.JWT_SECRET
 if (!configuredSecret) throw new Error('JWT_SECRET is missing')
@@ -39,7 +40,7 @@ async function createSensitiveToken(userId: string, organizationId: string, acti
 export async function requestOwnershipTransfer(userId: string, organizationId: string, targetMemberId: string) {
   const actor = await getMembership(userId, organizationId)
   requireOrganizationRole(actor.role, ['OWNER'])
-  const target = await prisma.organizationMember.findFirst({ where: { id: targetMemberId, organizationId }, include: { user: true } })
+  const target = await prisma.organizationMember.findFirst({ where: { id: targetMemberId, organizationId, leftAt: null }, include: { user: true } })
   if (!target || target.user.deletedAt) throw new ApiError(404, 'MEMBER_NOT_FOUND', 'Участник не найден.')
   if (target.role === 'OWNER' || target.userId === userId) throw new ApiError(400, 'INVALID_OWNERSHIP_TARGET', 'Выберите другого участника организации.')
   const code = await createSensitiveToken(userId, organizationId, 'TRANSFER_OWNERSHIP', target.userId)
@@ -68,15 +69,25 @@ async function claimSensitiveToken(tx: Prisma.TransactionClient, userId: string,
 export async function confirmOwnershipTransfer(userId: string, organizationId: string, code: string) {
   const actor = await getMembership(userId, organizationId)
   requireOrganizationRole(actor.role, ['OWNER'])
-  return prisma.$transaction(async (tx) => {
+  const actorUser = await prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { email: true } })
+  const result = await prisma.$transaction(async (tx) => {
     const token = await claimSensitiveToken(tx, userId, organizationId, 'TRANSFER_OWNERSHIP', code)
     if (!token.targetUserId) throw new ApiError(400, 'INVALID_OWNERSHIP_TARGET', 'Участник для передачи владения не найден.')
     const target = await tx.organizationMember.findUnique({ where: { organizationId_userId: { organizationId, userId: token.targetUserId } }, include: { user: true } })
-    if (!target || target.user.deletedAt || target.role === 'OWNER') throw new ApiError(400, 'INVALID_OWNERSHIP_TARGET', 'Участник для передачи владения недоступен.')
+    if (!target || target.leftAt || target.user.deletedAt || target.role === 'OWNER') throw new ApiError(400, 'INVALID_OWNERSHIP_TARGET', 'Участник для передачи владения недоступен.')
     await tx.organizationMember.update({ where: { id: actor.id }, data: { role: 'ADMIN' } })
     await tx.organizationMember.update({ where: { id: target.id }, data: { role: 'OWNER' } })
-    return { ownerUserId: target.userId }
+    await tx.accountNotification.createMany({ data: [
+      { userId: target.userId, organizationId, type: 'ROLE_CHANGED', title: 'Вы стали владельцем', message: `Вам передано владение организацией «${actor.organization.name}».` },
+      { userId, organizationId, type: 'ROLE_CHANGED', title: 'Владение передано', message: `Вы передали организацию «${actor.organization.name}» новому владельцу. Ваша новая роль — «Администратор».` },
+    ] })
+    return { ownerUserId: target.userId, targetEmail: target.user.email }
   }, { isolationLevel: 'Serializable' })
+  void Promise.all([
+    deliverRoleChanged(result.targetEmail, actor.organization.name, 'Владелец'),
+    deliverRoleChanged(actorUser.email, actor.organization.name, 'Администратор'),
+  ]).catch((error) => console.error('Ownership-transfer email failed:', error))
+  return { ownerUserId: result.ownerUserId }
 }
 
 export async function confirmOrganizationDeletion(userId: string, organizationId: string, code: string) {

@@ -4,10 +4,10 @@ import { z } from 'zod'
 import { requireAuth, type AuthenticatedRequest } from '../auth.ts'
 import { deliverOrganizationCreated, deliverOrganizationInvitation, deliverSensitiveActionCode } from '../mail.ts'
 import { ApiError } from '../api-error.ts'
-import { changeMemberRole, createOrganization, getOrganization, listMembers, listOrganizations, removeMember } from './organization-service.ts'
+import { changeMemberRole, createOrganization, getOrganization, listAccountNotifications, listMembers, listOrganizations, readAccountNotification, removeMember, updateOrganization } from './organization-service.ts'
 import { acceptCodeInvitation, acceptEmailInvitation, createCodeInvitation, createEmailInvitation, listActiveOrganizationInvitations, listPendingInvitations, previewCodeInvitation, previewEmailInvitation, rejectEmailInvitation, revokeInvitation } from './invitation-service.ts'
 import { confirmOrganizationDeletion, confirmOwnershipTransfer, requestOrganizationDeletion, requestOwnershipTransfer } from './sensitive-action-service.ts'
-import { createOrganizationBody, emailInvitationBody, inviteCodeBody, inviteParams, memberParams, organizationIdParams, ownershipRequestBody, roleBody, sensitiveCodeBody } from './schemas.ts'
+import { createOrganizationBody, emailInvitationBody, inviteCodeBody, inviteParams, memberParams, organizationIdParams, ownershipRequestBody, roleBody, sensitiveCodeBody, updateOrganizationBody } from './schemas.ts'
 
 const router = Router()
 const sensitiveLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: 'draft-8', legacyHeaders: false, message: { code: 'TOO_MANY_REQUESTS', message: 'Слишком много запросов. Попробуйте позже.' } })
@@ -24,6 +24,12 @@ function parse<T>(schema: z.ZodType<T>, value: unknown): T {
 function auth(request: Request) { return (request as AuthenticatedRequest).auth! }
 
 router.get('/organizations', async (request, response) => response.json({ organizations: await listOrganizations(auth(request).userId) }))
+router.get('/account-notifications', async (request, response) => response.json({ notifications: await listAccountNotifications(auth(request).userId) }))
+router.post('/account-notifications/:notificationId/read', async (request, response) => {
+  const notificationId = parse(z.object({ notificationId: z.string().uuid() }), request.params).notificationId
+  await readAccountNotification(auth(request).userId, notificationId)
+  response.status(204).end()
+})
 
 router.post('/organizations', async (request, response) => {
   const input = parse(createOrganizationBody, request.body)
@@ -36,6 +42,12 @@ router.post('/organizations', async (request, response) => {
 router.get('/organizations/:organizationId', async (request, response) => {
   const { organizationId } = parse(organizationIdParams, request.params)
   response.json({ organization: await getOrganization(auth(request).userId, organizationId) })
+})
+
+router.patch('/organizations/:organizationId', async (request, response) => {
+  const { organizationId } = parse(organizationIdParams, request.params)
+  const input = parse(updateOrganizationBody, request.body)
+  response.json({ organization: await updateOrganization(auth(request).userId, organizationId, input) })
 })
 
 router.get('/organizations/:organizationId/members', async (request, response) => {

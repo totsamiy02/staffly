@@ -1,7 +1,7 @@
 /* oxlint-disable react/only-export-components -- The provider and its hook share one context. */
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 
-export type AuthUser = { id: string; email: string; displayName: string }
+export type AuthUser = { id: string; email: string; displayName: string; firstName: string | null; lastName: string | null; middleName: string | null; phone: string | null; bio: string | null; avatarUrl: string | null }
 type AuthResult = { user: AuthUser; accessToken: string }
 type ApiOptions = { method?: 'GET' | 'POST' | 'PATCH' | 'DELETE'; body?: unknown }
 type AuthContextValue = {
@@ -10,7 +10,9 @@ type AuthContextValue = {
   login: (email: string, password: string) => Promise<void>
   verifyEmail: (email: string, code: string) => Promise<void>
   logout: () => Promise<void>
+  updateUser: (user: AuthUser) => void
   apiRequest: <T>(path: string, options?: ApiOptions) => Promise<T>
+  uploadImage: <T>(path: string, file: File) => Promise<T>
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -18,9 +20,13 @@ let bootstrapRequest: Promise<AuthResult | null> | null = null
 
 async function readJson<T>(response: Response): Promise<T> {
   if (response.status === 204) return undefined as T
-  const data = await response.json() as T & { message?: string; code?: string }
+  const text = await response.text()
+  let parsed: unknown = {}
+  try { parsed = text ? JSON.parse(text) : {} } catch { parsed = {} }
+  const data = (parsed && typeof parsed === 'object' ? parsed : {}) as T & { message?: string; code?: string }
   if (!response.ok) {
-    const error = new Error(data.message || 'Не удалось выполнить запрос.') as Error & { code?: string; status?: number }
+    const fallback = response.status === 404 ? 'Запрошенные данные не найдены.' : response.status >= 500 ? 'Сервис временно недоступен. Попробуйте позже.' : 'Не удалось выполнить запрос.'
+    const error = new Error(data.message || fallback) as Error & { code?: string; status?: number }
     error.code = data.code
     error.status = response.status
     throw error
@@ -111,7 +117,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return readJson<T>(response)
   }, [refresh])
 
-  return <AuthContext.Provider value={{ user, loading, login, verifyEmail, logout, apiRequest }}>{children}</AuthContext.Provider>
+  const uploadImage = useCallback(async <T,>(path: string, file: File): Promise<T> => {
+    const execute = (token: string | null) => fetch(`/api${path}`, {
+      method: 'PUT',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': file.type, ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: file,
+    })
+    let response = await execute(tokenRef.current)
+    if (response.status === 401) {
+      const refreshed = await refresh()
+      if (refreshed) response = await execute(refreshed.accessToken)
+    }
+    return readJson<T>(response)
+  }, [refresh])
+
+  const updateUser = useCallback((nextUser: AuthUser) => setUser(nextUser), [])
+
+  return <AuthContext.Provider value={{ user, loading, login, verifyEmail, logout, updateUser, apiRequest, uploadImage }}>{children}</AuthContext.Provider>
 }
 
 export function useAuth() {

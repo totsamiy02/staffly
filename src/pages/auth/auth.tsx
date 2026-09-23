@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import { authPost, useAuth } from '../../app/auth/auth-context.tsx'
+import { passwordRequirements, passwordValidationError } from '../../app/auth/password-policy.ts'
 import './auth.scss'
 
 type Mode = 'login' | 'register'
@@ -34,7 +35,7 @@ function EyeIcon({ visible }: { visible: boolean }) {
 
 function AuthPage() {
   const navigate = useNavigate()
-  const { login } = useAuth()
+  const { login, user, loading } = useAuth()
   const [searchParams, setSearchParams] = useSearchParams()
   const mode: Mode = searchParams.get('mode') === 'register' ? 'register' : 'login'
   const requestedReturnTo = searchParams.get('returnTo')
@@ -52,9 +53,10 @@ function AuthPage() {
   const [attempted, setAttempted] = useState(false)
 
   const emailError = !email.trim() ? 'Укажите электронную почту.' : !emailPattern.test(email.trim()) ? 'Введите корректный адрес почты.' : ''
-  const passwordError = !password ? 'Укажите пароль.' : mode === 'register' && (password.length < 10 || password.length > 128)
-    ? 'Пароль должен содержать от 10 до 128 символов.' : ''
+  const passwordError = !password ? 'Укажите пароль.' : mode === 'register' ? passwordValidationError(password) : ''
   const confirmError = !confirm ? 'Повторите пароль.' : confirm !== password ? 'Пароли не совпадают.' : ''
+
+  if (!loading && user) return <Navigate to={returnTo} replace />
 
   function switchMode(next: Mode) {
     setSearchParams({ mode: next, ...(requestedReturnTo ? { returnTo: requestedReturnTo } : {}) })
@@ -151,6 +153,7 @@ function AuthPage() {
             <div className="auth__fields">
               {input('email', 'Электронная почта', email, setEmail, emailError)}
               {input('password', 'Пароль', password, setPassword, passwordError)}
+              {mode === 'register' && <div className="auth__password-requirements">{passwordRequirements.map((requirement) => <span className={password && requirement.test(password) ? 'auth__password-rule auth__password-rule--valid' : 'auth__password-rule'} key={requirement.label}>{requirement.label}</span>)}</div>}
               {mode === 'register' && input('confirm', 'Повторите пароль', confirm, setConfirm, confirmError)}
             </div>
 

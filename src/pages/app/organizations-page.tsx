@@ -1,10 +1,11 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../app/auth/auth-context.tsx'
 import { useOrganizations, usePendingInvitations } from '../../app/organizations/queries.ts'
 import type { OrganizationSummary } from '../../app/organizations/types.ts'
 import AppTopbar from './app-topbar.tsx'
+import Avatar from '../../component/ui/avatar/avatar.tsx'
 import './app.scss'
 
 function OrganizationGrid({ title, organizations }: { title: string; organizations: OrganizationSummary[] }) {
@@ -13,9 +14,10 @@ function OrganizationGrid({ title, organizations }: { title: string; organizatio
     <h2>{title}</h2>
     <div className="organization-grid">
       {organizations.map((organization) => <Link className="organization-card" to={`/app/organizations/${organization.id}`} key={organization.id}>
-        <span className="organization-card__avatar">{organization.name.trim().slice(0, 1).toUpperCase()}</span>
+        <Avatar url={organization.logoUrl} name={organization.name} className="organization-card__avatar" />
         <strong>{organization.name}</strong>
         <span>{organization.memberCount} {organization.memberCount === 1 ? 'участник' : 'участников'}</span>
+        <small>{organization.role === 'OWNER' ? 'Владелец' : organization.role === 'ADMIN' ? 'Администратор' : 'Пользователь'}</small>
       </Link>)}
     </div>
   </section>
@@ -28,6 +30,7 @@ export default function OrganizationsPage() {
   const invitations = usePendingInvitations()
   const refetchInvitations = invitations.refetch
   const [params, setParams] = useSearchParams()
+  const location = useLocation()
   const [code, setCode] = useState('')
   const [preview, setPreview] = useState<{ organization: { id: string; name: string }; expiresAt: string } | null>(null)
   const [message, setMessage] = useState('')
@@ -38,6 +41,18 @@ export default function OrganizationsPage() {
   const previewCode = useMutation({ mutationFn: () => apiRequest<{ invitation: typeof preview }>('/invitations/code/preview', { method: 'POST', body: { code } }), onSuccess: (result) => { setPreview(result.invitation); setError('') }, onError: (failure) => setError(failure instanceof Error ? failure.message : 'Код не найден.') })
   const acceptCode = useMutation({ mutationFn: () => apiRequest<{ organizationId: string }>('/invitations/code/accept', { method: 'POST', body: { code } }), onSuccess: async () => { setPreview(null); setCode(''); setMessage('Вы присоединились к организации.'); await refresh() }, onError: (failure) => setError(failure instanceof Error ? failure.message : 'Не удалось принять приглашение.') })
   const emailToken = params.get('invite')
+
+  useEffect(() => {
+    if (location.hash !== '#join-organization') return
+    const frame = window.requestAnimationFrame(() => document.getElementById('join-organization')?.scrollIntoView({ behavior: 'smooth', block: 'center' }))
+    return () => window.cancelAnimationFrame(frame)
+  }, [location.hash])
+
+  useEffect(() => {
+    if (!message) return
+    const timer = window.setTimeout(() => setMessage(''), 5_000)
+    return () => window.clearTimeout(timer)
+  }, [message])
 
   function updateInviteCode(value: string) {
     const raw = value.toUpperCase().replace(/[^A-Z2-9]/g, '').slice(0, 12)
@@ -75,7 +90,7 @@ export default function OrganizationsPage() {
         <OrganizationGrid title="Организации, где вы состоите" organizations={joined} />
       </>}
 
-      <section className="join-card"><div><p className="app-eyebrow">Есть код приглашения?</p><h2>Присоединиться к организации</h2><p>Введите одноразовый код, который вам передал администратор.</p></div><form onSubmit={submitCode}><input value={code} onChange={(event) => updateInviteCode(event.target.value)} placeholder="XXXX-XXXX-XXXX" maxLength={14} pattern="[A-Z2-9]{4}(?:-[A-Z2-9]{4}){2}" autoComplete="off" required /><button className="app-primary" disabled={busy || code.length !== 14}>Проверить код</button></form>{preview && <div className="invite-preview"><span className="organization-card__avatar">{preview.organization.name.slice(0, 1).toUpperCase()}</span><div><strong>{preview.organization.name}</strong><p>Вас приглашают присоединиться к организации.</p></div><button className="app-primary" disabled={busy} onClick={() => acceptCode.mutate()}>Присоединиться</button><button className="app-secondary" onClick={() => setPreview(null)}>Отмена</button></div>}</section>
+      <section className="join-card" id="join-organization"><div><p className="app-eyebrow">Есть код приглашения?</p><h2>Присоединиться к организации</h2><p>Введите одноразовый код, который вам передал администратор.</p></div><form onSubmit={submitCode}><input value={code} onChange={(event) => updateInviteCode(event.target.value)} placeholder="XXXX-XXXX-XXXX" maxLength={14} pattern="[A-Z2-9]{4}(?:-[A-Z2-9]{4}){2}" autoComplete="off" required /><button className="app-primary" disabled={busy || code.length !== 14}>Проверить код</button></form>{preview && <div className="invite-preview"><span className="organization-card__avatar">{preview.organization.name.slice(0, 1).toUpperCase()}</span><div><strong>{preview.organization.name}</strong><p>Вас приглашают присоединиться к организации.</p></div><button className="app-primary" disabled={busy} onClick={() => acceptCode.mutate()}>Присоединиться</button><button className="app-secondary" onClick={() => setPreview(null)}>Отмена</button></div>}</section>
     </main>
   </div>
 }

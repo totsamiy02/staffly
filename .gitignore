@@ -27,6 +27,9 @@ dist-ssr
 .DS_Store
 /src/generated/prisma
 
+# Files uploaded to the local development storage.
+/storage/
+
 # Local AI editor skills are not part of the application.
 /.agents/
 /.claude/

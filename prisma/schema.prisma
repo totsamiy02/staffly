@@ -16,6 +16,13 @@ model User {
   updatedAt           DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
   deletedAt           DateTime? @map("deleted_at") @db.Timestamptz(3)
   lastSecurityEmailAt DateTime? @map("last_security_email_at") @db.Timestamptz(3)
+  firstName           String?   @map("first_name") @db.VarChar(80)
+  lastName            String?   @map("last_name") @db.VarChar(80)
+  middleName          String?   @map("middle_name") @db.VarChar(80)
+  phone               String?   @db.VarChar(12)
+  bio                 String?   @db.VarChar(500)
+  lastSeenAt          DateTime? @map("last_seen_at") @db.Timestamptz(3)
+  avatarFileId        String?   @unique @map("avatar_file_id") @db.Uuid
 
   sessions                 AuthSession[]
   emailVerificationTokens  EmailVerificationToken[]
@@ -26,7 +33,11 @@ model User {
   acceptedInvites          OrganizationInvite[]     @relation("InvitationAcceptor")
   sensitiveActions         SensitiveActionToken[]   @relation("SensitiveActionOwner")
   targetedSensitiveActions SensitiveActionToken[]   @relation("SensitiveActionTarget")
+  accountNotifications     AccountNotification[]
+  avatar                   StoredFile?              @relation("UserAvatar", fields: [avatarFileId], references: [id], onDelete: SetNull)
+  uploadedFiles            StoredFile[]             @relation("FileUploader")
 
+  @@index([lastSeenAt])
   @@map("users")
 }
 
@@ -46,6 +57,15 @@ enum SensitiveActionType {
   DELETE_ORGANIZATION
 }
 
+enum WorkShiftStatus {
+  SCHEDULED
+  CANCELLED
+}
+
+enum AccountNotificationType {
+  ROLE_CHANGED
+}
+
 model Organization {
   id              String    @id @default(uuid()) @db.Uuid
   name            String    @db.VarChar(120)
@@ -55,15 +75,72 @@ model Organization {
   createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
   deletedAt       DateTime? @map("deleted_at") @db.Timestamptz(3)
+  contactEmail    String?   @map("contact_email") @db.VarChar(254)
+  phone           String?   @db.VarChar(12)
+  website         String?   @db.VarChar(2048)
+  address         String?   @db.VarChar(300)
+  logoFileId      String?   @unique @map("logo_file_id") @db.Uuid
 
-  createdBy        User                   @relation("OrganizationCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
-  members          OrganizationMember[]
-  invitations      OrganizationInvite[]
-  sensitiveActions SensitiveActionToken[]
+  createdBy            User                   @relation("OrganizationCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  logo                 StoredFile?            @relation("OrganizationLogo", fields: [logoFileId], references: [id], onDelete: SetNull)
+  files                StoredFile[]           @relation("OrganizationFiles")
+  members              OrganizationMember[]
+  invitations          OrganizationInvite[]
+  sensitiveActions     SensitiveActionToken[]
+  workShifts           WorkShift[]
+  accountNotifications AccountNotification[]
 
   @@index([createdByUserId])
   @@index([deletedAt])
   @@map("organizations")
+}
+
+enum StoredFilePurpose {
+  USER_AVATAR
+  ORGANIZATION_LOGO
+}
+
+model StoredFile {
+  id                String            @id @default(uuid()) @db.Uuid
+  objectKey         String            @unique @map("object_key") @db.VarChar(500)
+  mimeType          String            @map("mime_type") @db.VarChar(100)
+  size              Int
+  checksumSha256    String            @map("checksum_sha256") @db.Char(64)
+  purpose           StoredFilePurpose
+  uploadedByUserId  String            @map("uploaded_by_user_id") @db.Uuid
+  organizationId    String?           @map("organization_id") @db.Uuid
+  createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+  pendingDeletionAt DateTime?         @map("pending_deletion_at") @db.Timestamptz(3)
+  deletionAttempts  Int               @default(0) @map("deletion_attempts")
+  lastDeletionError String?           @map("last_deletion_error") @db.VarChar(500)
+
+  uploadedBy       User          @relation("FileUploader", fields: [uploadedByUserId], references: [id], onDelete: Restrict)
+  organization     Organization? @relation("OrganizationFiles", fields: [organizationId], references: [id], onDelete: Cascade)
+  userAvatar       User?         @relation("UserAvatar")
+  organizationLogo Organization? @relation("OrganizationLogo")
+
+  @@index([uploadedByUserId])
+  @@index([organizationId])
+  @@index([pendingDeletionAt])
+  @@map("stored_files")
+}
+
+model AccountNotification {
+  id             String                  @id @default(uuid()) @db.Uuid
+  userId         String                  @map("user_id") @db.Uuid
+  organizationId String                  @map("organization_id") @db.Uuid
+  type           AccountNotificationType
+  title          String                  @db.VarChar(160)
+  message        String                  @db.VarChar(500)
+  readAt         DateTime?               @map("read_at") @db.Timestamptz(3)
+  createdAt      DateTime                @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt, createdAt])
+  @@index([organizationId])
+  @@map("account_notifications")
 }
 
 model OrganizationMember {
@@ -74,15 +151,75 @@ model OrganizationMember {
   joinedAt       DateTime         @default(now()) @map("joined_at") @db.Timestamptz(3)
   createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt      DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  leftAt         DateTime?        @map("left_at") @db.Timestamptz(3)
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization        Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user                User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workShifts          WorkShift[]           @relation("ShiftEmployee")
+  createdWorkShifts   WorkShift[]           @relation("ShiftCreator")
+  cancelledWorkShifts WorkShift[]           @relation("ShiftCanceller")
+  shiftAdjustments    WorkShiftAdjustment[] @relation("ShiftAdjustmentAuthor")
 
   @@unique([organizationId, userId])
   @@index([organizationId])
   @@index([userId])
   @@index([organizationId, role])
+  @@index([organizationId, leftAt])
   @@map("organization_members")
+}
+
+model WorkShift {
+  id                  String          @id @default(uuid()) @db.Uuid
+  organizationId      String          @map("organization_id") @db.Uuid
+  memberId            String          @map("member_id") @db.Uuid
+  createdByMemberId   String          @map("created_by_member_id") @db.Uuid
+  scheduledStartAt    DateTime        @map("scheduled_start_at") @db.Timestamptz(3)
+  scheduledEndAt      DateTime        @map("scheduled_end_at") @db.Timestamptz(3)
+  breakMinutes        Int             @default(0) @map("break_minutes")
+  actualStartAt       DateTime?       @map("actual_start_at") @db.Timestamptz(3)
+  actualEndAt         DateTime?       @map("actual_end_at") @db.Timestamptz(3)
+  actualBreakMinutes  Int?            @map("actual_break_minutes")
+  description         String?         @db.VarChar(500)
+  status              WorkShiftStatus @default(SCHEDULED)
+  cancelledAt         DateTime?       @map("cancelled_at") @db.Timestamptz(3)
+  cancelledByMemberId String?         @map("cancelled_by_member_id") @db.Uuid
+  cancellationReason  String?         @map("cancellation_reason") @db.VarChar(500)
+  assignmentReadAt    DateTime?       @map("assignment_read_at") @db.Timestamptz(3)
+  createdAt           DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt           DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization      Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  member            OrganizationMember    @relation("ShiftEmployee", fields: [memberId], references: [id], onDelete: Restrict)
+  createdByMember   OrganizationMember    @relation("ShiftCreator", fields: [createdByMemberId], references: [id], onDelete: Restrict)
+  cancelledByMember OrganizationMember?   @relation("ShiftCanceller", fields: [cancelledByMemberId], references: [id], onDelete: Restrict)
+  adjustments       WorkShiftAdjustment[]
+
+  @@index([organizationId, scheduledStartAt])
+  @@index([organizationId, scheduledEndAt])
+  @@index([organizationId, memberId, scheduledStartAt])
+  @@index([memberId, scheduledStartAt])
+  @@map("work_shifts")
+}
+
+model WorkShiftAdjustment {
+  id                   String   @id @default(uuid()) @db.Uuid
+  shiftId              String   @map("shift_id") @db.Uuid
+  changedByMemberId    String   @map("changed_by_member_id") @db.Uuid
+  previousStartAt      DateTime @map("previous_start_at") @db.Timestamptz(3)
+  previousEndAt        DateTime @map("previous_end_at") @db.Timestamptz(3)
+  previousBreakMinutes Int      @map("previous_break_minutes")
+  newStartAt           DateTime @map("new_start_at") @db.Timestamptz(3)
+  newEndAt             DateTime @map("new_end_at") @db.Timestamptz(3)
+  newBreakMinutes      Int      @map("new_break_minutes")
+  reason               String   @db.VarChar(500)
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  shift           WorkShift          @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  changedByMember OrganizationMember @relation("ShiftAdjustmentAuthor", fields: [changedByMemberId], references: [id], onDelete: Restrict)
+
+  @@index([shiftId, createdAt])
+  @@index([changedByMemberId])
+  @@map("work_shift_adjustments")
 }
 
 model OrganizationInvite {

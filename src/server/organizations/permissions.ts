@@ -7,7 +7,7 @@ export async function getMembership(userId: string, organizationId: string) {
     where: { organizationId_userId: { organizationId, userId } },
     include: { organization: true },
   })
-  if (!membership || membership.organization.deletedAt) throw new ApiError(404, 'ORGANIZATION_NOT_FOUND', 'Организация не найдена.')
+  if (!membership || membership.leftAt || membership.organization.deletedAt) throw new ApiError(404, 'ORGANIZATION_NOT_FOUND', 'Организация не найдена.')
   return membership
 }
 

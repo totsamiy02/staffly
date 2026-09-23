@@ -1,10 +1,27 @@
 import './header.scss'
 import logo from '../../assets/images/logo/staffly-logo.svg'
 import { Link } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../../app/auth/auth-context.tsx'
+import Avatar from '../ui/avatar/avatar.tsx'
 
 function Header() {
   const { user, loading, logout } = useAuth()
+  const [profileOpen, setProfileOpen] = useState(false)
+  const profileRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function close(event: MouseEvent) {
+      if (!profileRef.current?.contains(event.target as Node)) setProfileOpen(false)
+    }
+    function escape(event: KeyboardEvent) {
+      if (event.key === 'Escape') setProfileOpen(false)
+    }
+    document.addEventListener('mousedown', close)
+    document.addEventListener('keydown', escape)
+    return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', escape) }
+  }, [])
+
   return (
     <header className="header" id="top">
       <div className="container header__container">
@@ -13,12 +30,17 @@ function Header() {
         </a>
 
         {loading ? null : user ? (
-          <div className="header__profile">
-            <Link className="header__profile-link" to="/app" aria-label={`Организации пользователя ${user.displayName}`}>
-              <span className="header__avatar" aria-hidden="true" />
+          <div className="header__profile" ref={profileRef}>
+            <button className="header__profile-trigger" type="button" aria-expanded={profileOpen} aria-label="Открыть меню профиля" onClick={() => setProfileOpen((value) => !value)}>
+              <Avatar url={user.avatarUrl} name={user.displayName} className="header__avatar" eager />
               <span>{user.displayName}</span>
-            </Link>
-            <button type="button" className="header__logout" onClick={() => { void logout() }}>Выйти</button>
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m6 8 4 4 4-4" /></svg>
+            </button>
+            {profileOpen && <div className="header__profile-menu">
+              <div><Avatar url={user.avatarUrl} name={user.displayName} className="header__profile-menu-avatar" eager /><p><strong>{user.displayName}</strong><small>{user.email}</small></p></div>
+              <nav><Link to="/app" onClick={() => setProfileOpen(false)}>Мои организации</Link><Link to="/app/settings" onClick={() => setProfileOpen(false)}>Настройки профиля</Link></nav>
+              <button type="button" onClick={() => { setProfileOpen(false); void logout() }}>Выйти из аккаунта</button>
+            </div>}
           </div>
         ) : (
           <div className="header__buttons">

@@ -149,6 +149,10 @@
   margin-top: 22px;
 }
 
+.auth__password-requirements { display: flex; flex-wrap: wrap; gap: 5px; }
+.auth__password-rule { padding: 4px 7px; border: 1px solid #484848; border-radius: 999px; color: #999; font-size: 9px; }
+.auth__password-rule--valid { border-color: #59705e; background: rgb(87 126 96 / 16%); color: #b7d2bd; }
+
 .auth__field {
   display: flex;
   min-height: 50px;

@@ -17,6 +17,8 @@ import ProtectedRoute from './pages/app/protected-route.tsx'
 import OrganizationsPage from './pages/app/organizations-page.tsx'
 import CreateOrganizationPage from './pages/app/create-organization-page.tsx'
 import OrganizationLayout from './pages/app/organization-layout.tsx'
+import UserSettingsPage from './pages/app/user-settings-page.tsx'
+import StatusPage from './pages/error/status-page.tsx'
 
 function HomePage() {
   return (
@@ -47,13 +49,14 @@ function App() {
         <Route path="/workspace" element={<Navigate to="/app" replace />} />
         <Route path="/app" element={<ProtectedRoute><OrganizationsPage /></ProtectedRoute>} />
         <Route path="/app/organizations/new" element={<ProtectedRoute><CreateOrganizationPage /></ProtectedRoute>} />
+        <Route path="/app/settings" element={<ProtectedRoute><UserSettingsPage /></ProtectedRoute>} />
         <Route path="/app/organizations/:organizationId/*" element={<ProtectedRoute><OrganizationLayout /></ProtectedRoute>} />
         <Route path="/privacy-policy" element={<PrivacyPolicy />} />
         <Route path="/personal-data-consent" element={<PersonalDataConsent />} />
         <Route path="/terms" element={<Terms />} />
         <Route path="/offer" element={<Offer />} />
         <Route path="/cookie-policy" element={<Navigate to="/privacy-policy#cookies" replace />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="*" element={<StatusPage status={404} />} />
       </Routes>
 
       {!hidePublicFrame && <Footer />}

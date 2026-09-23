@@ -26,7 +26,7 @@ function emailHtml(title: string, text: string, content = '') {
 async function sendMail(email: string, subject: string, text: string, html: string, developmentLog: string) {
   if (!transport) {
     if (process.env.NODE_ENV !== 'development' && process.env.NODE_ENV !== 'test') throw new Error('SMTP is not configured')
-    console.log(`[DEV ONLY] ${developmentLog}`)
+    if (process.env.NODE_ENV === 'development') console.log(`[DEV ONLY] ${developmentLog}`)
     return
   }
   await transport.sendMail({ from: { name: 'Staffly', address: smtpUser! }, to: email, subject, text, html })
@@ -64,4 +64,23 @@ export function deliverSensitiveActionCode(kind: 'ownership' | 'deletion', email
   const title = ownership ? 'Передача владения' : 'Удаление организации'
   const action = ownership ? `подтвердить передачу владения организацией «${organizationName}»` : `подтвердить удаление организации «${organizationName}»`
   return sendMail(email, `${title} — Staffly`, `Используйте код ${code}, чтобы ${action}. Код действует 10 минут.`, emailHtml(title, `Используйте код ниже, чтобы ${escapeHtml(action)}.`, codeBlock(code)), `${kind} code for ${email}: ${code}`)
+}
+
+export function deliverShiftAssignment(email: string, organizationId: string, organizationName: string, startAt: Date, endAt: Date, timezone: string) {
+  const start = startAt.toLocaleString('ru-RU', { timeZone: timezone, dateStyle: 'long', timeStyle: 'short' })
+  const end = endAt.toLocaleString('ru-RU', { timeZone: timezone, dateStyle: 'long', timeStyle: 'short' })
+  const monthParts = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit' }).formatToParts(startAt)
+  const part = (type: string) => monthParts.find((item) => item.type === type)?.value ?? ''
+  const link = `${appUrl}/app/organizations/${organizationId}/schedule?view=mine&month=${part('year')}-${part('month')}`
+  const safeName = escapeHtml(organizationName)
+  const content = `<div style="margin:24px 0;padding:18px;border:1px solid #e1e1e1;border-radius:12px;background:#fafafa"><strong style="display:block;margin-bottom:8px">${escapeHtml(start)}</strong><span style="color:#666;font-size:13px">До ${escapeHtml(end)}</span></div><div style="margin:28px 0"><a href="${escapeHtml(link)}" style="display:inline-block;padding:14px 22px;border-radius:10px;background:#111;color:#fff;text-decoration:none;font-size:14px;font-weight:700">Открыть мои смены</a></div>`
+  return sendMail(email, `Вам назначена смена в ${organizationName} — Staffly`, `В организации «${organizationName}» вам назначена смена: ${start} — ${end}.\n${link}`, emailHtml('Новая смена', `В организации <strong>«${safeName}»</strong> вам назначена рабочая смена.`, content), `shift assigned for ${email}: ${start} — ${end}; ${link}`)
+}
+
+export function deliverPasswordChanged(email: string) {
+  return sendMail(email, 'Пароль изменён — Staffly', 'Пароль вашего аккаунта Staffly был изменён. Если это сделали не вы, сразу восстановите доступ.', emailHtml('Пароль изменён', 'Пароль вашего аккаунта Staffly был успешно изменён. Все остальные активные сеансы завершены.<br><br>Если это сделали не вы, немедленно восстановите пароль через страницу входа.'), `password changed for ${email}`)
+}
+
+export function deliverRoleChanged(email: string, organizationName: string, role: string) {
+  return sendMail(email, `Новая роль в ${organizationName} — Staffly`, `В организации «${organizationName}» вам назначена роль: ${role}.`, emailHtml('Роль в организации изменена', `В организации <strong>«${escapeHtml(organizationName)}»</strong> вам назначена роль <strong>«${escapeHtml(role)}»</strong>.`), `role changed for ${email}: ${organizationName} — ${role}`)
 }

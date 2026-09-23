@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { authPost } from '../../app/auth/auth-context.tsx'
 import CodeInput from './code-input.tsx'
+import { passwordRequirements, passwordValidationError } from '../../app/auth/password-policy.ts'
 import './auth.scss'
 
 function ResetPasswordPage() {
@@ -26,7 +27,8 @@ function ResetPasswordPage() {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (password.length < 10 || password.length > 128) { setError('Пароль должен содержать от 10 до 128 символов.'); return }
+    const passwordError = passwordValidationError(password)
+    if (passwordError) { setError(passwordError); return }
     if (password !== confirmPassword) { setError('Пароли не совпадают.'); return }
     setBusy(true)
     setError('')
@@ -55,12 +57,13 @@ function ResetPasswordPage() {
     <Link className="auth__brand" to="/">Staffly</Link>
     <h1>Новый пароль</h1>
     {done ? <p className="auth__notice">Пароль обновлён. Все прежние сеансы завершены.</p> : <>
-      <p>Введите код из письма{initialEmail && <> на <strong>{initialEmail}</strong></>} и новый пароль длиной от 10 до 128 символов.</p>
+      <p>Введите код из письма{initialEmail && <> на <strong>{initialEmail}</strong></>} и новый безопасный пароль.</p>
       <form onSubmit={submit}>
         <div className="auth__fields">
           {!initialEmail && <div className="auth__field"><input type="email" aria-label="Электронная почта" placeholder="Электронная почта" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></div>}
           <CodeInput label="Код из письма" value={code} onChange={setCode} />
           <div className="auth__field"><input type="password" aria-label="Новый пароль" placeholder="Новый пароль" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} required /></div>
+          <div className="auth__password-requirements">{passwordRequirements.map((requirement) => <span className={password && requirement.test(password) ? 'auth__password-rule auth__password-rule--valid' : 'auth__password-rule'} key={requirement.label}>{requirement.label}</span>)}</div>
           <div className="auth__field"><input type="password" aria-label="Повторите пароль" placeholder="Повторите пароль" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} required /></div>
         </div>
         {error && <p className="auth__error" role="alert">{error}</p>}
