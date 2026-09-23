@@ -16,7 +16,7 @@
 
   img {
     display: block;
-    width: 150px;
+    width: 165px;
     height: auto;
   }
 }
@@ -51,19 +51,19 @@
 
 .header__avatar {
   display: grid;
-  width: 36px;
-  height: 36px;
+  width: 46px;
+  height: 46px;
   place-items: center;
   border: 1px solid #ccc;
   border-radius: 50%;
   background: #e8e8e8;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 700;
 }
 
 .header__profile-menu { position: absolute; z-index: 30; top: calc(100% + 10px); right: 0; width: min(310px, calc(100vw - 28px)); overflow: hidden; border: 1px solid #d8d8d8; border-radius: 16px; background: #fff; box-shadow: 0 22px 65px rgb(0 0 0 / 14%); }
 .header__profile-menu > div { display: flex; align-items: center; gap: 12px; padding: 19px; }
-.header__profile-menu-avatar { display: grid; width: 46px; height: 46px; flex: 0 0 46px; place-items: center; border-radius: 50%; background: #111; color: #fff; font-size: 14px; font-weight: 700; }
+.header__profile-menu-avatar { display: grid; width: 62px; height: 62px; flex: 0 0 62px; place-items: center; border-radius: 50%; background: #111; color: #fff; font-size: 18px; font-weight: 700; }
 .header__profile-menu p { display: grid; min-width: 0; }
 .header__profile-menu strong, .header__profile-menu small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .header__profile-menu strong { font-size: 14px; }
@@ -89,5 +89,5 @@
   .header__profile { gap: 10px; font-size: 14px; }
   .header__profile-trigger > span:nth-child(2) { display: none; }
   .header__profile-trigger > svg { display: none; }
-  .header__avatar { width: 32px; height: 32px; }
+  .header__avatar { width: 40px; height: 40px; }
 }

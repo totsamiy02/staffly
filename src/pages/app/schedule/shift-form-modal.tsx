@@ -5,13 +5,14 @@ import type { OrganizationMember, OrganizationSummary } from '../../../app/organ
 import { displayDate, zonedDateAndTime } from '../../../app/schedule/date-utils.ts'
 import type { WorkShift } from '../../../app/schedule/types.ts'
 import AnimatedOverlay from './animated-overlay.tsx'
+import Avatar from '../../../component/ui/avatar/avatar.tsx'
 
 type Props = { organization: OrganizationSummary; members: OrganizationMember[]; date: string; shift?: WorkShift | null; actual?: boolean; onClose: () => void }
 
 function EmployeePicker({ members, value, onChange }: { members: OrganizationMember[]; value: string; onChange: (id: string) => void }) {
   const [open, setOpen] = useState(false)
   const selected = members.find((member) => member.id === value)
-  return <div className="employee-picker"><span>Сотрудник</span><button className="employee-picker__trigger" type="button" aria-expanded={open} onClick={() => setOpen((current) => !current)}><span className="employee-picker__avatar">{selected?.displayName.slice(0, 1).toUpperCase() ?? '?'}</span><span><strong>{selected?.displayName ?? 'Выберите сотрудника'}</strong><small>{selected?.email ?? 'Активный участник организации'}</small></span><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m6 8 4 4 4-4" /></svg></button>{open && <div className="employee-picker__menu">{members.map((member) => <button type="button" className={member.id === value ? 'active' : ''} onClick={() => { onChange(member.id); setOpen(false) }} key={member.id}><span className="employee-picker__avatar">{member.displayName.slice(0, 1).toUpperCase()}</span><span><strong>{member.displayName}</strong><small>{member.email}</small></span>{member.id === value && <span className="employee-picker__check">✓</span>}</button>)}</div>}</div>
+  return <div className="employee-picker"><span>Сотрудник</span><button className="employee-picker__trigger" type="button" aria-expanded={open} onClick={() => setOpen((current) => !current)}><Avatar url={selected?.avatarUrl} name={selected?.displayName ?? '?'} className="employee-picker__avatar" /><span><strong>{selected?.displayName ?? 'Выберите сотрудника'}</strong><small>{selected?.email ?? 'Активный участник организации'}</small></span><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m6 8 4 4 4-4" /></svg></button>{open && <div className="employee-picker__menu">{members.map((member) => <button type="button" className={member.id === value ? 'active' : ''} onClick={() => { onChange(member.id); setOpen(false) }} key={member.id}><Avatar url={member.avatarUrl} name={member.displayName} className="employee-picker__avatar" /><span><strong>{member.displayName}</strong><small>{member.email}</small></span>{member.id === value && <span className="employee-picker__check">✓</span>}</button>)}</div>}</div>
 }
 
 export default function ShiftFormModal({ organization, members, date, shift, actual = false, onClose }: Props) {

@@ -102,7 +102,7 @@ export default function UserSettingsPage() {
     {message && <p className="app-alert" role="status">{message}</p>}
 
     {section === 'profile' && <section className="profile-editor">
-      <aside><ImageUpload endpoint="/profile/avatar" imageUrl={user?.avatarUrl ?? null} name={user?.displayName ?? initial} avatarClassName="account-profile-card__avatar" onChange={(avatarUrl) => { if (user) updateUser({ ...user, avatarUrl }); void queryClient.invalidateQueries({ queryKey: ['organization-members'] }) }} onMessage={setMessage} onError={setProfileError} /><h2>{user?.displayName}</h2><p>{user?.email}</p></aside>
+      <aside><ImageUpload endpoint="/profile/avatar" imageUrl={user?.avatarUrl ?? null} name={user?.displayName ?? initial} avatarClassName="account-profile-card__avatar" onChange={(avatarUrl) => { if (user) updateUser({ ...user, avatarUrl }); void queryClient.invalidateQueries({ queryKey: ['organization-members'] }) }} onMessage={setMessage} onError={setProfileError} /><div className="profile-editor__identity"><span>Ваша учетная запись</span><h2>{user?.displayName}</h2><p>{user?.email}</p></div></aside>
       <form onSubmit={saveProfile} noValidate>
         <div className="account-settings-card__heading"><h2>Личные данные</h2><p>Имя и фамилия будут использоваться в шапке и списке сотрудников.</p></div>
         <div className="profile-fields-grid">

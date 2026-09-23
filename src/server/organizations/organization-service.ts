@@ -1,4 +1,4 @@
-import type { OrganizationRole } from '../../generated/prisma/client.ts'
+import type { OrganizationRole, Prisma } from '../../generated/prisma/client.ts'
 import { prisma } from '../db.ts'
 import { ApiError } from '../api-error.ts'
 import { deliverRoleChanged } from '../mail.ts'
@@ -74,6 +74,44 @@ export async function listMembers(userId: string, organizationId: string) {
     const displayName = [member.user.lastName, member.user.firstName, member.user.middleName].filter(Boolean).join(' ') || member.user.email.split('@')[0]
     return { id: member.id, userId: member.userId, email: member.user.email, displayName, firstName: member.user.firstName, lastName: member.user.lastName, middleName: member.user.middleName, phone: member.user.phone, bio: member.user.bio, avatarUrl: mediaUrl(member.user.avatarFileId), lastSeenAt: member.user.lastSeenAt, online: Boolean(member.user.lastSeenAt && member.user.lastSeenAt.getTime() > onlineThreshold), role: member.role, joinedAt: member.joinedAt }
   })
+}
+
+export async function listMembersPage(userId: string, organizationId: string, options: { page?: number; pageSize?: number; role?: OrganizationRole; search?: string }) {
+  await getMembership(userId, organizationId)
+  const page = options.page ?? 1
+  const pageSize = options.pageSize ?? 20
+  const terms = options.search?.trim().split(/\s+/).filter(Boolean) ?? []
+  const where: Prisma.OrganizationMemberWhereInput = {
+    organizationId,
+    leftAt: null,
+    organization: { deletedAt: null },
+    user: { deletedAt: null },
+    ...(options.role ? { role: options.role } : {}),
+    ...(terms.length ? { AND: terms.map((term) => ({ user: { OR: [
+      { email: { contains: term, mode: 'insensitive' } },
+      { firstName: { contains: term, mode: 'insensitive' } },
+      { lastName: { contains: term, mode: 'insensitive' } },
+      { middleName: { contains: term, mode: 'insensitive' } },
+    ] } })) } : {}),
+  }
+  const [total, members] = await prisma.$transaction([
+    prisma.organizationMember.count({ where }),
+    prisma.organizationMember.findMany({
+      where,
+      include: { user: { select: { id: true, email: true, firstName: true, lastName: true, middleName: true, phone: true, bio: true, lastSeenAt: true, avatarFileId: true } } },
+      orderBy: [{ role: 'asc' }, { user: { lastName: 'asc' } }, { user: { firstName: 'asc' } }, { user: { email: 'asc' } }],
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+  ])
+  const onlineThreshold = Date.now() - 2 * 60 * 1000
+  return {
+    members: members.map((member) => {
+      const displayName = [member.user.lastName, member.user.firstName, member.user.middleName].filter(Boolean).join(' ') || member.user.email.split('@')[0]
+      return { id: member.id, userId: member.userId, email: member.user.email, displayName, firstName: member.user.firstName, lastName: member.user.lastName, middleName: member.user.middleName, phone: member.user.phone, bio: member.user.bio, avatarUrl: mediaUrl(member.user.avatarFileId), lastSeenAt: member.user.lastSeenAt, online: Boolean(member.user.lastSeenAt && member.user.lastSeenAt.getTime() > onlineThreshold), role: member.role, joinedAt: member.joinedAt }
+    }),
+    pagination: { page, pageSize, total, pages: Math.max(1, Math.ceil(total / pageSize)) },
+  }
 }
 
 export async function changeMemberRole(actorUserId: string, organizationId: string, memberId: string, nextRole: Exclude<OrganizationRole, 'OWNER'>) {

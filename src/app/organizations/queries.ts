@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { useAuth } from '../auth/auth-context.tsx'
-import type { AccountNotification, ActiveOrganizationInvitation, OrganizationMember, OrganizationSummary, PendingInvitation } from './types.ts'
+import type { AccountNotification, ActiveOrganizationInvitation, MemberPagination, OrganizationMember, OrganizationRole, OrganizationSummary, PendingInvitation } from './types.ts'
 
 export function useOrganizations() {
   const { apiRequest, user } = useAuth()
@@ -29,9 +29,16 @@ export function useOrganization(organizationId: string | undefined) {
   return useQuery({ queryKey: ['organization', organizationId], queryFn: () => apiRequest<{ organization: OrganizationSummary }>(`/organizations/${organizationId}`), enabled: Boolean(user && organizationId) })
 }
 
-export function useOrganizationMembers(organizationId: string | undefined) {
+export function useOrganizationMembers(organizationId: string | undefined, options?: { page: number; pageSize: number; search?: string; role?: OrganizationRole }) {
   const { apiRequest, user } = useAuth()
-  return useQuery({ queryKey: ['organization-members', organizationId], queryFn: () => apiRequest<{ members: OrganizationMember[] }>(`/organizations/${organizationId}/members`), enabled: Boolean(user && organizationId), refetchInterval: 60_000, refetchOnWindowFocus: true })
+  const query = new URLSearchParams()
+  if (options) {
+    query.set('page', String(options.page)); query.set('pageSize', String(options.pageSize))
+    if (options.search) query.set('search', options.search)
+    if (options.role) query.set('role', options.role)
+  }
+  const suffix = query.size ? `?${query}` : ''
+  return useQuery({ queryKey: ['organization-members', organizationId, options], queryFn: () => apiRequest<{ members: OrganizationMember[]; pagination?: MemberPagination }>(`/organizations/${organizationId}/members${suffix}`), enabled: Boolean(user && organizationId), placeholderData: (previous) => previous, refetchInterval: 60_000, refetchOnWindowFocus: true })
 }
 
 export function useActiveOrganizationInvitations(organizationId: string | undefined, enabled = true) {

@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../app/auth/auth-context.tsx'
 import { useOrganizationMembers } from '../../app/organizations/queries.ts'
-import type { OrganizationMember, OrganizationSummary } from '../../app/organizations/types.ts'
+import type { OrganizationMember, OrganizationRole, OrganizationSummary } from '../../app/organizations/types.ts'
 import { formatRussianPhone } from '../../app/profile/phone.ts'
 import Avatar from '../../component/ui/avatar/avatar.tsx'
 
@@ -17,7 +17,11 @@ function lastSeenLabel(member: OrganizationMember) {
 export default function OrganizationMembers({ organization }: { organization: OrganizationSummary }) {
   const { apiRequest, user } = useAuth()
   const queryClient = useQueryClient()
-  const members = useOrganizationMembers(organization.id)
+  const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+  const [role, setRole] = useState<OrganizationRole | ''>('')
+  const [page, setPage] = useState(1)
+  const members = useOrganizationMembers(organization.id, { page, pageSize: 20, search: debouncedSearch || undefined, role: role || undefined })
   const canManage = organization.role === 'OWNER' || organization.role === 'ADMIN'
   const [pendingRemoval, setPendingRemoval] = useState<OrganizationMember | null>(null)
   const [profileMemberId, setProfileMemberId] = useState<string | null>(null)
@@ -31,6 +35,10 @@ export default function OrganizationMembers({ organization }: { organization: Or
     document.addEventListener('keydown', closeEscape)
     return () => { document.removeEventListener('mousedown', closeOutside); document.removeEventListener('keydown', closeEscape) }
   }, [])
+  useEffect(() => {
+    const timer = window.setTimeout(() => { setDebouncedSearch(search.trim()); setPage(1) }, 300)
+    return () => window.clearTimeout(timer)
+  }, [search])
   const refresh = () => Promise.all([
     queryClient.invalidateQueries({ queryKey: ['organization-members', organization.id] }),
     queryClient.invalidateQueries({ queryKey: ['organizations'] }),
@@ -45,9 +53,11 @@ export default function OrganizationMembers({ organization }: { organization: Or
   })
   const error = roleMutation.error || removeMutation.error
 
+  const pagination = members.data?.pagination
   return <section className="members-page"><header><p className="app-eyebrow">Команда</p><h1>Сотрудники</h1><p>Откройте профиль сотрудника или используйте меню действий для управления.</p></header>
     {error && <p className="app-alert app-alert--error">{error instanceof Error ? error.message : 'Не удалось изменить участника.'}</p>}
-    {members.isLoading ? <div className="app-state"><span className="app-spinner" />Загружаем участников…</div> : members.isError ? <div className="app-state">Не удалось загрузить участников.</div> : <div className="members-table">{members.data?.members.map((member) => {
+    <div className="members-toolbar"><label><span>Поиск сотрудника</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="ФИО или электронная почта" /></label><label><span>Роль</span><select value={role} onChange={(event) => { setRole(event.target.value as OrganizationRole | ''); setPage(1) }}><option value="">Все роли</option><option value="OWNER">Владелец</option><option value="ADMIN">Администратор</option><option value="MEMBER">Пользователь</option></select></label><p>{pagination ? `${pagination.total} сотрудников` : 'Сотрудники организации'}</p></div>
+    {members.isLoading ? <div className="app-state"><span className="app-spinner" />Загружаем участников…</div> : members.isError ? <div className="app-state">Не удалось загрузить участников.</div> : !members.data?.members.length ? <div className="app-state">По выбранным условиям сотрудники не найдены.</div> : <><div className="members-table">{members.data.members.map((member) => {
       const isOwner = member.role === 'OWNER'
       const canRemove = canManage && !isOwner && (organization.role === 'OWNER' || member.role === 'MEMBER')
       const profileOpen = profileMemberId === member.id
@@ -61,7 +71,7 @@ export default function OrganizationMembers({ organization }: { organization: Or
         {canManage && !isOwner && <div className="member-actions-host"><button type="button" className="member-more" aria-label={`Действия с сотрудником ${member.displayName}`} aria-expanded={actionsOpen} onClick={() => { setActionsMemberId(actionsOpen ? null : member.id); setProfileMemberId(null) }}><span /><span /><span /></button>{actionsOpen && <div className="member-actions-menu"><strong>Действия</strong><label><span>Роль сотрудника</span><select aria-label={`Роль ${member.displayName}`} value={member.role} disabled={roleMutation.isPending} onChange={(event) => roleMutation.mutate({ member, role: event.target.value as 'ADMIN' | 'MEMBER' })}><option value="MEMBER">Пользователь</option><option value="ADMIN">Администратор</option></select></label>{canRemove && <button className="member-actions-menu__danger" disabled={removeMutation.isPending} onClick={() => { setPendingRemoval(member); setActionsMemberId(null) }}>Удалить из организации</button>}</div>}</div>}
         {profileOpen && <aside className="member-profile-popover"><div className="member-profile-popover__heading"><Avatar url={member.avatarUrl} name={member.displayName} className="app-avatar" /><div><strong>{member.displayName}</strong><span className={member.online ? 'online-text' : ''}>{lastSeenLabel(member)}</span></div></div><dl><div><dt>Роль</dt><dd>{roleNames[member.role]}</dd></div><div><dt>Почта</dt><dd>{member.email}</dd></div>{member.phone && <div><dt>Телефон</dt><dd>{formatRussianPhone(member.phone)}</dd></div>}<div><dt>В команде</dt><dd>{new Date(member.joinedAt).toLocaleDateString('ru-RU')}</dd></div></dl>{member.bio && <p>{member.bio}</p>}</aside>}
       </article>
-    })}</div>}
+    })}</div>{pagination && pagination.pages > 1 && <nav className="members-pagination" aria-label="Страницы сотрудников"><button className="app-secondary" disabled={page <= 1 || members.isFetching} onClick={() => setPage((value) => Math.max(1, value - 1))}>Назад</button><span>Страница {pagination.page} из {pagination.pages}</span><button className="app-secondary" disabled={page >= pagination.pages || members.isFetching} onClick={() => setPage((value) => value + 1)}>Далее</button></nav>}</>}
     {pendingRemoval && <div className="app-modal" role="dialog" aria-modal="true" aria-labelledby="remove-member-title"><div className="app-modal__card"><p className="app-eyebrow">Подтверждение</p><h2 id="remove-member-title">Удалить участника?</h2><p>{pendingRemoval.email} потеряет доступ к организации.</p><div><button className="app-secondary" onClick={() => setPendingRemoval(null)}>Отмена</button><button className="app-danger" disabled={removeMutation.isPending} onClick={() => removeMutation.mutate(pendingRemoval)}>Удалить</button></div></div></div>}
   </section>
 }

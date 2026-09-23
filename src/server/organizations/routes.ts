@@ -4,10 +4,10 @@ import { z } from 'zod'
 import { requireAuth, type AuthenticatedRequest } from '../auth.ts'
 import { deliverOrganizationCreated, deliverOrganizationInvitation, deliverSensitiveActionCode } from '../mail.ts'
 import { ApiError } from '../api-error.ts'
-import { changeMemberRole, createOrganization, getOrganization, listAccountNotifications, listMembers, listOrganizations, readAccountNotification, removeMember, updateOrganization } from './organization-service.ts'
+import { changeMemberRole, createOrganization, getOrganization, listAccountNotifications, listMembers, listMembersPage, listOrganizations, readAccountNotification, removeMember, updateOrganization } from './organization-service.ts'
 import { acceptCodeInvitation, acceptEmailInvitation, createCodeInvitation, createEmailInvitation, listActiveOrganizationInvitations, listPendingInvitations, previewCodeInvitation, previewEmailInvitation, rejectEmailInvitation, revokeInvitation } from './invitation-service.ts'
 import { confirmOrganizationDeletion, confirmOwnershipTransfer, requestOrganizationDeletion, requestOwnershipTransfer } from './sensitive-action-service.ts'
-import { createOrganizationBody, emailInvitationBody, inviteCodeBody, inviteParams, memberParams, organizationIdParams, ownershipRequestBody, roleBody, sensitiveCodeBody, updateOrganizationBody } from './schemas.ts'
+import { createOrganizationBody, emailInvitationBody, inviteCodeBody, inviteParams, memberListQuery, memberParams, organizationIdParams, ownershipRequestBody, roleBody, sensitiveCodeBody, updateOrganizationBody } from './schemas.ts'
 
 const router = Router()
 const sensitiveLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: 'draft-8', legacyHeaders: false, message: { code: 'TOO_MANY_REQUESTS', message: 'Слишком много запросов. Попробуйте позже.' } })
@@ -52,6 +52,11 @@ router.patch('/organizations/:organizationId', async (request, response) => {
 
 router.get('/organizations/:organizationId/members', async (request, response) => {
   const { organizationId } = parse(organizationIdParams, request.params)
+  const options = parse(memberListQuery, request.query)
+  if (options.page || options.pageSize || options.role || options.search) {
+    response.json(await listMembersPage(auth(request).userId, organizationId, options))
+    return
+  }
   response.json({ members: await listMembers(auth(request).userId, organizationId) })
 })
 

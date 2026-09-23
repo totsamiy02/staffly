@@ -79,7 +79,7 @@ export default function OrganizationLayout() {
       <div className="workspace-sidebar__organization"><Avatar url={organization.logoUrl} name={organization.name} className="workspace-sidebar__organization-avatar" eager /><div><strong>{organization.name}</strong><small>{roleNames[organization.role]} · {currentSection}</small></div></div>
       <button className="workspace-sidebar__collapse" type="button" aria-label={sidebarCollapsed ? 'Развернуть меню' : 'Свернуть меню'} onClick={toggleSidebar}><CollapseIcon collapsed={sidebarCollapsed} /><span>{sidebarCollapsed ? 'Развернуть' : 'Свернуть'}</span></button>
       <nav aria-label="Разделы организации">{navigation.map(([path, label]) => <NavLink end title={sidebarCollapsed ? label : undefined} to={path ? `${organizationPath}/${path}` : organizationPath} key={label}><NavigationIcon section={path} /><span>{label}</span></NavLink>)}</nav>
-      <NavLink className="workspace-sidebar__back" title={sidebarCollapsed ? 'Все организации' : undefined} to="/app"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m10 6-6 6 6 6M4 12h16" /></svg><span>Все организации</span></NavLink>
+      <div className="workspace-sidebar__footer"><NavLink className="workspace-sidebar__back" title={sidebarCollapsed ? 'Все организации' : undefined} to="/app"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m10 6-6 6 6 6M4 12h16" /></svg><span>Все организации</span></NavLink></div>
     </aside>
     <main className="workspace-content">
       <Routes>

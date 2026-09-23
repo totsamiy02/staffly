@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { after, before, describe, it } from 'node:test'
 import { randomUUID } from 'node:crypto'
 import { prisma } from '../src/server/db.ts'
-import { changeMemberRole, createOrganization, getOrganization, listAccountNotifications, listMembers, listOrganizations, readAccountNotification, removeMember, updateOrganization } from '../src/server/organizations/organization-service.ts'
+import { changeMemberRole, createOrganization, getOrganization, listAccountNotifications, listMembers, listMembersPage, listOrganizations, readAccountNotification, removeMember, updateOrganization } from '../src/server/organizations/organization-service.ts'
 import { acceptCodeInvitation, acceptEmailInvitation, createCodeInvitation, createEmailInvitation, listActiveOrganizationInvitations, listPendingInvitations, previewCodeInvitation, rejectEmailInvitation, revokeInvitation } from '../src/server/organizations/invitation-service.ts'
 import { confirmOrganizationDeletion, confirmOwnershipTransfer, requestOrganizationDeletion, requestOwnershipTransfer } from '../src/server/organizations/sensitive-action-service.ts'
 import { updateProfileBody } from '../src/server/profile/schemas.ts'
@@ -15,6 +15,7 @@ import { calendarRange, moveMonth } from '../src/app/schedule/date-utils.ts'
 import sharp from 'sharp'
 import { cleanupPendingFiles, removeOrganizationLogo, removeUserAvatar, replaceOrganizationLogo, replaceUserAvatar } from '../src/server/storage/image-service.ts'
 import { writeObject } from '../src/server/storage/local-file-storage.ts'
+import { formatRussianPhone, normalizeRussianPhone } from '../src/app/profile/phone.ts'
 
 const suffix = randomUUID().slice(0, 8)
 const email = (name: string) => `${name}-${suffix}@example.test`
@@ -70,7 +71,7 @@ describe('organizations and authorization', { concurrency: false }, () => {
 
   it('supports many organizations and many members while rejecting duplicate membership', async () => {
     const first = (await listOrganizations(owner.id))[0]
-    const second = await createOrganization(owner.id, { name: 'Second Company', description: 'Test', timezone: 'UTC' })
+    const second = await createOrganization(owner.id, { name: 'Second Company', description: 'Test', timezone: 'Europe/Samara' })
     await prisma.organizationMember.create({ data: { organizationId: first.id, userId: admin.id, role: 'ADMIN' } })
     await prisma.organizationMember.create({ data: { organizationId: first.id, userId: member.id, role: 'MEMBER' } })
     await prisma.organizationMember.create({ data: { organizationId: second.id, userId: member.id, role: 'MEMBER' } })
@@ -192,6 +193,9 @@ describe('profiles and public organization details', { concurrency: false }, () 
     assert.equal(profile.phone, '+79991234567')
     assert.equal(profile.middleName, null)
     assert.equal(updateProfileBody.safeParse({ firstName: 'Анна1', lastName: '', middleName: '', phone: '+1 555 123 4567', bio: '' }).success, false)
+    assert.equal(formatRussianPhone('8 999 123 45 67'), '+7 (999) 123-45-67')
+    assert.equal(formatRussianPhone('+1 555 123 4567'), '')
+    assert.equal(normalizeRussianPhone('+7 (999) 123-45-67'), '+79991234567')
     assert.ok(passwordValidationError('password'))
     assert.equal(passwordValidationError('StrongPass1!'), '')
   })
@@ -204,6 +208,9 @@ describe('profiles and public organization details', { concurrency: false }, () 
     const memberProfile = (await listMembers(owner.id, organization.id)).find((item) => item.userId === member.id)
     assert.equal(memberProfile?.displayName, 'Иванова Анна')
     assert.equal(memberProfile?.online, true)
+    const filtered = await listMembersPage(owner.id, organization.id, { page: 1, pageSize: 20, role: 'MEMBER', search: 'Иванова Анна' })
+    assert.equal(filtered.pagination.total, 1)
+    assert.equal(filtered.members[0]?.userId, member.id)
     assert.equal((await getOrganization(owner.id, organization.id)).contactEmail, 'team@example.test')
   })
 
@@ -216,6 +223,7 @@ describe('profiles and public organization details', { concurrency: false }, () 
     assert.equal(updateOrganizationBody.safeParse({ ...data, phone: '+1 555 123 4567' }).success, false)
     assert.equal(updateOrganizationBody.safeParse({ ...data, website: 'javascript:alert(1)' }).success, false)
     assert.equal(updateOrganizationBody.safeParse({ ...data, timezone: 'Mars/Olympus' }).success, false)
+    assert.equal(updateOrganizationBody.safeParse({ ...data, timezone: 'UTC' }).success, false)
   })
 })
 
@@ -348,7 +356,7 @@ describe('work schedule and time statistics', { concurrency: false }, () => {
     await expectCode(() => listSchedule(outsider.id, scheduleOrganizationId, '2025-01-01', '2025-03-01'), 'ORGANIZATION_NOT_FOUND')
     const shift = await prisma.workShift.findFirstOrThrow({ where: { organizationId: scheduleOrganizationId } })
     await expectCode(() => getShift(outsider.id, scheduleOrganizationId, shift.id), 'ORGANIZATION_NOT_FOUND')
-    const otherOrganization = await createOrganization(outsider.id, { name: 'Other Schedule', description: null, timezone: 'UTC' })
+    const otherOrganization = await createOrganization(outsider.id, { name: 'Other Schedule', description: null, timezone: 'Europe/Kaliningrad' })
     const otherMember = await prisma.organizationMember.findUniqueOrThrow({ where: { organizationId_userId: { organizationId: otherOrganization.id, userId: outsider.id } } })
     const otherShift = await createShift(outsider.id, otherOrganization.id, { memberId: otherMember.id, startDate: '2025-01-01', startTime: '09:00', endDate: '2025-01-01', endTime: '17:00', breakMinutes: 0, description: null })
     await expectCode(() => getShift(owner.id, scheduleOrganizationId, otherShift.id), 'SHIFT_NOT_FOUND')

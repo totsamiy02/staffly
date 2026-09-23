@@ -8,7 +8,7 @@ export function formatRussianPhone(value: string) {
   let digits = value.replace(/\D/g, '')
   if (!digits) return ''
   if (digits[0] === '8') digits = `7${digits.slice(1)}`
-  if (digits[0] !== '7') digits = `7${digits}`
+  if (digits[0] !== '7') return ''
   digits = digits.slice(0, 11)
   const body = digits.slice(1)
   let result = '+7'

@@ -11,8 +11,8 @@ import './app.scss'
 function OrganizationGrid({ title, organizations }: { title: string; organizations: OrganizationSummary[] }) {
   if (!organizations.length) return null
   return <section className="organizations-section">
-    <h2>{title}</h2>
-    <div className="organization-grid">
+    <header><div><h2>{title}</h2><p>{organizations.length} {organizations.length === 1 ? 'организация' : 'организации'}</p></div></header>
+    <div className={`organization-grid${organizations.length === 1 ? ' organization-grid--single' : ''}`}>
       {organizations.map((organization) => <Link className="organization-card" to={`/app/organizations/${organization.id}`} key={organization.id}>
         <Avatar url={organization.logoUrl} name={organization.name} className="organization-card__avatar" />
         <strong>{organization.name}</strong>
