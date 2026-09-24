@@ -1,10 +1,10 @@
 import { useQuery } from '@tanstack/react-query'
 import { useAuth } from '../auth/auth-context.tsx'
-import type { MemberWorkTime, ShiftDetails, ShiftNotification, WorkShift, WorkTimeStatistics } from './types.ts'
+import type { EmployeeAbsence, MemberWorkTime, ShiftDetails, ShiftNotification, WorkShift, WorkTimeStatistics } from './types.ts'
 
 export function useSchedule(organizationId: string, from: string, to: string) {
   const { apiRequest } = useAuth()
-  return useQuery({ queryKey: ['schedule', organizationId, from, to], queryFn: () => apiRequest<{ timezone: string; shifts: WorkShift[] }>(`/organizations/${organizationId}/schedule?from=${from}&to=${to}`), placeholderData: (previous) => previous })
+  return useQuery({ queryKey: ['schedule', organizationId, from, to], queryFn: () => apiRequest<{ timezone: string; shifts: WorkShift[]; absences: EmployeeAbsence[] }>(`/organizations/${organizationId}/schedule?from=${from}&to=${to}`), placeholderData: (previous) => previous })
 }
 
 export function useMyUpcomingShifts(organizationId: string, enabled = true) {

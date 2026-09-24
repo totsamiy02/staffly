@@ -2,8 +2,10 @@ import type { Prisma, WorkShift } from '../../generated/prisma/client.ts'
 import { prisma } from '../db.ts'
 import { ApiError } from '../api-error.ts'
 import { getMembership, requireOrganizationRole } from '../organizations/permissions.ts'
-import { startOfZonedDate, zonedDateTimeToUtc } from './timezone.ts'
+import { addCalendarDays, startOfZonedDate, zonedDateTimeToUtc } from './timezone.ts'
 import { deliverShiftAssignment } from '../mail.ts'
+
+const dateText = (value: Date) => value.toISOString().slice(0, 10)
 
 export type ShiftInput = { memberId: string; startDate: string; startTime: string; endDate: string; endTime: string; breakMinutes: number; description: string | null }
 export type ActualInput = Omit<ShiftInput, 'memberId' | 'description'> & { reason: string }
@@ -36,6 +38,16 @@ async function shiftInOrganization(tx: Prisma.TransactionClient | typeof prisma,
   const shift = await tx.workShift.findFirst({ where: { id: shiftId, organizationId } })
   if (!shift) throw new ApiError(404, 'SHIFT_NOT_FOUND', 'Смена не найдена.')
   return shift
+}
+
+export async function assertNoApprovedAbsence(organizationId: string, memberId: string, startAt: Date, endAt: Date, timezone: string, client: Prisma.TransactionClient | typeof prisma = prisma) {
+  const absences = await client.employeeAbsence.findMany({ where: { organizationId, memberId, cancelledAt: null }, orderBy: { startDate: 'asc' } })
+  const absence = absences.find((item) => {
+    const absenceStart = startOfZonedDate(dateText(item.startDate), timezone)
+    const absenceEnd = startOfZonedDate(addCalendarDays(dateText(item.endDate), 1), timezone)
+    return startAt < absenceEnd && endAt > absenceStart
+  })
+  if (absence) throw new ApiError(409, 'EMPLOYEE_ABSENT', `Сотрудник отсутствует с ${dateText(absence.startDate)} по ${dateText(absence.endDate)}.`)
 }
 
 function publicShift(shift: WorkShift & { member: { user: { email: string; firstName: string | null; lastName: string | null; middleName: string | null } }; _count?: { adjustments: number } }) {
@@ -71,7 +83,8 @@ export async function listSchedule(userId: string, organizationId: string, fromD
     include: shiftInclude,
     orderBy: [{ scheduledStartAt: 'asc' }, { member: { user: { lastName: 'asc' } } }],
   })
-  return { timezone: actor.organization.timezone, shifts: shifts.map(publicShift) }
+  const absences = await prisma.employeeAbsence.findMany({ where: { organizationId, cancelledAt: null, startDate: { lt: new Date(`${toDate}T00:00:00.000Z`) }, endDate: { gte: new Date(`${fromDate}T00:00:00.000Z`) } }, include: { member: { include: { user: { select: { email: true, firstName: true, lastName: true, middleName: true } } } } }, orderBy: { startDate: 'asc' } })
+  return { timezone: actor.organization.timezone, shifts: shifts.map(publicShift), absences: absences.map((item) => ({ id: item.id, memberId: item.memberId, memberName: displayName(item.member.user), type: item.type, startDate: dateText(item.startDate), endDate: dateText(item.endDate) })) }
 }
 
 export async function listMyUpcomingShifts(userId: string, organizationId: string) {
@@ -91,6 +104,7 @@ export async function createShift(userId: string, organizationId: string, input:
   const endAt = zonedDateTimeToUtc(input.endDate, input.endTime, actor.organization.timezone)
   validateDuration(startAt, endAt, input.breakMinutes)
   const target = await activeTarget(prisma, organizationId, input.memberId)
+  await assertNoApprovedAbsence(organizationId, input.memberId, startAt, endAt, actor.organization.timezone)
   const conflict = await prisma.workShift.findFirst({ where: { memberId: input.memberId, status: 'SCHEDULED', scheduledStartAt: { lt: endAt }, scheduledEndAt: { gt: startAt } } })
   if (conflict) throw new ApiError(409, 'SHIFT_OVERLAP', 'У сотрудника уже есть пересекающаяся смена.')
   try {
@@ -113,6 +127,7 @@ export async function updateShift(userId: string, organizationId: string, shiftI
   const startAt = zonedDateTimeToUtc(input.startDate, input.startTime, actor.organization.timezone)
   const endAt = zonedDateTimeToUtc(input.endDate, input.endTime, actor.organization.timezone)
   validateDuration(startAt, endAt, input.breakMinutes)
+  await assertNoApprovedAbsence(organizationId, input.memberId, startAt, endAt, actor.organization.timezone)
   const conflict = await prisma.workShift.findFirst({ where: { id: { not: shiftId }, memberId: input.memberId, status: 'SCHEDULED', scheduledStartAt: { lt: endAt }, scheduledEndAt: { gt: startAt } } })
   if (conflict) throw new ApiError(409, 'SHIFT_OVERLAP', 'У сотрудника уже есть пересекающаяся смена.')
   try {

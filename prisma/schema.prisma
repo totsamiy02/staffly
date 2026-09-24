@@ -64,6 +64,40 @@ enum WorkShiftStatus {
 
 enum AccountNotificationType {
   ROLE_CHANGED
+  REQUEST_CREATED
+  REQUEST_APPROVED
+  REQUEST_REJECTED
+  REQUEST_CANCELLED
+}
+
+enum RequestSystemCode {
+  VACATION
+  DAY_OFF
+  SICK_LEAVE
+  ABSENCE
+  SHIFT_CHANGE
+  OTHER
+}
+
+enum RequestDateMode {
+  NONE
+  SINGLE
+  RANGE
+}
+
+enum RequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum RequestEventType {
+  CREATED
+  EDITED
+  APPROVED
+  REJECTED
+  CANCELLED
 }
 
 model Organization {
@@ -89,6 +123,9 @@ model Organization {
   sensitiveActions     SensitiveActionToken[]
   workShifts           WorkShift[]
   accountNotifications AccountNotification[]
+  requestTypes         RequestType[]
+  requests             OrganizationRequest[]
+  absences             EmployeeAbsence[]
 
   @@index([createdByUserId])
   @@index([deletedAt])
@@ -98,6 +135,7 @@ model Organization {
 enum StoredFilePurpose {
   USER_AVATAR
   ORGANIZATION_LOGO
+  REQUEST_ATTACHMENT
 }
 
 model StoredFile {
@@ -114,10 +152,11 @@ model StoredFile {
   deletionAttempts  Int               @default(0) @map("deletion_attempts")
   lastDeletionError String?           @map("last_deletion_error") @db.VarChar(500)
 
-  uploadedBy       User          @relation("FileUploader", fields: [uploadedByUserId], references: [id], onDelete: Restrict)
-  organization     Organization? @relation("OrganizationFiles", fields: [organizationId], references: [id], onDelete: Cascade)
-  userAvatar       User?         @relation("UserAvatar")
-  organizationLogo Organization? @relation("OrganizationLogo")
+  uploadedBy        User               @relation("FileUploader", fields: [uploadedByUserId], references: [id], onDelete: Restrict)
+  organization      Organization?      @relation("OrganizationFiles", fields: [organizationId], references: [id], onDelete: Cascade)
+  userAvatar        User?              @relation("UserAvatar")
+  organizationLogo  Organization?      @relation("OrganizationLogo")
+  requestAttachment RequestAttachment?
 
   @@index([uploadedByUserId])
   @@index([organizationId])
@@ -129,17 +168,20 @@ model AccountNotification {
   id             String                  @id @default(uuid()) @db.Uuid
   userId         String                  @map("user_id") @db.Uuid
   organizationId String                  @map("organization_id") @db.Uuid
+  requestId      String?                 @map("request_id") @db.Uuid
   type           AccountNotificationType
   title          String                  @db.VarChar(160)
   message        String                  @db.VarChar(500)
   readAt         DateTime?               @map("read_at") @db.Timestamptz(3)
   createdAt      DateTime                @default(now()) @map("created_at") @db.Timestamptz(3)
 
-  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  request      OrganizationRequest? @relation(fields: [requestId], references: [id], onDelete: Cascade)
 
   @@index([userId, readAt, createdAt])
   @@index([organizationId])
+  @@index([requestId])
   @@map("account_notifications")
 }
 
@@ -159,6 +201,11 @@ model OrganizationMember {
   createdWorkShifts   WorkShift[]           @relation("ShiftCreator")
   cancelledWorkShifts WorkShift[]           @relation("ShiftCanceller")
   shiftAdjustments    WorkShiftAdjustment[] @relation("ShiftAdjustmentAuthor")
+  createdRequests     OrganizationRequest[] @relation("RequestCreator")
+  resolvedRequests    OrganizationRequest[] @relation("RequestResolver")
+  requestReads        RequestRead[]
+  requestEvents       RequestEvent[]
+  absences            EmployeeAbsence[]
 
   @@unique([organizationId, userId])
   @@index([organizationId])
@@ -193,12 +240,137 @@ model WorkShift {
   createdByMember   OrganizationMember    @relation("ShiftCreator", fields: [createdByMemberId], references: [id], onDelete: Restrict)
   cancelledByMember OrganizationMember?   @relation("ShiftCanceller", fields: [cancelledByMemberId], references: [id], onDelete: Restrict)
   adjustments       WorkShiftAdjustment[]
+  changeRequests    OrganizationRequest[]
 
   @@index([organizationId, scheduledStartAt])
   @@index([organizationId, scheduledEndAt])
   @@index([organizationId, memberId, scheduledStartAt])
   @@index([memberId, scheduledStartAt])
   @@map("work_shifts")
+}
+
+model RequestType {
+  id                String             @id @default(uuid()) @db.Uuid
+  organizationId    String             @map("organization_id") @db.Uuid
+  name              String             @db.VarChar(100)
+  description       String?            @db.VarChar(500)
+  systemCode        RequestSystemCode? @map("system_code")
+  dateMode          RequestDateMode    @map("date_mode")
+  requiresComment   Boolean            @default(false) @map("requires_comment")
+  allowsAttachments Boolean            @default(false) @map("allows_attachments")
+  isActive          Boolean            @default(true) @map("is_active")
+  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  requests     OrganizationRequest[]
+
+  @@unique([organizationId, systemCode])
+  @@index([organizationId, isActive])
+  @@map("request_types")
+}
+
+model OrganizationRequest {
+  id                 String             @id @default(uuid()) @db.Uuid
+  organizationId     String             @map("organization_id") @db.Uuid
+  createdByMemberId  String             @map("created_by_member_id") @db.Uuid
+  requestTypeId      String             @map("request_type_id") @db.Uuid
+  typeNameSnapshot   String             @map("type_name_snapshot") @db.VarChar(100)
+  systemCodeSnapshot RequestSystemCode? @map("system_code_snapshot")
+  status             RequestStatus      @default(PENDING)
+  startDate          DateTime?          @map("start_date") @db.Date
+  endDate            DateTime?          @map("end_date") @db.Date
+  comment            String?            @db.VarChar(2000)
+  relatedShiftId     String?            @map("related_shift_id") @db.Uuid
+  originalStartAt    DateTime?          @map("original_start_at") @db.Timestamptz(3)
+  originalEndAt      DateTime?          @map("original_end_at") @db.Timestamptz(3)
+  proposedStartAt    DateTime?          @map("proposed_start_at") @db.Timestamptz(3)
+  proposedEndAt      DateTime?          @map("proposed_end_at") @db.Timestamptz(3)
+  resolvedAt         DateTime?          @map("resolved_at") @db.Timestamptz(3)
+  resolvedByMemberId String?            @map("resolved_by_member_id") @db.Uuid
+  resolutionComment  String?            @map("resolution_comment") @db.VarChar(1000)
+  cancelledAt        DateTime?          @map("cancelled_at") @db.Timestamptz(3)
+  createdAt          DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization  Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  creator       OrganizationMember    @relation("RequestCreator", fields: [createdByMemberId], references: [id], onDelete: Restrict)
+  requestType   RequestType           @relation(fields: [requestTypeId], references: [id], onDelete: Restrict)
+  relatedShift  WorkShift?            @relation(fields: [relatedShiftId], references: [id], onDelete: Restrict)
+  resolvedBy    OrganizationMember?   @relation("RequestResolver", fields: [resolvedByMemberId], references: [id], onDelete: Restrict)
+  reads         RequestRead[]
+  attachments   RequestAttachment[]
+  events        RequestEvent[]
+  absence       EmployeeAbsence?
+  notifications AccountNotification[]
+
+  @@index([organizationId, status, createdAt])
+  @@index([createdByMemberId, status, createdAt])
+  @@index([requestTypeId, createdAt])
+  @@index([resolvedAt])
+  @@map("requests")
+}
+
+model RequestRead {
+  requestId String   @map("request_id") @db.Uuid
+  memberId  String   @map("member_id") @db.Uuid
+  readAt    DateTime @default(now()) @map("read_at") @db.Timestamptz(3)
+
+  request OrganizationRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  member  OrganizationMember  @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@id([requestId, memberId])
+  @@index([memberId, readAt])
+  @@map("request_reads")
+}
+
+model RequestAttachment {
+  id           String   @id @default(uuid()) @db.Uuid
+  requestId    String   @map("request_id") @db.Uuid
+  storedFileId String   @unique @map("stored_file_id") @db.Uuid
+  fileName     String   @map("file_name") @db.VarChar(255)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  request    OrganizationRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  storedFile StoredFile          @relation(fields: [storedFileId], references: [id], onDelete: Cascade)
+
+  @@index([requestId, createdAt])
+  @@map("request_attachments")
+}
+
+model RequestEvent {
+  id            String           @id @default(uuid()) @db.Uuid
+  requestId     String           @map("request_id") @db.Uuid
+  actorMemberId String           @map("actor_member_id") @db.Uuid
+  type          RequestEventType
+  comment       String?          @db.VarChar(1000)
+  createdAt     DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  request OrganizationRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  actor   OrganizationMember  @relation(fields: [actorMemberId], references: [id], onDelete: Restrict)
+
+  @@index([requestId, createdAt])
+  @@map("request_events")
+}
+
+model EmployeeAbsence {
+  id              String            @id @default(uuid()) @db.Uuid
+  organizationId  String            @map("organization_id") @db.Uuid
+  memberId        String            @map("member_id") @db.Uuid
+  sourceRequestId String            @unique @map("source_request_id") @db.Uuid
+  type            RequestSystemCode
+  startDate       DateTime          @map("start_date") @db.Date
+  endDate         DateTime          @map("end_date") @db.Date
+  createdAt       DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+  cancelledAt     DateTime?         @map("cancelled_at") @db.Timestamptz(3)
+
+  organization  Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  member        OrganizationMember  @relation(fields: [memberId], references: [id], onDelete: Restrict)
+  sourceRequest OrganizationRequest @relation(fields: [sourceRequestId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, startDate, endDate])
+  @@index([memberId, startDate, endDate])
+  @@map("employee_absences")
 }
 
 model WorkShiftAdjustment {

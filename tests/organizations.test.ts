@@ -8,7 +8,7 @@ import { confirmOrganizationDeletion, confirmOwnershipTransfer, requestOrganizat
 import { updateProfileBody } from '../src/server/profile/schemas.ts'
 import { updateOrganizationBody } from '../src/server/organizations/schemas.ts'
 import { passwordValidationError } from '../src/app/auth/password-policy.ts'
-import { cancelShift, correctActualTime, createShift, getShift, listMyUpcomingShifts, listSchedule, listShiftNotifications, readShiftNotification } from '../src/server/schedule/service.ts'
+import { cancelShift, correctActualTime, createShift, getShift, listMyUpcomingShifts, listSchedule, listShiftNotifications, readShiftNotification, updateShift } from '../src/server/schedule/service.ts'
 import { memberStatistics, myStatistics, organizationStatistics } from '../src/server/schedule/statistics.ts'
 import { zonedDateTimeToUtc } from '../src/server/schedule/timezone.ts'
 import { calendarRange, moveMonth } from '../src/app/schedule/date-utils.ts'
@@ -16,6 +16,9 @@ import sharp from 'sharp'
 import { cleanupPendingFiles, removeOrganizationLogo, removeUserAvatar, replaceOrganizationLogo, replaceUserAvatar } from '../src/server/storage/image-service.ts'
 import { writeObject } from '../src/server/storage/local-file-storage.ts'
 import { formatRussianPhone, normalizeRussianPhone } from '../src/app/profile/phone.ts'
+import { cancelRequest, createRequest, createRequestType, getRequest, listRequests, listRequestTypes, resolveRequest, updateRequest, updateRequestType } from '../src/server/requests/service.ts'
+import { addRequestAttachment, deleteRequestAttachment, downloadRequestAttachment } from '../src/server/requests/attachment-service.ts'
+import { createRequestBody } from '../src/server/requests/schemas.ts'
 
 const suffix = randomUUID().slice(0, 8)
 const email = (name: string) => `${name}-${suffix}@example.test`
@@ -30,6 +33,12 @@ async function expectCode(action: () => Promise<unknown>, code: string) {
 
 before(async () => {
   await prisma.accountNotification.deleteMany()
+  await prisma.employeeAbsence.deleteMany()
+  await prisma.requestRead.deleteMany()
+  await prisma.requestEvent.deleteMany()
+  await prisma.requestAttachment.deleteMany()
+  await prisma.organizationRequest.deleteMany()
+  await prisma.requestType.deleteMany()
   await prisma.workShiftAdjustment.deleteMany()
   await prisma.workShift.deleteMany()
   await prisma.sensitiveActionToken.deleteMany()
@@ -88,6 +97,196 @@ describe('organizations and authorization', { concurrency: false }, () => {
     await expectCode(() => changeMemberRole(admin.id, first.id, ownerMembership.id, 'MEMBER'), 'INSUFFICIENT_PERMISSIONS')
     await expectCode(() => removeMember(admin.id, first.id, ownerMembership.id), 'INSUFFICIENT_PERMISSIONS')
     assert.notEqual(first.id, second.id)
+  })
+})
+
+describe('requests workflow, privacy and schedule integration', { concurrency: false }, () => {
+  it('supports system and custom types while protecting type management', async () => {
+    const organization = (await listOrganizations(owner.id))[0]
+    const types = await listRequestTypes(member.id, organization.id)
+    assert.equal(types.filter((type) => type.systemCode).length, 6)
+    const custom = await createRequestType(owner.id, organization.id, { name: 'Удалённый день', description: 'Работа вне офиса', dateMode: 'SINGLE', requiresComment: true, allowsAttachments: true })
+    await expectCode(() => createRequestType(member.id, organization.id, { name: 'Запрещённый', dateMode: 'NONE', requiresComment: false, allowsAttachments: false }), 'INSUFFICIENT_PERMISSIONS')
+    await expectCode(() => createRequest(member.id, organization.id, { requestTypeId: custom.id, startDate: '2027-01-10' }), 'REQUEST_COMMENT_REQUIRED')
+    const historical = await createRequest(member.id, organization.id, { requestTypeId: custom.id, startDate: '2027-01-10', comment: 'Из дома' })
+    await updateRequestType(owner.id, organization.id, custom.id, { name: 'Удалённый рабочий день', description: custom.description, dateMode: custom.dateMode, requiresComment: custom.requiresComment, allowsAttachments: custom.allowsAttachments, isActive: false })
+    await expectCode(() => createRequest(member.id, organization.id, { requestTypeId: custom.id, startDate: '2027-01-10', comment: 'Из дома' }), 'REQUEST_TYPE_NOT_FOUND')
+    assert.equal((await prisma.organizationRequest.findUniqueOrThrow({ where: { id: historical.id } })).typeNameSnapshot, 'Удалённый день')
+    const system = types.find((type) => type.systemCode === 'OTHER')!
+    await updateRequestType(owner.id, organization.id, system.id, { name: system.name, description: system.description, dateMode: system.dateMode, requiresComment: system.requiresComment, allowsAttachments: system.allowsAttachments, isActive: false })
+    assert.equal((await listRequestTypes(member.id, organization.id)).some((type) => type.id === system.id), false)
+    await expectCode(() => createRequest(member.id, organization.id, { requestTypeId: system.id, comment: 'Недоступный тип' }), 'REQUEST_TYPE_NOT_FOUND')
+    await updateRequestType(owner.id, organization.id, system.id, { name: system.name, description: system.description, dateMode: system.dateMode, requiresComment: system.requiresComment, allowsAttachments: system.allowsAttachments, isActive: true })
+    assert.equal(createRequestBody.safeParse({ requestTypeId: custom.id, startDate: '2027-02-30' }).success, false)
+  })
+
+  it('tracks reads per reviewer, blocks IDOR, resolves once and creates an absence', async () => {
+    const organization = (await listOrganizations(owner.id))[0]
+    const vacation = (await listRequestTypes(member.id, organization.id)).find((type) => type.systemCode === 'VACATION')!
+    const request = await createRequest(member.id, organization.id, { requestTypeId: vacation.id, startDate: '2028-02-10', endDate: '2028-02-12', comment: 'Поездка' })
+    await expectCode(() => getRequest(outsider.id, organization.id, request.id), 'ORGANIZATION_NOT_FOUND')
+    await getRequest(owner.id, organization.id, request.id)
+    assert.equal(await prisma.requestRead.count({ where: { requestId: request.id } }), 1)
+    await getRequest(admin.id, organization.id, request.id)
+    assert.equal(await prisma.requestRead.count({ where: { requestId: request.id } }), 2)
+    const employeeMembership = await prisma.organizationMember.findUniqueOrThrow({ where: { organizationId_userId: { organizationId: organization.id, userId: member.id } } })
+    const conflict = await createShift(owner.id, organization.id, { memberId: employeeMembership.id, startDate: '2028-02-11', startTime: '09:00', endDate: '2028-02-11', endTime: '18:00', breakMinutes: 0, description: null })
+    await expectCode(() => resolveRequest(owner.id, organization.id, request.id, 'APPROVED', null, false), 'REQUEST_SHIFT_CONFLICTS')
+    await resolveRequest(owner.id, organization.id, request.id, 'APPROVED', 'Согласовано', true)
+    assert.equal((await prisma.workShift.findUniqueOrThrow({ where: { id: conflict.id } })).status, 'CANCELLED')
+    assert.ok(await prisma.employeeAbsence.findUnique({ where: { sourceRequestId: request.id } }))
+    await expectCode(() => resolveRequest(admin.id, organization.id, request.id, 'REJECTED', 'Поздно'), 'REQUEST_ALREADY_RESOLVED')
+    await expectCode(() => createShift(owner.id, organization.id, { memberId: employeeMembership.id, startDate: '2028-02-12', startTime: '10:00', endDate: '2028-02-12', endTime: '17:00', breakMinutes: 0, description: null }), 'EMPLOYEE_ABSENT')
+    const dayOffType = (await listRequestTypes(member.id, organization.id)).find((type) => type.systemCode === 'DAY_OFF')!
+    const dayOff = await createRequest(member.id, organization.id, { requestTypeId: dayOffType.id, startDate: '2028-03-10' })
+    await resolveRequest(owner.id, organization.id, dayOff.id, 'APPROVED', null)
+    const boundaryShift = await createShift(owner.id, organization.id, { memberId: employeeMembership.id, startDate: '2028-03-09', startTime: '20:00', endDate: '2028-03-10', endTime: '00:00', breakMinutes: 0, description: 'До начала отгула' })
+    assert.equal(boundaryShift.status, 'SCHEDULED')
+    await expectCode(() => createShift(owner.id, organization.id, { memberId: employeeMembership.id, startDate: '2028-03-10', startTime: '00:00', endDate: '2028-03-11', endTime: '00:00', breakMinutes: 0, description: null }), 'EMPLOYEE_ABSENT')
+  })
+
+  it('keeps attachments private and validates ownership of shift-change requests', async () => {
+    const organization = (await listOrganizations(owner.id))[0]
+    const types = await listRequestTypes(member.id, organization.id)
+    const other = types.find((type) => type.systemCode === 'OTHER')!
+    const request = await createRequest(member.id, organization.id, { requestTypeId: other.id, comment: 'Документы' })
+    const jpeg = await sharp({ create: { width: 8, height: 8, channels: 3, background: '#fff' } }).jpeg().toBuffer()
+    const image = await addRequestAttachment(member.id, organization.id, request.id, jpeg, 'image/jpeg', 'spravka.jpg')
+    const pdf = Buffer.from('%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF')
+    const document = await addRequestAttachment(member.id, organization.id, request.id, pdf, 'application/pdf', 'spravka.pdf')
+    assert.equal((await downloadRequestAttachment(owner.id, organization.id, request.id, image.id)).contents.length, jpeg.length)
+    assert.equal((await downloadRequestAttachment(member.id, organization.id, request.id, document.id)).attachment.fileName, 'spravka.pdf')
+    await expectCode(() => downloadRequestAttachment(outsider.id, organization.id, request.id, image.id), 'ORGANIZATION_NOT_FOUND')
+    await expectCode(() => deleteRequestAttachment(owner.id, organization.id, request.id, image.id), 'ATTACHMENT_FORBIDDEN')
+    await deleteRequestAttachment(member.id, organization.id, request.id, image.id)
+    await expectCode(() => downloadRequestAttachment(member.id, organization.id, request.id, image.id), 'ATTACHMENT_NOT_FOUND')
+    assert.equal(await prisma.storedFile.findUnique({ where: { id: image.storedFileId } }), null)
+    const shiftType = types.find((type) => type.systemCode === 'SHIFT_CHANGE')!
+    const ownerMembership = await prisma.organizationMember.findUniqueOrThrow({ where: { organizationId_userId: { organizationId: organization.id, userId: owner.id } } })
+    const ownerShift = await createShift(owner.id, organization.id, { memberId: ownerMembership.id, startDate: '2028-04-01', startTime: '10:00', endDate: '2028-04-01', endTime: '18:00', breakMinutes: 0, description: null })
+    await expectCode(() => createRequest(member.id, organization.id, { requestTypeId: shiftType.id, relatedShiftId: ownerShift.id, proposedStartDate: '2028-04-02', proposedStartTime: '10:00', proposedEndDate: '2028-04-02', proposedEndTime: '18:00', comment: 'Чужая смена' }), 'SHIFT_NOT_FOUND')
+  })
+
+  it('moves the original shift on approval and rejects stale or conflicting proposals', async () => {
+    const organization = (await listOrganizations(owner.id))[0]
+    const memberRecord = await prisma.organizationMember.findUniqueOrThrow({ where: { organizationId_userId: { organizationId: organization.id, userId: member.id } } })
+    const shiftType = (await listRequestTypes(member.id, organization.id)).find((item) => item.systemCode === 'SHIFT_CHANGE')!
+    const shift = await createShift(owner.id, organization.id, { memberId: memberRecord.id, startDate: '2032-05-01', startTime: '09:00', endDate: '2032-05-01', endTime: '18:00', breakMinutes: 0, description: null })
+    await expectCode(() => createRequest(member.id, organization.id, { requestTypeId: shiftType.id, relatedShiftId: shift.id, comment: 'Позже' }), 'SHIFT_PROPOSAL_REQUIRED')
+    const proposal = await createRequest(member.id, organization.id, { requestTypeId: shiftType.id, relatedShiftId: shift.id, proposedStartDate: '2032-05-02', proposedStartTime: '12:00', proposedEndDate: '2032-05-02', proposedEndTime: '20:00', comment: 'Мне удобнее во второй день' })
+    assert.ok((await getRequest(member.id, organization.id, proposal.id)).request.proposedStartAt)
+    await updateRequest(member.id, organization.id, proposal.id, { requestTypeId: shiftType.id, relatedShiftId: shift.id, proposedStartDate: '2032-05-02', proposedStartTime: '13:00', proposedEndDate: '2032-05-02', proposedEndTime: '21:00', comment: 'Мне удобнее после обеда' })
+    await resolveRequest(owner.id, organization.id, proposal.id, 'APPROVED', null)
+    const moved = await prisma.workShift.findUniqueOrThrow({ where: { id: shift.id } })
+    assert.equal(moved.scheduledStartAt.toISOString(), zonedDateTimeToUtc('2032-05-02', '13:00', organization.timezone).toISOString())
+    assert.equal(moved.status, 'SCHEDULED')
+    assert.equal(moved.assignmentReadAt, null)
+    assert.equal((await listSchedule(member.id, organization.id, '2032-05-01', '2032-05-03')).shifts.filter((item) => item.id === shift.id).length, 1)
+
+    const other = await createShift(owner.id, organization.id, { memberId: memberRecord.id, startDate: '2032-05-04', startTime: '09:00', endDate: '2032-05-04', endTime: '18:00', breakMinutes: 0, description: null })
+    const conflict = await createRequest(member.id, organization.id, { requestTypeId: shiftType.id, relatedShiftId: shift.id, proposedStartDate: '2032-05-04', proposedStartTime: '12:00', proposedEndDate: '2032-05-04', proposedEndTime: '20:00', comment: 'Перенести ещё раз' })
+    await expectCode(() => resolveRequest(owner.id, organization.id, conflict.id, 'APPROVED', null), 'SHIFT_OVERLAP')
+    assert.equal((await prisma.organizationRequest.findUniqueOrThrow({ where: { id: conflict.id } })).status, 'PENDING')
+    assert.equal((await prisma.workShift.findUniqueOrThrow({ where: { id: other.id } })).status, 'SCHEDULED')
+    await cancelRequest(member.id, organization.id, conflict.id)
+
+    const stale = await createRequest(member.id, organization.id, { requestTypeId: shiftType.id, relatedShiftId: shift.id, proposedStartDate: '2032-05-05', proposedStartTime: '10:00', proposedEndDate: '2032-05-05', proposedEndTime: '19:00', comment: 'Перенос' })
+    await updateShift(owner.id, organization.id, shift.id, { memberId: memberRecord.id, startDate: '2032-05-03', startTime: '09:00', endDate: '2032-05-03', endTime: '18:00', breakMinutes: 0, description: null })
+    await expectCode(() => resolveRequest(owner.id, organization.id, stale.id, 'APPROVED', null), 'SHIFT_CHANGED_SINCE_REQUEST')
+    assert.equal((await prisma.organizationRequest.findUniqueOrThrow({ where: { id: stale.id } })).status, 'PENDING')
+  })
+
+  it('lets only the author edit a pending request and alerts reviewers again', async () => {
+    const organization = (await listOrganizations(owner.id))[0]
+    const type = (await listRequestTypes(member.id, organization.id)).find((item) => item.systemCode === 'OTHER')!
+    const request = await createRequest(member.id, organization.id, { requestTypeId: type.id, comment: 'Первый текст' })
+    const alert = await prisma.accountNotification.findFirstOrThrow({ where: { requestId: request.id, userId: owner.id, type: 'REQUEST_CREATED' } })
+    await getRequest(owner.id, organization.id, request.id)
+    await readAccountNotification(owner.id, alert.id)
+    await expectCode(() => updateRequest(owner.id, organization.id, request.id, { requestTypeId: type.id, comment: 'Не мой текст' }), 'REQUEST_NOT_FOUND')
+    await updateRequest(member.id, organization.id, request.id, { requestTypeId: type.id, comment: 'Исправленный текст' })
+    const edited = (await getRequest(member.id, organization.id, request.id)).request
+    assert.equal(edited.comment, 'Исправленный текст')
+    assert.equal(edited.events.at(-1)?.type, 'EDITED')
+    assert.equal(await prisma.requestRead.count({ where: { requestId: request.id } }), 0)
+    assert.ok((await prisma.accountNotification.findUniqueOrThrow({ where: { id: alert.id } })).readAt)
+    assert.ok(await prisma.accountNotification.findFirst({ where: { requestId: request.id, userId: owner.id, type: 'REQUEST_CREATED', readAt: null, title: 'Заявка изменена' } }))
+    await resolveRequest(owner.id, organization.id, request.id, 'APPROVED', null)
+    await expectCode(() => updateRequest(member.id, organization.id, request.id, { requestTypeId: type.id, comment: 'Поздно' }), 'REQUEST_ALREADY_RESOLVED')
+  })
+
+  it('supports cancellation, pagination and concurrent decision protection', async () => {
+    const organization = (await listOrganizations(owner.id))[0]
+    const type = (await listRequestTypes(member.id, organization.id)).find((item) => item.systemCode === 'OTHER')!
+    const cancelled = await createRequest(member.id, organization.id, { requestTypeId: type.id, comment: 'Отменю сам' })
+    await cancelRequest(member.id, organization.id, cancelled.id)
+    assert.equal((await prisma.organizationRequest.findUniqueOrThrow({ where: { id: cancelled.id } })).status, 'CANCELLED')
+    const concurrent = await createRequest(member.id, organization.id, { requestTypeId: type.id, comment: 'Одно решение' })
+    const decisions = await Promise.allSettled([resolveRequest(owner.id, organization.id, concurrent.id, 'APPROVED', null), resolveRequest(admin.id, organization.id, concurrent.id, 'REJECTED', 'Не согласовано')])
+    assert.equal(decisions.filter((item) => item.status === 'fulfilled').length, 1)
+    assert.equal(decisions.filter((item) => item.status === 'rejected').length, 1)
+    const list = await listRequests(owner.id, organization.id, 'history', { page: 1, pageSize: 1 })
+    assert.equal(list.requests.length, 1)
+    assert.ok(list.pagination.total >= 2)
+  })
+
+  it('lets owners and admins review their own requests and filter the shared lists', async () => {
+    const organization = (await listOrganizations(owner.id))[0]
+    const type = (await listRequestTypes(owner.id, organization.id)).find((item) => item.systemCode === 'OTHER')!
+    await prisma.user.update({ where: { id: owner.id }, data: { lastName: 'Биленко', firstName: 'Иван' } })
+    const ownerRequest = await createRequest(owner.id, organization.id, { requestTypeId: type.id, comment: 'Заявка владельца' })
+    const adminRequest = await createRequest(admin.id, organization.id, { requestTypeId: type.id, comment: 'Заявка администратора' })
+    assert.ok((await listRequests(owner.id, organization.id, 'incoming', { page: 1, pageSize: 20 })).requests.some((item) => item.id === ownerRequest.id))
+    assert.ok((await listRequests(admin.id, organization.id, 'incoming', { page: 1, pageSize: 20 })).requests.some((item) => item.id === ownerRequest.id))
+    assert.ok((await listRequests(owner.id, organization.id, 'incoming', { page: 1, pageSize: 20 })).requests.some((item) => item.id === adminRequest.id))
+    assert.deepEqual((await listRequests(owner.id, organization.id, 'incoming', { page: 1, pageSize: 20, role: 'OWNER', search: 'би' })).requests.map((item) => item.id), [ownerRequest.id])
+    assert.deepEqual((await listRequests(owner.id, organization.id, 'incoming', { page: 1, pageSize: 20, role: 'OWNER', typeId: type.id, search: 'би Ив' })).requests.map((item) => item.id), [ownerRequest.id])
+    assert.deepEqual((await listRequests(owner.id, organization.id, 'incoming', { page: 1, pageSize: 20, role: 'OWNER', search: 'Другое' })).requests, [])
+    assert.deepEqual((await listRequests(owner.id, organization.id, 'incoming', { page: 1, pageSize: 20, role: 'ADMIN', search: 'Би' })).requests, [])
+    assert.ok(await prisma.accountNotification.findFirst({ where: { requestId: ownerRequest.id, userId: owner.id, type: 'REQUEST_CREATED' } }))
+    await getRequest(owner.id, organization.id, ownerRequest.id)
+    await resolveRequest(owner.id, organization.id, ownerRequest.id, 'APPROVED', null)
+    assert.equal((await listRequests(owner.id, organization.id, 'history', { page: 1, pageSize: 20, role: 'OWNER', search: 'Би' })).requests.some((item) => item.id === ownerRequest.id), true)
+    assert.equal((await listRequests(owner.id, organization.id, 'history', { page: 1, pageSize: 20, role: 'OWNER', status: 'APPROVED', typeId: type.id, search: 'Би' })).requests.some((item) => item.id === ownerRequest.id), true)
+    const completedOwnerRequest = await createRequest(owner.id, organization.id, { requestTypeId: type.id, comment: 'Рассмотреть администратору' })
+    await resolveRequest(admin.id, organization.id, completedOwnerRequest.id, 'APPROVED', null)
+    assert.equal((await listRequests(owner.id, organization.id, 'history', { page: 1, pageSize: 20 })).requests.some((item) => item.id === completedOwnerRequest.id), true)
+    assert.equal((await listRequests(admin.id, organization.id, 'history', { page: 1, pageSize: 20 })).requests.some((item) => item.id === completedOwnerRequest.id), true)
+    assert.equal((await listRequests(owner.id, organization.id, 'mine', { page: 1, pageSize: 20 })).requests.some((item) => item.id === completedOwnerRequest.id), true)
+    await expectCode(() => listRequests(member.id, organization.id, 'incoming', { page: 1, pageSize: 20 }), 'INSUFFICIENT_PERMISSIONS')
+    await expectCode(() => cancelRequest(owner.id, organization.id, ownerRequest.id), 'REQUEST_ALREADY_RESOLVED')
+    await expectCode(() => cancelRequest(member.id, organization.id, adminRequest.id), 'REQUEST_NOT_FOUND')
+    await cancelRequest(admin.id, organization.id, adminRequest.id)
+    await prisma.user.update({ where: { id: owner.id }, data: { lastName: null, firstName: null } })
+  })
+
+  it('sends generic decision notifications without confusing them with request reads', async () => {
+    const organization = (await listOrganizations(owner.id))[0]
+    const type = (await listRequestTypes(member.id, organization.id)).find((item) => item.systemCode === 'OTHER')!
+    const request = await createRequest(member.id, organization.id, { requestTypeId: type.id, comment: 'Нужен ответ' })
+    const reviewerNotification = await prisma.accountNotification.findFirstOrThrow({ where: { requestId: request.id, userId: owner.id, type: 'REQUEST_CREATED' } })
+    assert.equal(await prisma.requestRead.count({ where: { requestId: request.id } }), 0)
+    assert.equal(reviewerNotification.readAt, null)
+    await getRequest(owner.id, organization.id, request.id)
+    assert.equal(await prisma.requestRead.count({ where: { requestId: request.id } }), 1)
+    assert.equal((await prisma.accountNotification.findUniqueOrThrow({ where: { id: reviewerNotification.id } })).readAt, null)
+    await resolveRequest(owner.id, organization.id, request.id, 'REJECTED', 'Недостаточно информации')
+    assert.equal((await prisma.accountNotification.findFirstOrThrow({ where: { requestId: request.id, userId: member.id, type: 'REQUEST_REJECTED' } })).message, 'Другое')
+  })
+
+  it('keeps custom requests out of schedule semantics and cancels pending history when membership ends', async () => {
+    const organization = (await listOrganizations(owner.id))[0]
+    const custom = await createRequestType(owner.id, organization.id, { name: 'Компенсация расходов', description: null, dateMode: 'RANGE', requiresComment: true, allowsAttachments: true })
+    const customRequest = await createRequest(member.id, organization.id, { requestTypeId: custom.id, startDate: '2029-01-01', endDate: '2029-01-03', comment: 'Чеки' })
+    await resolveRequest(owner.id, organization.id, customRequest.id, 'APPROVED', null)
+    assert.equal(await prisma.employeeAbsence.count({ where: { sourceRequestId: customRequest.id } }), 0)
+    const leaving = await prisma.user.create({ data: { email: email('leaving'), passwordHash: 'test-only', emailVerifiedAt: new Date() } })
+    const leavingMembership = await prisma.organizationMember.create({ data: { organizationId: organization.id, userId: leaving.id, role: 'MEMBER' } })
+    const pending = await createRequest(leaving.id, organization.id, { requestTypeId: custom.id, startDate: '2029-02-01', endDate: '2029-02-02', comment: 'До ухода' })
+    await removeMember(owner.id, organization.id, leavingMembership.id)
+    const preserved = await prisma.organizationRequest.findUniqueOrThrow({ where: { id: pending.id } })
+    assert.equal(preserved.status, 'CANCELLED')
+    assert.equal(preserved.resolutionComment, 'Участник покинул организацию')
   })
 })
 

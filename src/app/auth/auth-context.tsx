@@ -13,6 +13,9 @@ type AuthContextValue = {
   updateUser: (user: AuthUser) => void
   apiRequest: <T>(path: string, options?: ApiOptions) => Promise<T>
   uploadImage: <T>(path: string, file: File) => Promise<T>
+  uploadFile: <T>(path: string, file: File) => Promise<T>
+  downloadFile: (path: string, fileName: string) => Promise<void>
+  previewFile: (path: string) => Promise<Blob>
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -132,9 +135,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return readJson<T>(response)
   }, [refresh])
 
+  const uploadFile = useCallback(async <T,>(path: string, file: File): Promise<T> => {
+    const execute = (token: string | null) => fetch(`/api${path}`, { method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': file.type, 'X-File-Name': encodeURIComponent(file.name), ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: file })
+    let response = await execute(tokenRef.current)
+    if (response.status === 401) { const refreshed = await refresh(); if (refreshed) response = await execute(refreshed.accessToken) }
+    return readJson<T>(response)
+  }, [refresh])
+
+  const downloadFile = useCallback(async (path: string, fileName: string) => {
+    const execute = (token: string | null) => fetch(`/api${path}`, { credentials: 'same-origin', headers: token ? { Authorization: `Bearer ${token}` } : {} })
+    let response = await execute(tokenRef.current)
+    if (response.status === 401) { const refreshed = await refresh(); if (refreshed) response = await execute(refreshed.accessToken) }
+    if (!response.ok) { await readJson(response); return }
+    const url = URL.createObjectURL(await response.blob())
+    const anchor = document.createElement('a'); anchor.href = url; anchor.download = fileName; anchor.click(); URL.revokeObjectURL(url)
+  }, [refresh])
+
+  const previewFile = useCallback(async (path: string) => {
+    const execute = (token: string | null) => fetch(`/api${path}`, { credentials: 'same-origin', headers: token ? { Authorization: `Bearer ${token}` } : {} })
+    let response = await execute(tokenRef.current)
+    if (response.status === 401) { const refreshed = await refresh(); if (refreshed) response = await execute(refreshed.accessToken) }
+    if (!response.ok) { await readJson(response); throw new Error('Не удалось открыть файл.') }
+    return response.blob()
+  }, [refresh])
+
   const updateUser = useCallback((nextUser: AuthUser) => setUser(nextUser), [])
 
-  return <AuthContext.Provider value={{ user, loading, login, verifyEmail, logout, updateUser, apiRequest, uploadImage }}>{children}</AuthContext.Provider>
+  return <AuthContext.Provider value={{ user, loading, login, verifyEmail, logout, updateUser, apiRequest, uploadImage, uploadFile, downloadFile, previewFile }}>{children}</AuthContext.Provider>
 }
 
 export function useAuth() {

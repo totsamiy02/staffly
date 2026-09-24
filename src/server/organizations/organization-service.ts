@@ -4,6 +4,7 @@ import { ApiError } from '../api-error.ts'
 import { deliverRoleChanged } from '../mail.ts'
 import { assertCanChangeRole, assertCanRemoveMember, getMembership } from './permissions.ts'
 import { mediaUrl } from '../storage/image-service.ts'
+import { seedSystemRequestTypes } from '../requests/service.ts'
 
 export type CreateOrganizationInput = { name: string; description: string | null; timezone: string }
 export type UpdateOrganizationInput = CreateOrganizationInput & { contactEmail: string | null; phone: string | null; website: string | null; address: string | null }
@@ -12,6 +13,7 @@ export async function createOrganization(userId: string, input: CreateOrganizati
   return prisma.$transaction(async (tx) => {
     const organization = await tx.organization.create({ data: { ...input, createdByUserId: userId } })
     await tx.organizationMember.create({ data: { organizationId: organization.id, userId, role: 'OWNER' } })
+    await seedSystemRequestTypes(tx, organization.id)
     return { ...organization, logoUrl: null, role: 'OWNER' as const, memberCount: 1 }
   })
 }
@@ -148,5 +150,12 @@ export async function removeMember(actorUserId: string, organizationId: string, 
   await prisma.$transaction(async (tx) => {
     await tx.workShift.updateMany({ where: { organizationId, memberId: target.id, status: 'SCHEDULED', scheduledStartAt: { gt: now } }, data: { status: 'CANCELLED', cancelledAt: now, cancelledByMemberId: actor.id, cancellationReason: 'Сотрудник покинул организацию' } })
     await tx.organizationMember.update({ where: { id: target.id }, data: { leftAt: now } })
+    const pending = await tx.organizationRequest.findMany({ where: { organizationId, createdByMemberId: target.id, status: 'PENDING' }, select: { id: true } })
+    if (pending.length) {
+      const ids = pending.map((request) => request.id)
+      await tx.organizationRequest.updateMany({ where: { id: { in: ids } }, data: { status: 'CANCELLED', cancelledAt: now, resolutionComment: 'Участник покинул организацию' } })
+      await tx.requestEvent.createMany({ data: ids.map((requestId) => ({ requestId, actorMemberId: actor.id, type: 'CANCELLED' as const, comment: 'Участник покинул организацию' })) })
+      await tx.accountNotification.updateMany({ where: { requestId: { in: ids }, readAt: null }, data: { readAt: now } })
+    }
   }, { isolationLevel: 'Serializable' })
 }

@@ -4,4 +4,4 @@ export type PendingInvitation = { id: string; organization: { id: string; name: 
 export type OrganizationMember = { id: string; userId: string; email: string; displayName: string; firstName: string | null; lastName: string | null; middleName: string | null; phone: string | null; bio: string | null; avatarUrl: string | null; lastSeenAt: string | null; online: boolean; role: OrganizationRole; joinedAt: string }
 export type MemberPagination = { page: number; pageSize: number; total: number; pages: number }
 export type ActiveOrganizationInvitation = { id: string; type: 'EMAIL' | 'CODE'; invitedEmail: string | null; expiresAt: string; createdAt: string }
-export type AccountNotification = { id: string; type: 'ROLE_CHANGED'; title: string; message: string; createdAt: string; organization: { id: string; name: string } }
+export type AccountNotification = { id: string; type: 'ROLE_CHANGED' | 'REQUEST_CREATED' | 'REQUEST_APPROVED' | 'REQUEST_REJECTED' | 'REQUEST_CANCELLED'; requestId: string | null; title: string; message: string; createdAt: string; organization: { id: string; name: string } }

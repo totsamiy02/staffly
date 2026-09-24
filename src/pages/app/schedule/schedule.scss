@@ -40,6 +40,10 @@
 .schedule-shift-chip--mine::after { position: absolute; top: 5px; right: 5px; width: 5px; height: 5px; border-radius: 50%; background: #7657d6; content: ''; }
 .schedule-shift-chip--active.schedule-shift-chip--mine { box-shadow: inset 0 0 0 1px #876ee0, 0 0 0 1px rgb(72 161 93 / 18%); }
 .schedule-shift-chip--cancelled { border-left-color: #b46c6c; background: #f8eeee; opacity: .6; text-decoration: line-through; }
+.schedule-absence-chip { display: grid; min-width: 0; padding: 6px 7px; border-left: 3px solid #c08b45; border-radius: 6px; background: #fff5e7; }
+.schedule-absence-chip strong, .schedule-absence-chip small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.schedule-absence-chip strong { font-size: 10px; }
+.schedule-absence-chip small { color: #8a6638; font-size: 9px; }
 .schedule-day__more { color: #777; font-size: 9px; font-weight: 700; }
 .schedule-state { display: flex; min-height: 260px; align-items: center; justify-content: center; flex-direction: column; gap: 10px; padding: 30px; color: #777; text-align: center; }
 .schedule-state strong { color: #222; font-size: 18px; }
@@ -73,10 +77,15 @@
 .schedule-drawer__empty { padding: 35px 20px; border: 1px dashed #ccc; border-radius: 13px; color: #777; text-align: center; font-size: 12px; }
 .schedule-drawer__add { width: 100%; margin-top: 15px; }
 .day-shift { padding: 18px; border: 1px solid #dedede; border-radius: 14px; background: #fff; }
+.day-absence { display: grid; padding: 16px; border: 1px solid #ead7b9; border-radius: 14px; background: #fff7eb; }
+.day-absence strong { font-size: 13px; }
+.day-absence span { margin-top: 3px; color: #845f2f; font-size: 11px; font-weight: 700; }
+.day-absence small { margin-top: 7px; color: #8a7963; font-size: 9px; }
 .day-shift--future { border-color: #cfdbfa; }
 .day-shift--active { border-color: #9fd2aa; background: #f6fcf7; }
 .day-shift--completed { border-color: #d3d3d3; background: #ededed; }
 .day-shift--mine { outline: 1px solid #876ee0; outline-offset: -1px; box-shadow: inset 3px 0 #7657d6; }
+.day-shift--focused { outline: 2px solid #7354cf; outline-offset: -2px; box-shadow: 0 0 0 4px rgb(115 84 207 / 14%); }
 .day-shift--cancelled { background: #faf4f4; opacity: .67; }
 .day-shift__heading { display: flex; align-items: center; gap: 10px; }
 .day-shift__heading > span { display: grid; width: 38px; height: 38px; flex: 0 0 38px; place-items: center; border-radius: 50%; background: #111; color: #fff; font-size: 12px; font-weight: 700; }
@@ -111,15 +120,19 @@
 .employee-picker > span { color: #555; font-size: 11px; font-weight: 700; }
 .employee-picker__trigger { display: flex; width: 100%; min-height: 58px; align-items: center; gap: 11px; padding: 8px 12px; border: 1px solid #d5d5d5; border-radius: 12px; background: #fff; cursor: pointer; text-align: left; transition: border-color .18s, box-shadow .18s; }
 .employee-picker__trigger:hover, .employee-picker__trigger[aria-expanded="true"] { border-color: #8a8a8a; box-shadow: 0 0 0 3px rgb(0 0 0 / 4%); }
-.employee-picker__trigger > span:nth-child(2), .employee-picker__menu button > span:nth-child(2) { display: grid; min-width: 0; flex: 1; }
+.employee-picker__trigger > span:nth-child(2), .employee-picker__results button > span:nth-child(2) { display: grid; min-width: 0; flex: 1; }
 .employee-picker strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .employee-picker small { overflow: hidden; color: #888; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .employee-picker__avatar { display: grid; width: 34px; height: 34px; flex: 0 0 34px; place-items: center; border-radius: 50%; background: #111; color: #fff; font-size: 11px; font-weight: 750; }
 .employee-picker__trigger svg { width: 18px; height: 18px; color: #777; transition: transform .18s; }
 .employee-picker__trigger[aria-expanded="true"] svg { transform: rotate(180deg); }
-.employee-picker__menu { position: absolute; z-index: 5; top: calc(100% + 5px); right: 0; left: 0; overflow-y: auto; max-height: 240px; padding: 5px; border: 1px solid #d8d8d8; border-radius: 12px; background: #fff; box-shadow: 0 18px 45px rgb(0 0 0 / 14%); animation: picker-in .16s ease both; }
-.employee-picker__menu button { display: flex; width: 100%; align-items: center; gap: 10px; padding: 8px; border-radius: 9px; cursor: pointer; text-align: left; }
-.employee-picker__menu button:hover, .employee-picker__menu button.active { background: #f1f3f8; }
+.employee-picker__menu { position: absolute; z-index: 5; top: calc(100% + 5px); right: 0; left: 0; overflow: hidden; border: 1px solid #d8d8d8; border-radius: 12px; background: #fff; box-shadow: 0 18px 45px rgb(0 0 0 / 14%); animation: picker-in .16s ease both; }
+.employee-picker__search { padding: 8px; border-bottom: 1px solid #eee; }
+.employee-picker__search input { min-height: 40px; }
+.employee-picker__results { max-height: min(240px, 35dvh); overflow-y: auto; overscroll-behavior: contain; padding: 5px; }
+.employee-picker__results button { display: flex; width: 100%; align-items: center; gap: 10px; padding: 8px; border-radius: 9px; cursor: pointer; text-align: left; }
+.employee-picker__results button:hover, .employee-picker__results button.active { background: #f1f3f8; }
+.employee-picker__empty { padding: 14px; color: #777; font-size: 12px; text-align: center; }
 .employee-picker__check { color: #576da7; font-weight: 800; }
 .shift-form__timeline { display: grid; align-items: center; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 10px; }
 .shift-form__timeline fieldset { display: grid; min-width: 0; padding: 14px; border: 1px solid #dedede; border-radius: 13px; grid-template-columns: minmax(0, 1fr); gap: 10px; }

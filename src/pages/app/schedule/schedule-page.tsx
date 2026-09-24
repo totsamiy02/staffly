@@ -13,6 +13,7 @@ import ShiftFormModal from './shift-form-modal.tsx'
 import './schedule.scss'
 
 const weekDays = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
+const absenceNames = { VACATION: 'Отпуск', DAY_OFF: 'Отгул', SICK_LEAVE: 'Больничный', ABSENCE: 'Отсутствие' } as const
 
 function shiftCoversDate(shift: WorkShift, day: string, timezone: string) {
   const start = zonedDateAndTime(shift.scheduledStartAt, timezone)
@@ -43,6 +44,7 @@ export default function SchedulePage({ organization }: { organization: Organizat
   const [month, setMonth] = useState(initialMonth)
   const [shiftView, setShiftView] = useState<'all' | 'mine'>(searchParams.get('view') === 'mine' ? 'mine' : 'all')
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
+  const [focusedShiftId, setFocusedShiftId] = useState<string | null>(null)
   const [editing, setEditing] = useState<WorkShift | null>(null)
   const [actual, setActual] = useState<WorkShift | null>(null)
   const [adding, setAdding] = useState(false)
@@ -58,12 +60,31 @@ export default function SchedulePage({ organization }: { organization: Organizat
   const myPlanned = useMyUpcomingShifts(organization.id, myShiftsOpen)
   const plannedOwnShifts = myPlanned.data?.shifts ?? []
   const visibleShifts = shiftView === 'mine' ? (schedule.data?.shifts.filter((shift) => shift.memberId === ownMember?.id) ?? []) : (schedule.data?.shifts ?? [])
+  const visibleAbsences = shiftView === 'mine' ? (schedule.data?.absences.filter((absence) => absence.memberId === ownMember?.id) ?? []) : (schedule.data?.absences ?? [])
   const selectedShifts = selectedDate ? visibleShifts.filter((shift) => shiftCoversDate(shift, selectedDate, organization.timezone)) : []
+  const focusedShiftVisible = selectedShifts.some((shift) => shift.id === focusedShiftId)
+  const selectedAbsences = selectedDate ? visibleAbsences.filter((absence) => selectedDate >= absence.startDate && selectedDate <= absence.endDate) : []
   const monthHasShifts = visibleShifts.some((shift) => {
     const start = zonedDateAndTime(shift.scheduledStartAt, organization.timezone).date
     const end = zonedDateAndTime(shift.scheduledEndAt, organization.timezone).date
     return start < `${moveMonth(month, 1)}-01` && end >= `${month}-01`
   }) ?? false
+
+  useEffect(() => {
+    const shiftId = searchParams.get('shift')
+    if (!shiftId || !schedule.data || schedule.isPlaceholderData) return
+    const shift = schedule.data.shifts.find((item) => item.id === shiftId)
+    if (!shift) return
+    const date = zonedDateAndTime(shift.scheduledStartAt, organization.timezone).date
+    setSelectedDate(date); setFocusedShiftId(shiftId); setAdding(false)
+    setSearchParams((current) => { const next = new URLSearchParams(current); next.delete('shift'); return next }, { replace: true })
+  }, [organization.timezone, schedule.data, schedule.isPlaceholderData, searchParams, setSearchParams])
+
+  useEffect(() => {
+    if (!focusedShiftId || !selectedDate || !focusedShiftVisible) return
+    const frame = window.requestAnimationFrame(() => document.getElementById(`day-shift-${focusedShiftId}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }))
+    return () => window.cancelAnimationFrame(frame)
+  }, [focusedShiftId, focusedShiftVisible, selectedDate])
 
   useEffect(() => {
     const nextMonth = searchParams.get('month')
@@ -82,6 +103,7 @@ export default function SchedulePage({ organization }: { organization: Organizat
   function changeView(view: 'all' | 'mine') {
     setShiftView(view)
     setSelectedDate(null)
+    setFocusedShiftId(null)
     setSearchParams((current) => {
       const next = new URLSearchParams(current)
       if (view === 'mine') next.set('view', 'mine'); else next.delete('view')
@@ -90,9 +112,10 @@ export default function SchedulePage({ organization }: { organization: Organizat
     }, { replace: true })
   }
 
-  function chooseDay(day: string, shifts: WorkShift[]) {
+  function chooseDay(day: string, shifts: WorkShift[], absenceCount: number) {
     setSelectedDate(day); setActionError('')
-    if (canManage && shifts.length === 0) setAdding(true)
+    setFocusedShiftId(null)
+    if (canManage && shifts.length === 0 && absenceCount === 0) setAdding(true)
   }
 
   async function cancel(close: () => void) {
@@ -117,11 +140,12 @@ export default function SchedulePage({ organization }: { organization: Organizat
         {weekDays.map((day) => <div className="schedule-calendar__weekday" role="columnheader" key={day}>{day}</div>)}
         {range.days.map((day) => {
           const shifts = visibleShifts.filter((shift) => shiftCoversDate(shift, day, organization.timezone))
+          const absences = visibleAbsences.filter((absence) => day >= absence.startDate && day <= absence.endDate)
           const inMonth = day.startsWith(month)
           const today = day === todayDate
-          return <button type="button" role="gridcell" className={`schedule-day${inMonth ? '' : ' schedule-day--outside'}${today ? ' schedule-day--today' : ''}`} key={day} onClick={() => chooseDay(day, shifts)}>
+          return <button type="button" role="gridcell" className={`schedule-day${inMonth ? '' : ' schedule-day--outside'}${today ? ' schedule-day--today' : ''}`} key={day} onClick={() => chooseDay(day, shifts, absences.length)}>
             <span className="schedule-day__number">{Number(day.slice(-2))}</span>
-            <span className="schedule-day__shifts">{shifts.slice(0, 2).map((shift) => { const state = shiftState(shift); const mine = shift.memberId === ownMember?.id; return <span className={`schedule-shift-chip schedule-shift-chip--${state.key}${mine ? ' schedule-shift-chip--mine' : ''}`} key={shift.id}><strong>{mine ? 'Моя смена' : shift.memberName}</strong><small>{formatTime(shift.scheduledStartAt, organization.timezone)}–{formatTime(shift.scheduledEndAt, organization.timezone)}</small></span> })}{shifts.length > 2 && <small className="schedule-day__more">Ещё {shifts.length - 2}</small>}</span>
+            <span className="schedule-day__shifts">{absences.slice(0, 1).map((absence) => <span className="schedule-absence-chip" key={absence.id}><strong>{absence.memberId === ownMember?.id ? `Мой ${absenceNames[absence.type].toLowerCase()}` : absence.memberName}</strong><small>{absenceNames[absence.type]}</small></span>)}{shifts.slice(0, absences.length ? 1 : 2).map((shift) => { const state = shiftState(shift); const mine = shift.memberId === ownMember?.id; return <span className={`schedule-shift-chip schedule-shift-chip--${state.key}${mine ? ' schedule-shift-chip--mine' : ''}`} key={shift.id}><strong>{mine ? 'Моя смена' : shift.memberName}</strong><small>{formatTime(shift.scheduledStartAt, organization.timezone)}–{formatTime(shift.scheduledEndAt, organization.timezone)}</small></span> })}{shifts.length + absences.length > 2 && <small className="schedule-day__more">Ещё {shifts.length + absences.length - 2}</small>}</span>
           </button>
         })}
       </div><span className="schedule-calendar-loading">Обновляем месяц…</span></div>
@@ -129,9 +153,10 @@ export default function SchedulePage({ organization }: { organization: Organizat
       {!monthHasShifts && <div className="schedule-empty"><h3>{shiftView === 'mine' ? 'У вас нет смен в этом месяце' : 'На этот месяц смен пока нет'}</h3><p>{shiftView === 'mine' ? 'Переключитесь на все смены или выберите другой месяц.' : canManage ? 'Нажмите на нужный день календаря, чтобы добавить первую смену.' : 'Когда администратор составит график, смены появятся здесь.'}</p></div>}
     </>}
 
-    {selectedDate && !adding && !editing && !actual && <AnimatedOverlay variant="drawer" onClose={() => setSelectedDate(null)}>{(close) => <aside className="schedule-drawer" role="dialog" aria-modal="true" aria-labelledby="day-title"><header><div><p className="app-eyebrow">Расписание на день</p><h2 id="day-title">{displayDate(selectedDate)}</h2><p>{selectedShifts.length ? `${selectedShifts.length} ${selectedShifts.length === 1 ? 'смена' : 'смены'}` : 'Свободный день'}</p></div><button aria-label="Закрыть" onClick={close}>×</button></header><div className="schedule-drawer__list">
-      {!selectedShifts.length && <div className="schedule-drawer__empty">На этот день смен нет.</div>}
-      {selectedShifts.map((shift) => { const state = shiftState(shift); const mine = shift.memberId === ownMember?.id; return <article className={`day-shift day-shift--${state.key}${mine ? ' day-shift--mine' : ''}`} key={shift.id}><div className="day-shift__heading"><span>{shift.memberName.slice(0, 1).toUpperCase()}</span><div><strong>{mine ? `${shift.memberName} · ваша смена` : shift.memberName}</strong><small>{state.label}{shift.adjusted ? ' · время изменено' : ''}</small></div></div><div className="day-shift__time"><strong>{formatTime(shift.scheduledStartAt, organization.timezone)}–{formatTime(shift.scheduledEndAt, organization.timezone)}</strong><span>{formatDuration(shift.effectiveMinutes)}</span></div>{shift.description && <p>{shift.description}</p>}{shift.cancellationReason && <p>Причина отмены: {shift.cancellationReason}</p>}{canManage && shift.status !== 'CANCELLED' && <footer>{state.key === 'completed' ? <button className="app-secondary" onClick={() => setActual(shift)}>Уточнить отработанное время</button> : <button className="app-secondary" onClick={() => setEditing(shift)}>Изменить расписание</button>}<button className="schedule-cancel-button" onClick={() => { setCancelling(shift); setCancelReason(''); setActionError('') }}>Отменить смену</button></footer>}</article> })}
+    {selectedDate && !adding && !editing && !actual && <AnimatedOverlay variant="drawer" onClose={() => { setSelectedDate(null); setFocusedShiftId(null) }}>{(close) => <aside className="schedule-drawer" role="dialog" aria-modal="true" aria-labelledby="day-title"><header><div><p className="app-eyebrow">Расписание на день</p><h2 id="day-title">{displayDate(selectedDate)}</h2><p>{selectedShifts.length ? `${selectedShifts.length} ${selectedShifts.length === 1 ? 'смена' : 'смены'}` : 'Свободный день'}</p></div><button aria-label="Закрыть" onClick={close}>×</button></header><div className="schedule-drawer__list">
+      {!selectedShifts.length && !selectedAbsences.length && <div className="schedule-drawer__empty">На этот день смен и отсутствий нет.</div>}
+      {selectedAbsences.map((absence) => <article className="day-absence" key={absence.id}><strong>{absence.memberName}</strong><span>{absenceNames[absence.type]}</span><small>{displayDate(absence.startDate)} — {displayDate(absence.endDate)}</small></article>)}
+      {selectedShifts.map((shift) => { const state = shiftState(shift); const mine = shift.memberId === ownMember?.id; return <article id={`day-shift-${shift.id}`} className={`day-shift day-shift--${state.key}${mine ? ' day-shift--mine' : ''}${focusedShiftId === shift.id ? ' day-shift--focused' : ''}`} key={shift.id}><div className="day-shift__heading"><span>{shift.memberName.slice(0, 1).toUpperCase()}</span><div><strong>{mine ? `${shift.memberName} · ваша смена` : shift.memberName}</strong><small>{state.label}{shift.adjusted ? ' · время изменено' : ''}</small></div></div><div className="day-shift__time"><strong>{formatTime(shift.scheduledStartAt, organization.timezone)}–{formatTime(shift.scheduledEndAt, organization.timezone)}</strong><span>{formatDuration(shift.effectiveMinutes)}</span></div>{shift.description && <p>{shift.description}</p>}{shift.cancellationReason && <p>Причина отмены: {shift.cancellationReason}</p>}{canManage && shift.status !== 'CANCELLED' && <footer>{state.key === 'completed' ? <button className="app-secondary" onClick={() => setActual(shift)}>Уточнить отработанное время</button> : <button className="app-secondary" onClick={() => setEditing(shift)}>Изменить расписание</button>}<button className="schedule-cancel-button" onClick={() => { setCancelling(shift); setCancelReason(''); setActionError('') }}>Отменить смену</button></footer>}</article> })}
     </div>{canManage && <button className="app-primary schedule-drawer__add" onClick={() => setAdding(true)}>Добавить смену на эту дату</button>}</aside>}</AnimatedOverlay>}
 
     {(adding || editing || actual) && selectedDate && <ShiftFormModal organization={organization} members={members.data?.members ?? []} date={selectedDate} shift={editing ?? actual} actual={Boolean(actual)} onClose={() => { setAdding(false); setEditing(null); setActual(null); setSelectedDate(null) }} />}

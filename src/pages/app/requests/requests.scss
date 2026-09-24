@@ -1,0 +1,121 @@
+.requests-page { width: 100%; }
+.requests-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; }
+.requests-heading h1 { font-size: clamp(30px, 4vw, 44px); letter-spacing: -.045em; }
+.requests-heading > div > p:last-child { margin-top: 8px; color: #777; font-size: 12px; }
+.requests-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 26px; padding-bottom: 15px; border-bottom: 1px solid #dedede; }
+.requests-tabs button { display: grid; min-width: 155px; gap: 3px; padding: 12px 16px; border: 1px solid #dedede; border-radius: 12px; background: #fff; color: #222; cursor: pointer; text-align: left; transition: background .2s, border-color .2s, transform .2s; }
+.requests-tabs button:hover { transform: translateY(-2px); border-color: #999; }
+.requests-tabs button.active { border-color: #171717; background: #171717; color: #fff; }
+.requests-tabs button strong { font-size: 13px; }
+.requests-tabs button small { color: #888; font-size: 10px; }
+.requests-tabs button.active small { color: #c7c7c7; }
+.requests-filters { display: flex; flex-wrap: wrap; gap: 12px; margin: 20px 0; }
+.requests-filters label { display: grid; min-width: 190px; gap: 7px; }
+.requests-filters .requests-search { flex: 1; min-width: 260px; }
+.requests-filters label > span { color: #6e6e6e; font-size: 11px; font-weight: 700; }
+.requests-filters input, .requests-filters select, .request-modal input, .request-modal select, .request-modal textarea, .request-review textarea { width: 100%; min-height: 44px; border: 1px solid #d5d5d5; border-radius: 10px; outline: 0; background: #fff; padding: 0 13px; color: #111; font: inherit; font-size: 12px; }
+.requests-filters input:focus, .requests-filters select:focus, .request-modal input:focus, .request-modal select:focus, .request-modal textarea:focus, .request-review textarea:focus { border-color: #777; box-shadow: 0 0 0 3px rgb(0 0 0 / 5%); }
+.requests-list { overflow: hidden; border: 1px solid #dedede; border-radius: 16px; background: #fff; }
+.request-card { position: relative; display: grid; width: 100%; min-height: 82px; align-items: center; grid-template-columns: minmax(0, 1fr) auto 90px; gap: 18px; padding: 14px 20px; border-bottom: 1px solid #ededed; cursor: pointer; text-align: left; transition: background .16s; }
+.request-card:last-child { border-bottom: 0; }
+.request-card:hover { background: #f8f8f8; }
+.request-card > i { position: absolute; left: 8px; width: 7px; height: 7px; border-radius: 50%; background: #6d59d9; }
+.request-card > div { display: grid; min-width: 0; }
+.request-card > div > span { color: #777; font-size: 10px; font-weight: 700; }
+.request-card strong { overflow: hidden; margin-top: 3px; font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
+.request-card small, .request-card time { margin-top: 3px; color: #888; font-size: 10px; }
+.request-status { display: inline-flex; width: fit-content; padding: 6px 9px; border-radius: 999px; background: #eee; color: #555; font-size: 10px; font-weight: 750; }
+.request-status--pending { background: #fff4d7; color: #795e16; }
+.request-status--approved { background: #e9f5eb; color: #397044; }
+.request-status--rejected { background: #faeaea; color: #8b4141; }
+.request-status--cancelled { color: #777; }
+.requests-empty { margin-top: 18px; padding: 55px 24px; border: 1px dashed #ccc; border-radius: 16px; text-align: center; }
+.requests-empty h2 { font-size: 20px; }
+.requests-empty p { max-width: 500px; margin: 8px auto 0; color: #777; font-size: 12px; }
+.request-modal { width: min(100%, 610px); max-height: calc(100dvh - 48px); overflow-y: auto; padding: 28px; border-radius: 18px; background: #fff; }
+.request-modal > header, .request-drawer > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.request-modal > header h2, .request-drawer > header h2 { font-size: 23px; }
+.request-modal > header > button, .request-drawer > header > button { display: grid; width: 35px; height: 35px; place-items: center; border-radius: 9px; color: #777; cursor: pointer; font-size: 24px; }
+.request-modal form { display: grid; gap: 16px; margin-top: 24px; }
+.request-modal label, .request-review label { display: grid; gap: 7px; }
+.request-modal label > span, .request-review label > span { color: #555; font-size: 11px; font-weight: 700; }
+.request-modal label > small { color: #888; font-size: 10px; }
+.request-modal textarea, .request-review textarea { padding-block: 11px; resize: vertical; }
+.request-date-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.request-shift-proposal { display: grid; gap: 12px; padding: 15px; border: 1px solid #dedede; border-radius: 12px; background: #fafafa; }
+.request-shift-proposal > p { color: #666; font-size: 11px; line-height: 1.5; }
+.request-shift-proposal > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.request-shift-proposal fieldset { display: grid; min-width: 0; gap: 9px; padding: 11px; border: 1px solid #ddd; border-radius: 10px; background: #fff; }
+.request-shift-proposal legend { padding: 0 5px; color: #555; font-size: 11px; font-weight: 700; }
+.request-shift-proposal input { min-width: 0; }
+.request-file-field input { padding: 10px; }
+.request-file-field ul { display: grid; gap: 4px; padding: 10px 12px; border-radius: 9px; background: #f5f5f5; color: #555; font-size: 10px; }
+.request-modal footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+.request-drawer { width: min(100%, 570px); height: 100%; overflow-y: auto; padding: 28px; background: #f7f7f7; }
+.request-drawer > header { position: sticky; z-index: 3; top: -28px; margin: -28px -28px 0; padding: 28px; border-bottom: 1px solid #e2e2e2; background: rgb(247 247 247 / 94%); backdrop-filter: blur(10px); }
+.request-drawer > header .request-status { margin-top: 9px; }
+.request-detail-person { display: flex; align-items: center; gap: 12px; margin-top: 25px; padding: 17px; border: 1px solid #dedede; border-radius: 14px; background: #fff; }
+.request-detail-person .app-avatar { width: 48px; height: 48px; flex-basis: 48px; }
+.request-detail-person > div { display: grid; min-width: 0; }
+.request-detail-person span { color: #777; font-size: 11px; }
+.request-detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
+.request-detail-grid > div, .request-detail-block, .request-conflicts, .request-review, .request-timeline { padding: 16px; border: 1px solid #dedede; border-radius: 13px; background: #fff; }
+.request-detail-grid dt { color: #888; font-size: 9px; }
+.request-detail-grid dd { margin-top: 3px; font-size: 12px; }
+.request-detail-block, .request-conflicts, .request-timeline, .request-review { margin-top: 12px; }
+.request-detail-block h3, .request-conflicts h3, .request-timeline h3 { margin-bottom: 9px; font-size: 12px; }
+.request-detail-block p, .request-conflicts p { color: #555; font-size: 12px; line-height: 1.55; white-space: pre-wrap; }
+.request-related-shift { display: inline-flex; margin-top: 12px; color: #5542b5; font-size: 12px; font-weight: 700; }
+.request-attachments { display: grid; gap: 7px; }
+.request-attachment { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 10px; border-radius: 9px; background: #f3f3f3; }
+.request-attachment > div { display: grid; min-width: 130px; flex: 1; }
+.request-attachment strong { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.request-attachment small { color: #888; font-size: 10px; }
+.request-attachment button { padding: 7px 9px; border: 1px solid #d8d8d8; border-radius: 7px; background: #fff; cursor: pointer; font-size: 10px; font-weight: 700; }
+.request-preview { margin-top: 12px; overflow: hidden; border: 1px solid #dedede; border-radius: 10px; background: #f8f8f8; }
+.request-preview > div { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 12px; }
+.request-preview strong { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.request-preview button { cursor: pointer; font-size: 22px; }
+.request-preview img, .request-preview iframe { display: block; width: 100%; max-height: 430px; border: 0; object-fit: contain; }
+.request-preview iframe { height: 430px; }
+.request-form-note { padding: 11px 13px; border-radius: 9px; background: #f5f3fb; color: #5b4e7c; font-size: 11px; line-height: 1.5; }
+.request-conflicts { border-color: #e4d2a4; background: #fffbf0; }
+.request-conflicts > div { display: flex; justify-content: space-between; margin-top: 7px; padding-top: 7px; border-top: 1px solid #eee2c5; font-size: 11px; }
+.request-timeline > div { display: flex; gap: 10px; padding: 7px 0; }
+.request-timeline i { width: 8px; height: 8px; margin-top: 4px; border-radius: 50%; background: #777; }
+.request-timeline p { display: grid; font-size: 11px; }
+.request-timeline span, .request-timeline small { margin-top: 2px; color: #888; font-size: 9px; }
+.request-review { display: grid; gap: 12px; }
+.request-review__confirm { display: flex !important; align-items: flex-start; grid-template-columns: auto 1fr; }
+.request-review__confirm input { margin-top: 2px; }
+.request-review > div { display: flex; justify-content: flex-end; gap: 8px; }
+.request-cancel { width: 100%; margin-top: 13px; padding: 11px; border-radius: 10px; background: #f8eaea; color: #843d3d; cursor: pointer; font-size: 12px; font-weight: 700; }
+.request-own-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin-top: 13px; }
+.request-own-actions .request-cancel { margin-top: 0; }
+.request-own-actions .app-secondary { width: 100%; }
+.request-types-settings { position: relative; padding: 28px; border: 1px solid #dedede; border-radius: 16px; background: #fff; }
+.request-types-settings > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; margin-bottom: 24px; }
+.request-types-settings > header h2 { font-size: 19px; }
+.request-types-settings > header p:last-child { max-width: 550px; margin-top: 6px; color: #777; font-size: 12px; }
+.request-types-settings > section + section { margin-top: 22px; padding-top: 20px; border-top: 1px solid #eee; }
+.request-types-settings > section h3 { margin-bottom: 9px; color: #777; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; }
+.request-type-row { display: flex; min-height: 58px; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px; background: #f6f6f6; }
+.request-type-row + .request-type-row { margin-top: 6px; }
+.request-type-row.is-inactive { opacity: .58; }
+.request-type-row > div { display: grid; min-width: 0; flex: 1; }
+.request-type-row strong { font-size: 13px; }
+.request-type-row span, .request-type-row small { color: #777; font-size: 10px; }
+.request-type-row > button { padding: 7px 9px; border: 1px solid #ddd; border-radius: 8px; background: #fff; cursor: pointer; font-size: 10px; font-weight: 700; }
+.request-types-empty { padding: 20px; border: 1px dashed #ccc; border-radius: 10px; color: #777; text-align: center; font-size: 11px; }
+.request-type-form { position: fixed; z-index: 45; display: grid; inset: 0; place-items: center; padding: 20px; background: rgb(0 0 0 / 38%); backdrop-filter: blur(3px); }
+.request-type-form form { display: grid; width: min(100%, 500px); gap: 14px; padding: 26px; border-radius: 17px; background: #fff; box-shadow: 0 25px 70px rgb(0 0 0 / 20%); }
+.request-type-form header { display: flex; align-items: center; justify-content: space-between; }
+.request-type-form header button { font-size: 24px; }
+.request-type-form label { display: grid; gap: 7px; }
+.request-type-form label > span { color: #555; font-size: 11px; font-weight: 700; }
+.request-type-form input, .request-type-form select, .request-type-form textarea { width: 100%; min-height: 44px; border: 1px solid #d5d5d5; border-radius: 10px; padding: 0 13px; font: inherit; font-size: 12px; }
+.request-type-form textarea { padding-block: 11px; resize: vertical; }
+.request-type-form .request-type-check { display: flex; align-items: center; flex-direction: row; }
+.request-type-form .request-type-check input { width: 17px; min-height: 17px; }
+.request-type-form footer { display: flex; justify-content: flex-end; gap: 8px; }
+@media (max-width: 700px) { .requests-heading { align-items: stretch; flex-direction: column; } .requests-heading .app-primary { width: 100%; } .requests-filters label { width: 100%; } .request-card { grid-template-columns: minmax(0, 1fr) auto; padding: 14px; } .request-card time { display: none; } .request-date-fields, .request-detail-grid, .request-shift-proposal > div { grid-template-columns: 1fr; } .request-modal { width: 100%; max-height: 92dvh; padding: 22px; border-radius: 18px 18px 0 0; } .request-drawer { padding: 22px; } .request-drawer > header { top: -22px; margin: -22px -22px 0; padding: 22px; } }

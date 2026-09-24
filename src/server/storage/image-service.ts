@@ -39,7 +39,7 @@ async function normalizeImage(input: unknown) {
 
 type RemoveObject = (objectKey: string) => Promise<void>
 
-async function deletePendingFile(fileId: string, removeObject: RemoveObject = deleteObject) {
+export async function deletePendingFile(fileId: string, removeObject: RemoveObject = deleteObject) {
   const file = await prisma.storedFile.findFirst({ where: { id: fileId, pendingDeletionAt: { not: null } } })
   if (!file) return true
   try {

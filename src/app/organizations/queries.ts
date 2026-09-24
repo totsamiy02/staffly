@@ -21,7 +21,7 @@ export function usePendingInvitations() {
 
 export function useAccountNotifications() {
   const { apiRequest, user } = useAuth()
-  return useQuery({ queryKey: ['account-notifications'], queryFn: () => apiRequest<{ notifications: AccountNotification[] }>('/account-notifications'), enabled: Boolean(user), refetchInterval: 30_000, refetchOnWindowFocus: true })
+  return useQuery({ queryKey: ['account-notifications'], queryFn: () => apiRequest<{ notifications: AccountNotification[] }>('/account-notifications'), enabled: Boolean(user), refetchInterval: 10_000, refetchOnWindowFocus: true })
 }
 
 export function useOrganization(organizationId: string | undefined) {
