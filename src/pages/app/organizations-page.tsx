@@ -1,3 +1,5 @@
+import { participantLabel } from '../../app/organizations/format.ts'
+import RoleBadge from '../../component/ui/role-badge/role-badge.tsx'
 import { useEffect, useState, type FormEvent } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
@@ -16,8 +18,8 @@ function OrganizationGrid({ title, organizations }: { title: string; organizatio
       {organizations.map((organization) => <Link className="organization-card" to={`/app/organizations/${organization.id}`} key={organization.id}>
         <Avatar url={organization.logoUrl} name={organization.name} className="organization-card__avatar" />
         <strong>{organization.name}</strong>
-        <span>{organization.memberCount} {organization.memberCount === 1 ? 'участник' : 'участников'}</span>
-        <small>{organization.role === 'OWNER' ? 'Владелец' : organization.role === 'ADMIN' ? 'Администратор' : 'Пользователь'}</small>
+        <span>{organization.memberCount ?? 0} {participantLabel(organization.memberCount ?? 0)}</span>
+        <RoleBadge role={organization.role} />
       </Link>)}
     </div>
   </section>

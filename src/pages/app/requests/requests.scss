@@ -119,3 +119,13 @@
 .request-type-form .request-type-check input { width: 17px; min-height: 17px; }
 .request-type-form footer { display: flex; justify-content: flex-end; gap: 8px; }
 @media (max-width: 700px) { .requests-heading { align-items: stretch; flex-direction: column; } .requests-heading .app-primary { width: 100%; } .requests-filters label { width: 100%; } .request-card { grid-template-columns: minmax(0, 1fr) auto; padding: 14px; } .request-card time { display: none; } .request-date-fields, .request-detail-grid, .request-shift-proposal > div { grid-template-columns: 1fr; } .request-modal { width: 100%; max-height: 92dvh; padding: 22px; border-radius: 18px 18px 0 0; } .request-drawer { padding: 22px; } .request-drawer > header { top: -22px; margin: -22px -22px 0; padding: 22px; } }
+.request-card { grid-template-columns: minmax(0, 1fr) auto; }
+.request-card > div { min-width: 0; }
+.request-card strong { overflow-wrap: anywhere; }
+.request-card__comment { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; }
+.request-card__person { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.request-shift-original, .request-shift-requested { padding: 10px 12px; border-radius: 9px; background: #f5f5f6; }
+.request-shift-requested { margin-top: 8px; border-left: 3px solid #82709c; background: #f4f1f8; }
+.request-shift-original strong, .request-shift-requested strong { font-size: 11px; }
+@media (max-width: 480px) { .request-card { gap: 10px; } .request-card .request-status { max-width: 110px; white-space: normal; text-align: center; } }
+.request-card strong { white-space: normal; }

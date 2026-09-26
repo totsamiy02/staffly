@@ -1,3 +1,4 @@
+import RoleBadge from '../../component/ui/role-badge/role-badge.tsx'
 import { Link, NavLink, Route, Routes, useLocation, useParams } from 'react-router-dom'
 import { useState, type ReactNode } from 'react'
 import { useOrganization } from '../../app/organizations/queries.ts'
@@ -53,7 +54,6 @@ function WorkspaceLoadError({ retry, notFound }: { retry: () => void; notFound: 
   </main></div>
 }
 
-const roleNames = { OWNER: 'Владелец', ADMIN: 'Администратор', MEMBER: 'Пользователь' } as const
 
 export default function OrganizationLayout() {
   const { organizationId } = useParams()
@@ -75,7 +75,7 @@ export default function OrganizationLayout() {
   }
   return <div className="app-page"><AppTopbar organization={organization} /><div className={`workspace-shell${sidebarCollapsed ? ' workspace-shell--collapsed' : ''}`}>
     <aside className="workspace-sidebar" aria-label="Навигация организации">
-      <div className="workspace-sidebar__organization"><Avatar url={organization.logoUrl} name={organization.name} className="workspace-sidebar__organization-avatar" eager /><div><strong>{organization.name}</strong><small>{roleNames[organization.role]} · {currentSection}</small></div></div>
+      <div className="workspace-sidebar__organization"><Avatar url={organization.logoUrl} name={organization.name} className="workspace-sidebar__organization-avatar" eager /><div><strong>{organization.name}</strong><small><RoleBadge role={organization.role} /> · {currentSection}</small></div></div>
       <button className="workspace-sidebar__collapse" type="button" aria-label={sidebarCollapsed ? 'Развернуть меню' : 'Свернуть меню'} onClick={toggleSidebar}><CollapseIcon collapsed={sidebarCollapsed} /><span>{sidebarCollapsed ? 'Развернуть' : 'Свернуть'}</span></button>
       <nav aria-label="Разделы организации">{navigation.map(([path, label]) => <NavLink end title={sidebarCollapsed ? label : undefined} to={path ? `${organizationPath}/${path}` : organizationPath} key={label}><NavigationIcon section={path} /><span>{label}</span></NavLink>)}</nav>
       <div className="workspace-sidebar__footer"><NavLink className="workspace-sidebar__back" title={sidebarCollapsed ? 'Все организации' : undefined} to="/app"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m10 6-6 6 6 6M4 12h16" /></svg><span>Все организации</span></NavLink></div>

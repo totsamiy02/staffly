@@ -1,3 +1,4 @@
+import Select from '../../component/ui/select/select.tsx'
 import { useState, type FormEvent } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate } from 'react-router-dom'
@@ -35,7 +36,7 @@ export default function CreateOrganizationPage() {
     <form className="organization-form" onSubmit={submit}>
       <label><span>Название *</span><input value={name} onChange={(event) => setName(event.target.value)} minLength={2} maxLength={120} placeholder="Например, Coffee House" autoFocus required /></label>
       <label><span>Описание</span><textarea value={description} onChange={(event) => setDescription(event.target.value)} maxLength={1000} rows={4} placeholder="Коротко расскажите о компании" /><small>{description.length}/1000</small></label>
-      <label><span>Часовой пояс *</span><select value={timezone} onChange={(event) => setTimezone(event.target.value)}>{RUSSIAN_TIMEZONES.map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}</select><small>Выберите региональное время организации.</small></label>
+      <label><span>Часовой пояс *</span><Select value={timezone} onChange={(event) => setTimezone(event.target.value)}>{RUSSIAN_TIMEZONES.map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}</Select><small>Выберите региональное время организации.</small></label>
       {error && <p className="app-alert app-alert--error" role="alert">{error}</p>}
       <div className="organization-form__actions"><Link className="app-secondary" to="/app">Отмена</Link><button className="app-primary" disabled={create.isPending}>{create.isPending ? 'Создаём…' : 'Создать организацию'}</button></div>
     </form>
