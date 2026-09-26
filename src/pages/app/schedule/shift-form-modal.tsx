@@ -1,3 +1,4 @@
+import { invalidateOrganizationWork } from '../../../app/live-query.ts'
 import Select from '../../../component/ui/select/select.tsx'
 import DatePicker, { TimeInput } from '../../../component/ui/date-picker/date-picker.tsx'
 import { useState, type FormEvent } from 'react'
@@ -42,7 +43,7 @@ export default function ShiftFormModal({ organization, members, date, shift, act
     try {
       if (actual && shift) await apiRequest(`/organizations/${organization.id}/shifts/${shift.id}/actual`, { method: 'POST', body: { startDate, startTime, endDate, endTime, breakMinutes: 0, reason } })
       else await apiRequest(`/organizations/${organization.id}/shifts${shift ? `/${shift.id}` : ''}`, { method: shift ? 'PATCH' : 'POST', body: { memberId, startDate, startTime, endDate, endTime, breakMinutes: 0, description } })
-      await Promise.all([queryClient.invalidateQueries({ queryKey: ['schedule', organization.id] }), queryClient.invalidateQueries({ queryKey: ['work-time-statistics', organization.id] }), queryClient.invalidateQueries({ queryKey: ['member-work-time', organization.id] }), queryClient.invalidateQueries({ queryKey: ['my-work-time', organization.id] }), queryClient.invalidateQueries({ queryKey: ['my-upcoming-shifts', organization.id] })])
+      await invalidateOrganizationWork(queryClient, organization.id)
       close()
     } catch (failure) { setError(failure instanceof Error ? failure.message : 'Не удалось сохранить смену.') }
     finally { setBusy(false) }

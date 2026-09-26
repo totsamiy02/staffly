@@ -1,3 +1,5 @@
+import { postAuthJson as postJson } from './session-transport.ts'
+import { useQueryClient } from '@tanstack/react-query'
 /* oxlint-disable react/only-export-components -- The provider and its hook share one context. */
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 
@@ -37,20 +39,14 @@ async function readJson<T>(response: Response): Promise<T> {
   return data
 }
 
-async function postJson(path: string, body: unknown): Promise<Response> {
-  return fetch(`/api/auth/${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'same-origin',
-    body: JSON.stringify(body),
-  })
-}
 
 export async function authPost<T>(path: string, body: unknown): Promise<T> {
   return readJson<T>(await postJson(path, body))
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const queryClient = useQueryClient()
+  const userIdRef = useRef<string | null>(null)
   const [user, setUser] = useState<AuthUser | null>(null)
   const [loading, setLoading] = useState(true)
   const tokenRef = useRef<string | null>(null)
@@ -58,24 +54,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refreshRef = useRef<Promise<AuthResult | null> | null>(null)
 
   const accept = useCallback((result: AuthResult) => {
+    if (userIdRef.current !== result.user.id) queryClient.clear()
+    userIdRef.current = result.user.id
     authVersion.current += 1
     tokenRef.current = result.accessToken
     setUser(result.user)
     setLoading(false)
-  }, [])
+  }, [queryClient])
 
   const clear = useCallback(() => {
     authVersion.current += 1
     tokenRef.current = null
+    userIdRef.current = null
+    queryClient.clear()
     setUser(null)
     setLoading(false)
-  }, [])
+  }, [queryClient])
 
   const refresh = useCallback(async () => {
+    const startedAt = authVersion.current
     refreshRef.current ??= postJson('refresh', {}).then(async (response) => response.ok ? await response.json() as AuthResult : null)
       .catch(() => null)
       .finally(() => { refreshRef.current = null; bootstrapRequest = null })
     const result = await refreshRef.current
+    if (authVersion.current !== startedAt) return tokenRef.current && userIdRef.current === result?.user.id ? result : null
     if (result) accept(result)
     else clear()
     return result
@@ -158,6 +160,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!response.ok) { await readJson(response); throw new Error('Не удалось открыть файл.') }
     return response.blob()
   }, [refresh])
+
+  const presenceUserId = user?.id
+  useEffect(() => {
+    if (!presenceUserId) return
+    const heartbeat = () => { if (document.visibilityState === 'visible') void apiRequest('/profile/presence', { method: 'POST', body: { visible: true } }).catch(() => undefined) }
+    heartbeat()
+    const timer = window.setInterval(heartbeat, 30_000)
+    document.addEventListener('visibilitychange', heartbeat)
+    // A hidden/closed tab expires by TTL. It cannot mark another visible tab of this session offline.
+    return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', heartbeat) }
+  }, [presenceUserId, apiRequest])
 
   const updateUser = useCallback((nextUser: AuthUser) => setUser(nextUser), [])
 

@@ -1,3 +1,4 @@
+import { updatePresence } from './presence.ts'
 import { Router, type Request } from 'express'
 import { z } from 'zod'
 import { prisma } from '../db.ts'
@@ -40,11 +41,9 @@ router.patch('/profile', async (request, response) => {
 })
 
 router.post('/profile/presence', async (request, response) => {
-  const now = new Date()
-  await prisma.user.updateMany({
-    where: { id: auth(request).userId, OR: [{ lastSeenAt: null }, { lastSeenAt: { lte: new Date(now.getTime() - 45_000) } }] },
-    data: { lastSeenAt: now },
-  })
+  const parsed = z.object({ visible: z.boolean().default(true) }).safeParse(request.body)
+  if (!parsed.success) throw new ApiError(400, 'INVALID_PRESENCE', 'Некорректное состояние активности.')
+  await updatePresence(auth(request).userId, auth(request).sessionId, parsed.data.visible)
   response.status(204).end()
 })
 

@@ -1,3 +1,4 @@
+import { liveQueryOptions } from '../../app/live-query.ts'
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { useNavigate } from 'react-router-dom'
@@ -49,7 +50,7 @@ export default function UserSettingsPage() {
   const [passwordError, setPasswordError] = useState('')
   const [message, setMessage] = useState('')
   const [section, setSection] = useState<'profile' | 'security'>('profile')
-  const sessions = useQuery({ queryKey: ['auth-sessions'], queryFn: () => apiRequest<{ sessions: ActiveSession[] }>('/auth/sessions'), enabled: section === 'security' })
+  const sessions = useQuery({ ...liveQueryOptions, queryKey: ['auth-sessions'], queryFn: () => apiRequest<{ sessions: ActiveSession[] }>('/auth/sessions'), enabled: section === 'security' })
   const revokeSession = useMutation({ mutationFn: (session: ActiveSession) => apiRequest(`/auth/sessions/${session.id}`, { method: 'DELETE' }), onSuccess: async (_, session) => { if (session.current) { await logout(); navigate('/', { replace: true }) } else await queryClient.invalidateQueries({ queryKey: ['auth-sessions'] }) } })
   const revokeOthers = useMutation({ mutationFn: () => apiRequest('/auth/sessions/revoke-others', { method: 'POST', body: {} }), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['auth-sessions'] }) })
   const revokeAll = useMutation({ mutationFn: () => apiRequest('/auth/logout-all', { method: 'POST', body: {} }), onSuccess: async () => { await logout(); navigate('/', { replace: true }) } })

@@ -1,11 +1,16 @@
 import { createHash, randomBytes, randomInt } from 'node:crypto'
 import { prisma } from '../db.ts'
+import { mediaUrl } from '../storage/image-service.ts'
 import { ApiError } from '../api-error.ts'
 import { getMembership, requireOrganizationRole } from './permissions.ts'
 
-const EMAIL_INVITE_MS = 7 * 24 * 60 * 60 * 1000
+const EMAIL_INVITE_MS = 24 * 60 * 60 * 1000
 const CODE_INVITE_MS = 10 * 60 * 1000
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+
+export function inviterIdentity(user: { lastName: string | null; firstName: string | null; middleName: string | null; email: string }) {
+  return [user.lastName, user.firstName, user.middleName].filter(Boolean).join(' ') || user.email
+}
 
 function digest(value: string) { return createHash('sha256').update(value).digest('hex') }
 function activeInviteWhere(now = new Date()) { return { acceptedAt: null, rejectedAt: null, revokedAt: null, expiresAt: { gt: now } } as const }
@@ -41,10 +46,11 @@ export async function createEmailInvitation(actorUserId: string, organizationId:
       invitedByUserId: actorUserId,
       type: 'EMAIL',
       invitedEmail,
+      createdAt: now,
       tokenHash: digest(token),
       expiresAt: new Date(now.getTime() + EMAIL_INVITE_MS),
     } })
-    return { invitation, token, organizationName: actor.organization.name, inviterEmail: actorUser.email }
+    return { invitation, token, organizationName: actor.organization.name, inviterName: inviterIdentity(actorUser), logoUrl: mediaUrl(actor.organization.logoFileId) }
   } catch (error) {
     if (isUniqueError(error)) throw new ApiError(409, 'INVITATION_ALREADY_EXISTS', 'Активное приглашение уже отправлено.')
     throw error
@@ -73,13 +79,14 @@ export async function createCodeInvitation(actorUserId: string, organizationId: 
 export async function listPendingInvitations(userEmail: string) {
   const invitations = await prisma.organizationInvite.findMany({
     where: { type: 'EMAIL', invitedEmail: userEmail, ...activeInviteWhere(), organization: { deletedAt: null } },
-    include: { organization: true, invitedBy: { select: { email: true } } },
+    include: { organization: true, invitedBy: { select: { email: true, firstName: true, lastName: true, middleName: true } } },
     orderBy: { createdAt: 'desc' },
   })
   return invitations.map((invite) => ({
     id: invite.id,
-    organization: { id: invite.organization.id, name: invite.organization.name },
-    invitedBy: invite.invitedBy.email,
+    organization: { id: invite.organization.id, name: invite.organization.name, logoUrl: mediaUrl(invite.organization.logoFileId) },
+    invitedBy: inviterIdentity(invite.invitedBy),
+    readAt: invite.readAt,
     expiresAt: invite.expiresAt,
     createdAt: invite.createdAt,
   }))
@@ -97,18 +104,18 @@ export async function listActiveOrganizationInvitations(actorUserId: string, org
 }
 
 export async function previewEmailInvitation(userEmail: string, token: string) {
-  const invite = await prisma.organizationInvite.findUnique({ where: { tokenHash: digest(token) }, include: { organization: true } })
+  const invite = await prisma.organizationInvite.findUnique({ where: { tokenHash: digest(token) }, include: { organization: true, invitedBy: { select: { email: true, firstName: true, lastName: true, middleName: true } } } })
   validateInvitation(invite, 'EMAIL')
   if (invite.invitedEmail !== userEmail) throw new ApiError(403, 'INVITATION_EMAIL_MISMATCH', 'Приглашение предназначено для другого аккаунта.')
-  return { id: invite.id, organization: { id: invite.organization.id, name: invite.organization.name }, expiresAt: invite.expiresAt }
+  return { id: invite.id, organization: { id: invite.organization.id, name: invite.organization.name, logoUrl: mediaUrl(invite.organization.logoFileId) }, invitedBy: inviterIdentity(invite.invitedBy), expiresAt: invite.expiresAt }
 }
 
 export async function previewCodeInvitation(userId: string, code: string) {
-  const invite = await prisma.organizationInvite.findUnique({ where: { tokenHash: digest(code) }, include: { organization: true } })
+  const invite = await prisma.organizationInvite.findUnique({ where: { tokenHash: digest(code) }, include: { organization: true, invitedBy: { select: { email: true, firstName: true, lastName: true, middleName: true } } } })
   validateInvitation(invite, 'CODE')
   const membership = await prisma.organizationMember.findUnique({ where: { organizationId_userId: { organizationId: invite.organizationId, userId } } })
   if (membership && !membership.leftAt) throw new ApiError(409, 'ALREADY_MEMBER', 'Вы уже состоите в этой организации.')
-  return { organization: { id: invite.organization.id, name: invite.organization.name }, expiresAt: invite.expiresAt }
+  return { organization: { id: invite.organization.id, name: invite.organization.name, logoUrl: mediaUrl(invite.organization.logoFileId) }, invitedBy: inviterIdentity(invite.invitedBy), expiresAt: invite.expiresAt }
 }
 
 type ValidatableInvite = {
@@ -134,14 +141,14 @@ function validateInvitation(invite: ValidatableInvite, type: 'EMAIL' | 'CODE'): 
 
 async function acceptInvitation(userId: string, userEmail: string, lookup: { id: string } | { tokenHash: string }, expectedType: 'EMAIL' | 'CODE') {
   return prisma.$transaction(async (tx) => {
-    const invite = await tx.organizationInvite.findUnique({ where: lookup, include: { organization: true } })
+    const invite = await tx.organizationInvite.findUnique({ where: lookup, include: { organization: true, invitedBy: { select: { email: true, firstName: true, lastName: true, middleName: true } } } })
     validateInvitation(invite, expectedType)
     if (expectedType === 'EMAIL' && invite.invitedEmail !== userEmail) throw new ApiError(403, 'INVITATION_EMAIL_MISMATCH', 'Приглашение предназначено для другого аккаунта.')
     const existing = await tx.organizationMember.findUnique({ where: { organizationId_userId: { organizationId: invite.organizationId, userId } } })
     if (existing && !existing.leftAt) throw new ApiError(409, 'ALREADY_MEMBER', 'Вы уже состоите в этой организации.')
     const claimed = await tx.organizationInvite.updateMany({
       where: { id: invite.id, acceptedAt: null, rejectedAt: null, revokedAt: null, expiresAt: { gt: new Date() } },
-      data: { acceptedAt: new Date(), acceptedByUserId: userId },
+      data: { acceptedAt: new Date(), acceptedByUserId: userId, readAt: new Date() },
     })
     if (!claimed.count) throw new ApiError(409, 'INVITATION_ALREADY_USED', 'Приглашение уже использовано.')
     if (existing) await tx.organizationMember.update({ where: { id: existing.id }, data: { leftAt: null, role: 'MEMBER' } })
@@ -159,10 +166,10 @@ export function acceptCodeInvitation(userId: string, userEmail: string, code: st
 }
 
 export async function rejectEmailInvitation(userEmail: string, inviteId: string) {
-  const invite = await prisma.organizationInvite.findUnique({ where: { id: inviteId }, include: { organization: true } })
+  const invite = await prisma.organizationInvite.findUnique({ where: { id: inviteId }, include: { organization: true, invitedBy: { select: { email: true, firstName: true, lastName: true, middleName: true } } } })
   validateInvitation(invite, 'EMAIL')
   if (invite.invitedEmail !== userEmail) throw new ApiError(403, 'INVITATION_EMAIL_MISMATCH', 'Приглашение предназначено для другого аккаунта.')
-  const rejected = await prisma.organizationInvite.updateMany({ where: { id: inviteId, rejectedAt: null, acceptedAt: null, revokedAt: null, expiresAt: { gt: new Date() } }, data: { rejectedAt: new Date() } })
+  const rejected = await prisma.organizationInvite.updateMany({ where: { id: inviteId, rejectedAt: null, acceptedAt: null, revokedAt: null, expiresAt: { gt: new Date() } }, data: { rejectedAt: new Date(), readAt: new Date() } })
   if (!rejected.count) throw new ApiError(409, 'INVITATION_ALREADY_USED', 'Приглашение уже обработано.')
 }
 

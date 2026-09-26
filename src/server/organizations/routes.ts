@@ -1,3 +1,4 @@
+import { listNotificationHistory, readHistoryNotification } from './notification-service.ts'
 import { Router, type Request } from 'express'
 import { rateLimit } from 'express-rate-limit'
 import { z } from 'zod'
@@ -24,6 +25,17 @@ function parse<T>(schema: z.ZodType<T>, value: unknown): T {
 function auth(request: Request) { return (request as AuthenticatedRequest).auth! }
 
 router.get('/organizations', async (request, response) => response.json({ organizations: await listOrganizations(auth(request).userId) }))
+router.get('/notifications', async (request, response) => {
+  const options = parse(z.object({ limit: z.coerce.number().int().min(1).max(50).default(20), cursor: z.string().max(512).optional(), unread: z.enum(['true', 'false']).optional() }), request.query)
+  response.json(await listNotificationHistory(auth(request).userId, auth(request).email, { ...options, unread: options.unread === 'true' }))
+})
+router.post('/notifications/:id/read', async (request, response) => {
+  const { id } = parse(z.object({ id: z.string().regex(/^(event|invite):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/) }), request.params)
+  const { unread } = parse(z.object({ unread: z.boolean().default(false) }), request.body)
+  await readHistoryNotification(auth(request).userId, auth(request).email, id, unread)
+  response.status(204).end()
+})
+
 router.get('/account-notifications', async (request, response) => response.json({ notifications: await listAccountNotifications(auth(request).userId) }))
 router.post('/account-notifications/:notificationId/read', async (request, response) => {
   const notificationId = parse(z.object({ notificationId: z.string().uuid() }), request.params).notificationId
@@ -78,7 +90,7 @@ router.post('/organizations/:organizationId/invitations/email', invitationLimite
   const { email } = parse(emailInvitationBody, request.body)
   const result = await createEmailInvitation(auth(request).userId, organizationId, email)
   let emailDelivered = true
-  try { await deliverOrganizationInvitation(email, result.organizationName, result.inviterEmail, result.token, result.invitation.expiresAt) }
+  try { await deliverOrganizationInvitation(email, result.organizationName, result.inviterName, result.token, result.invitation.expiresAt, result.logoUrl) }
   catch (error) { emailDelivered = false; console.error('Organization invitation email failed:', error) }
   response.status(201).json({ invitation: { id: result.invitation.id, email, expiresAt: result.invitation.expiresAt }, emailDelivered })
 })

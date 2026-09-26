@@ -1,3 +1,4 @@
+import { onlineSessions } from '../profile/presence.ts'
 import type { OrganizationRole, Prisma } from '../../generated/prisma/client.ts'
 import { prisma } from '../db.ts'
 import { ApiError } from '../api-error.ts'
@@ -68,13 +69,12 @@ export async function listMembers(userId: string, organizationId: string) {
   await getMembership(userId, organizationId)
   const members = await prisma.organizationMember.findMany({
     where: { organizationId, leftAt: null, organization: { deletedAt: null }, user: { deletedAt: null } },
-    include: { user: { select: { id: true, email: true, firstName: true, lastName: true, middleName: true, phone: true, bio: true, lastSeenAt: true, avatarFileId: true } } },
+    include: { user: { select: { id: true, email: true, firstName: true, lastName: true, middleName: true, phone: true, bio: true, lastSeenAt: true, avatarFileId: true, sessions: { where: onlineSessions(), select: { id: true }, take: 1 } } } },
     orderBy: [{ role: 'asc' }, { joinedAt: 'asc' }],
   })
-  const onlineThreshold = Date.now() - 2 * 60 * 1000
   return members.map((member) => {
     const displayName = [member.user.lastName, member.user.firstName, member.user.middleName].filter(Boolean).join(' ') || member.user.email.split('@')[0]
-    return { id: member.id, userId: member.userId, email: member.user.email, displayName, firstName: member.user.firstName, lastName: member.user.lastName, middleName: member.user.middleName, phone: member.user.phone, bio: member.user.bio, avatarUrl: mediaUrl(member.user.avatarFileId), lastSeenAt: member.user.lastSeenAt, online: Boolean(member.user.lastSeenAt && member.user.lastSeenAt.getTime() > onlineThreshold), role: member.role, joinedAt: member.joinedAt }
+    return { id: member.id, userId: member.userId, email: member.user.email, displayName, firstName: member.user.firstName, lastName: member.user.lastName, middleName: member.user.middleName, phone: member.user.phone, bio: member.user.bio, avatarUrl: mediaUrl(member.user.avatarFileId), lastSeenAt: member.user.lastSeenAt, online: member.user.sessions.length > 0, role: member.role, joinedAt: member.joinedAt }
   })
 }
 
@@ -100,17 +100,16 @@ export async function listMembersPage(userId: string, organizationId: string, op
     prisma.organizationMember.count({ where }),
     prisma.organizationMember.findMany({
       where,
-      include: { user: { select: { id: true, email: true, firstName: true, lastName: true, middleName: true, phone: true, bio: true, lastSeenAt: true, avatarFileId: true } } },
+      include: { user: { select: { id: true, email: true, firstName: true, lastName: true, middleName: true, phone: true, bio: true, lastSeenAt: true, avatarFileId: true, sessions: { where: onlineSessions(), select: { id: true }, take: 1 } } } },
       orderBy: [{ role: 'asc' }, { user: { lastName: 'asc' } }, { user: { firstName: 'asc' } }, { user: { email: 'asc' } }],
       skip: (page - 1) * pageSize,
       take: pageSize,
     }),
   ])
-  const onlineThreshold = Date.now() - 2 * 60 * 1000
   return {
     members: members.map((member) => {
       const displayName = [member.user.lastName, member.user.firstName, member.user.middleName].filter(Boolean).join(' ') || member.user.email.split('@')[0]
-      return { id: member.id, userId: member.userId, email: member.user.email, displayName, firstName: member.user.firstName, lastName: member.user.lastName, middleName: member.user.middleName, phone: member.user.phone, bio: member.user.bio, avatarUrl: mediaUrl(member.user.avatarFileId), lastSeenAt: member.user.lastSeenAt, online: Boolean(member.user.lastSeenAt && member.user.lastSeenAt.getTime() > onlineThreshold), role: member.role, joinedAt: member.joinedAt }
+      return { id: member.id, userId: member.userId, email: member.user.email, displayName, firstName: member.user.firstName, lastName: member.user.lastName, middleName: member.user.middleName, phone: member.user.phone, bio: member.user.bio, avatarUrl: mediaUrl(member.user.avatarFileId), lastSeenAt: member.user.lastSeenAt, online: member.user.sessions.length > 0, role: member.role, joinedAt: member.joinedAt }
     }),
     pagination: { page, pageSize, total, pages: Math.max(1, Math.ceil(total / pageSize)) },
   }
@@ -133,11 +132,11 @@ export async function changeMemberRole(actorUserId: string, organizationId: stri
 }
 
 export async function listAccountNotifications(userId: string) {
-  return prisma.accountNotification.findMany({ where: { userId, readAt: null, organization: { deletedAt: null } }, include: { organization: { select: { id: true, name: true } } }, orderBy: { createdAt: 'desc' }, take: 50 })
+  return prisma.accountNotification.findMany({ where: { userId, readAt: null, type: { notIn: ['SHIFT_ASSIGNED', 'SHIFT_CHANGED', 'SHIFT_CANCELLED'] }, organization: { deletedAt: null } }, include: { organization: { select: { id: true, name: true } } }, orderBy: { createdAt: 'desc' }, take: 50 })
 }
 
 export async function readAccountNotification(userId: string, notificationId: string) {
-  const updated = await prisma.accountNotification.updateMany({ where: { id: notificationId, userId, readAt: null }, data: { readAt: new Date() } })
+  const updated = await prisma.accountNotification.updateMany({ where: { id: notificationId, userId }, data: { readAt: new Date() } })
   if (!updated.count) throw new ApiError(404, 'NOTIFICATION_NOT_FOUND', 'Уведомление не найдено.')
 }
 

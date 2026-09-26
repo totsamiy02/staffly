@@ -18,6 +18,7 @@ import OrganizationsPage from './pages/app/organizations-page.tsx'
 import CreateOrganizationPage from './pages/app/create-organization-page.tsx'
 import OrganizationLayout from './pages/app/organization-layout.tsx'
 import UserSettingsPage from './pages/app/user-settings-page.tsx'
+import NotificationsPage from './pages/app/notifications-page.tsx'
 import StatusPage from './pages/error/status-page.tsx'
 
 function HomePage() {
@@ -49,6 +50,7 @@ function App() {
         <Route path="/workspace" element={<Navigate to="/app" replace />} />
         <Route path="/app" element={<ProtectedRoute><OrganizationsPage /></ProtectedRoute>} />
         <Route path="/app/organizations/new" element={<ProtectedRoute><CreateOrganizationPage /></ProtectedRoute>} />
+        <Route path="/app/notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />
         <Route path="/app/settings" element={<ProtectedRoute><UserSettingsPage /></ProtectedRoute>} />
         <Route path="/app/organizations/:organizationId/*" element={<ProtectedRoute><OrganizationLayout /></ProtectedRoute>} />
         <Route path="/privacy-policy" element={<PrivacyPolicy />} />

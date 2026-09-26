@@ -8,11 +8,13 @@ import type { AccountNotification } from '../../../app/organizations/types.ts'
 const dismissed = new Set<string>()
 
 export default function RequestAlerts() {
-  const { apiRequest } = useAuth()
+  const { apiRequest, user } = useAuth()
   const queryClient = useQueryClient()
   const notifications = useAccountNotifications()
   const [visible, setVisible] = useState<Array<{ item: AccountNotification; seconds: number }>>([])
   const [pageVisible, setPageVisible] = useState(document.visibilityState === 'visible')
+
+  useEffect(() => { setVisible([]) }, [user?.id])
 
   useEffect(() => {
     const update = () => setPageVisible(document.visibilityState === 'visible')
@@ -37,7 +39,7 @@ export default function RequestAlerts() {
   function open(item: AccountNotification) {
     close(item.id)
     void apiRequest(`/account-notifications/${item.id}/read`, { method: 'POST', body: {} })
-      .then(() => queryClient.invalidateQueries({ queryKey: ['account-notifications'] }))
+      .then(() => Promise.all([queryClient.invalidateQueries({ queryKey: ['account-notifications'] }), queryClient.invalidateQueries({ queryKey: ['notifications'] })]))
       .catch(() => undefined)
   }
 

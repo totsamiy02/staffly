@@ -20,6 +20,7 @@ const CODE_MS = 10 * 60 * 1000
 const EMAIL_COOLDOWN_MS = 60 * 1000
 const MAX_CODE_ATTEMPTS = 5
 const COOKIE_NAME = 'staffly_refresh'
+const BROWSER_COOKIE_NAME = 'staffly_browser'
 const COOKIE_PATH = '/api/auth'
 const invalidCredentials = 'Неверная почта или пароль.'
 
@@ -40,7 +41,8 @@ const changeBody = z.object({ currentPassword: z.string(), newPassword: password
 
 const router = Router()
 const tooManyRequests = (_request: Request, response: Response) => response.status(429).json({ message: 'Слишком много запросов. Попробуйте позже.' })
-const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 100, standardHeaders: 'draft-8', legacyHeaders: false, handler: tooManyRequests })
+const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 100, standardHeaders: 'draft-8', legacyHeaders: false, handler: tooManyRequests, skip: request => request.method === 'GET' || request.path === '/refresh' })
+const refreshLimiter = rateLimit({ windowMs: 60_000, limit: 120, standardHeaders: 'draft-8', legacyHeaders: false, handler: tooManyRequests })
 const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: 'draft-8', legacyHeaders: false, handler: tooManyRequests })
 const accountLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -103,17 +105,25 @@ async function accessToken(userId: string, sessionId: string) {
 async function createSession(user: { id: string; email: string }, request: Request, response: Response) {
   const now = Date.now()
   const rawToken = newToken()
-  const session = await prisma.authSession.create({
-    data: {
-      userId: user.id,
-      refreshTokenHash: digest(rawToken),
-      idleExpiresAt: new Date(now + IDLE_MS),
-      absoluteExpiresAt: new Date(now + ABSOLUTE_MS),
-      userAgent: request.get('user-agent')?.slice(0, 512),
-      ipAddress: request.ip?.slice(0, 45),
-    },
-  })
+  const previousToken = request.cookies?.[COOKIE_NAME]
+  const browserCookie = request.cookies?.[BROWSER_COOKIE_NAME]
+  const browserToken = typeof browserCookie === 'string' && /^[A-Za-z0-9_-]{64}$/.test(browserCookie) ? browserCookie : newToken()
+  const browserTokenHash = digest(browserToken)
+  const session = await prisma.$transaction(async tx => {
+    const previous = typeof previousToken === 'string' && previousToken.length <= 256
+      ? await tx.authSession.findUnique({ where: { refreshTokenHash: digest(previousToken) } }) : null
+    const browserSession = await tx.authSession.findFirst({ where: { userId: user.id, browserTokenHash, revokedAt: null, idleExpiresAt: { gt: new Date(now) }, absoluteExpiresAt: { gt: new Date(now) } }, orderBy: { createdAt: 'desc' } })
+    const current = previous?.userId === user.id && !previous.revokedAt && previous.idleExpiresAt.getTime() > now && previous.absoluteExpiresAt.getTime() > now ? previous : browserSession
+    const data = { browserTokenHash, refreshTokenHash: digest(rawToken), lastUsedAt: new Date(now), idleExpiresAt: new Date(now + IDLE_MS), userAgent: request.get('user-agent')?.slice(0, 512), ipAddress: request.ip?.slice(0, 45) }
+    // Password validation has already succeeded. The opaque browser cookie identifies
+    // continuity even if a refresh response was lost; it is never accepted as authentication.
+    await tx.authSession.updateMany({ where: { browserTokenHash, revokedAt: null, ...(current ? { id: { not: current.id } } : {}) }, data: { revokedAt: new Date(now), lastActiveAt: null } })
+    if (previous && previous.id !== current?.id && !previous.revokedAt) await tx.authSession.update({ where: { id: previous.id }, data: { revokedAt: new Date(now), lastActiveAt: null } })
+    if (current) return tx.authSession.update({ where: { id: current.id }, data: { ...data, idleExpiresAt: new Date(Math.min(now + IDLE_MS, current.absoluteExpiresAt.getTime())) } })
+    return tx.authSession.create({ data: { ...data, userId: user.id, absoluteExpiresAt: new Date(now + ABSOLUTE_MS) } })
+  }, { isolationLevel: 'Serializable' })
   setRefreshCookie(response, rawToken)
+  response.cookie(BROWSER_COOKIE_NAME, browserToken, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', path: COOKIE_PATH, maxAge: 365 * 24 * 60 * 60 * 1000 })
   return { user: publicUser(user), accessToken: await accessToken(user.id, session.id) }
 }
 
@@ -131,7 +141,7 @@ export async function requireAuth(request: AuthenticatedRequest, response: Respo
       response.status(401).json({ message: 'Сессия завершена.' }); return
     }
     request.auth = { userId: session.userId, sessionId: session.id, email: session.user.email }
-    if (session.lastUsedAt.getTime() < now.getTime() - 60_000) void prisma.authSession.updateMany({ where: { id: session.id, revokedAt: null }, data: { lastUsedAt: now } })
+    if (session.lastUsedAt.getTime() < now.getTime() - 60_000) await prisma.authSession.updateMany({ where: { id: session.id, revokedAt: null }, data: { lastUsedAt: now } })
     next()
   } catch {
     response.status(401).json({ message: 'Сессия завершена.' })
@@ -212,13 +222,12 @@ router.post('/login', loginLimiter, accountLimiter, async (request, response) =>
   response.json(await createSession(user, request, response))
 })
 
-router.post('/refresh', async (request, response) => {
+router.post('/refresh', refreshLimiter, async (request, response) => {
   const rawToken = request.cookies?.[COOKIE_NAME]
   if (typeof rawToken !== 'string' || rawToken.length > 256) { response.status(401).json({ message: 'Сессия завершена.' }); return }
   const session = await prisma.authSession.findUnique({ where: { refreshTokenHash: digest(rawToken) }, include: { user: true } })
   const now = new Date()
   if (!session || session.revokedAt || session.idleExpiresAt <= now || session.absoluteExpiresAt <= now || session.user.deletedAt || !session.user.emailVerifiedAt) {
-    clearRefreshCookie(response)
     response.status(401).json({ message: 'Сессия завершена.' }); return
   }
   const nextToken = newToken()
@@ -226,20 +235,20 @@ router.post('/refresh', async (request, response) => {
     where: { id: session.id, refreshTokenHash: digest(rawToken), revokedAt: null, idleExpiresAt: { gt: now }, absoluteExpiresAt: { gt: now } },
     data: { refreshTokenHash: digest(nextToken), lastUsedAt: now, idleExpiresAt: new Date(Math.min(now.getTime() + IDLE_MS, session.absoluteExpiresAt.getTime())) },
   })
-  if (!updated.count) { clearRefreshCookie(response); response.status(401).json({ message: 'Сессия завершена.' }); return }
+  if (!updated.count) { response.status(401).json({ message: 'Сессия завершена.' }); return }
   setRefreshCookie(response, nextToken)
   response.json({ user: publicUser(session.user), accessToken: await accessToken(session.userId, session.id) })
 })
 
 router.post('/logout', async (request, response) => {
   const rawToken = request.cookies?.[COOKIE_NAME]
-  if (typeof rawToken === 'string') await prisma.authSession.updateMany({ where: { refreshTokenHash: digest(rawToken) }, data: { revokedAt: new Date() } })
+  if (typeof rawToken === 'string') await prisma.authSession.updateMany({ where: { refreshTokenHash: digest(rawToken) }, data: { revokedAt: new Date(), lastActiveAt: null } })
   clearRefreshCookie(response)
   response.status(204).end()
 })
 
 router.post('/logout-all', requireAuth, async (request: AuthenticatedRequest, response) => {
-  await prisma.authSession.updateMany({ where: { userId: request.auth!.userId, revokedAt: null }, data: { revokedAt: new Date() } })
+  await prisma.authSession.updateMany({ where: { userId: request.auth!.userId, revokedAt: null }, data: { revokedAt: new Date(), lastActiveAt: null } })
   clearRefreshCookie(response)
   response.status(204).end()
 })
@@ -247,7 +256,7 @@ router.post('/logout-all', requireAuth, async (request: AuthenticatedRequest, re
 function deviceDetails(userAgent: string | null) {
   const value = userAgent ?? ''
   const device = /iPhone/i.test(value) ? 'iPhone' : /iPad/i.test(value) ? 'iPad' : /Android/i.test(value) ? 'Android' : /Macintosh|Mac OS X/i.test(value) ? 'Mac' : /Windows/i.test(value) ? 'Windows' : /Linux/i.test(value) ? 'Linux' : 'Неизвестное устройство'
-  const browser = /Edg\//i.test(value) ? 'Microsoft Edge' : /OPR\//i.test(value) ? 'Opera' : /Chrome\//i.test(value) ? 'Google Chrome' : /Firefox\//i.test(value) ? 'Firefox' : /Safari\//i.test(value) ? 'Safari' : 'Браузер'
+  const browser = /Edg\/|EdgiOS\/|EdgA\//i.test(value) ? 'Microsoft Edge' : /OPR\//i.test(value) ? 'Opera' : /Chrome\/|CriOS\//i.test(value) ? 'Google Chrome' : /Firefox\/|FxiOS\//i.test(value) ? 'Firefox' : /Safari\//i.test(value) ? 'Safari' : 'Браузер'
   const kind = /iPhone|iPad|Android|Mobile/i.test(value) ? 'mobile' : 'desktop'
   return { device, browser, kind }
 }
@@ -261,14 +270,14 @@ router.get('/sessions', requireAuth, async (request: AuthenticatedRequest, respo
 router.delete('/sessions/:sessionId', requireAuth, async (request: AuthenticatedRequest, response) => {
   const parsed = z.string().uuid().safeParse(request.params.sessionId)
   if (!parsed.success) { response.status(400).json({ message: 'Некорректный идентификатор сеанса.' }); return }
-  const revoked = await prisma.authSession.updateMany({ where: { id: parsed.data, userId: request.auth!.userId, revokedAt: null }, data: { revokedAt: new Date() } })
+  const revoked = await prisma.authSession.updateMany({ where: { id: parsed.data, userId: request.auth!.userId, revokedAt: null }, data: { revokedAt: new Date(), lastActiveAt: null } })
   if (!revoked.count) { response.status(404).json({ message: 'Активный сеанс не найден.' }); return }
   if (parsed.data === request.auth!.sessionId) clearRefreshCookie(response)
   response.status(204).end()
 })
 
 router.post('/sessions/revoke-others', requireAuth, async (request: AuthenticatedRequest, response) => {
-  await prisma.authSession.updateMany({ where: { userId: request.auth!.userId, id: { not: request.auth!.sessionId }, revokedAt: null }, data: { revokedAt: new Date() } })
+  await prisma.authSession.updateMany({ where: { userId: request.auth!.userId, id: { not: request.auth!.sessionId }, revokedAt: null }, data: { revokedAt: new Date(), lastActiveAt: null } })
   response.status(204).end()
 })
 
@@ -310,7 +319,7 @@ router.post('/reset-password', accountLimiter, async (request, response) => {
     const updated = await tx.passwordResetToken.updateMany({ where: { id: record.id, usedAt: null, attempts: { lt: MAX_CODE_ATTEMPTS }, expiresAt: { gt: new Date() } }, data: { attempts: { increment: 1 }, ...(nextHash ? { usedAt: new Date() } : {}) } })
     if (!updated.count || !nextHash) return false
     await tx.user.update({ where: { id: user.id }, data: { passwordHash: nextHash } })
-    await tx.authSession.updateMany({ where: { userId: user.id, revokedAt: null }, data: { revokedAt: new Date() } })
+    await tx.authSession.updateMany({ where: { userId: user.id, revokedAt: null }, data: { revokedAt: new Date(), lastActiveAt: null } })
     return true
   })
   if (!changed) { response.status(400).json({ message: 'Неверный или истёкший код.' }); return }
@@ -328,7 +337,7 @@ router.post('/change-password', loginLimiter, requireAuth, async (request: Authe
   const nextHash = await passwordHash(parsed.data.newPassword)
   await prisma.$transaction([
     prisma.user.update({ where: { id: user.id }, data: { passwordHash: nextHash } }),
-    prisma.authSession.updateMany({ where: { userId: user.id, id: { not: request.auth!.sessionId }, revokedAt: null }, data: { revokedAt: new Date() } }),
+    prisma.authSession.updateMany({ where: { userId: user.id, id: { not: request.auth!.sessionId }, revokedAt: null }, data: { revokedAt: new Date(), lastActiveAt: null } }),
   ])
   void deliverPasswordChanged(user.email).catch((error) => console.error('Password-changed email failed:', error))
   response.json({ message: 'Пароль обновлён. Другие сеансы завершены.' })

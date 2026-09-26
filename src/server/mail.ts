@@ -51,12 +51,13 @@ export function deliverOrganizationCreated(email: string, organizationName: stri
   return sendMail(email, 'Организация создана — Staffly', `Организация «${organizationName}» успешно создана в Staffly.`, emailHtml('Организация создана', `Организация <strong>«${safeName}»</strong> успешно создана. Теперь вы можете приглашать сотрудников и настраивать рабочее пространство.`), `organization created for ${email}: ${organizationName}`)
 }
 
-export function deliverOrganizationInvitation(email: string, organizationName: string, inviterEmail: string, token: string, expiresAt: Date) {
+export function deliverOrganizationInvitation(email: string, organizationName: string, inviterEmail: string, token: string, expiresAt: Date, logoUrl: string | null = null) {
   const link = `${appUrl}/app?invite=${encodeURIComponent(token)}`
   const safeName = escapeHtml(organizationName)
   const safeInviter = escapeHtml(inviterEmail)
+  const logo = logoUrl ? `<img src="${escapeHtml(new URL(logoUrl, appUrl).href)}" alt="${safeName}" width="56" height="56" style="display:block;object-fit:cover;border-radius:12px;margin:24px 0">` : `<div style="margin:24px 0;width:56px;height:56px;border-radius:12px;background:#111;color:#fff;line-height:56px;text-align:center;font-size:22px;font-weight:700">${escapeHtml(organizationName.trim().slice(0, 1).toUpperCase())}</div>`
   const button = `<div style="margin:28px 0"><a href="${escapeHtml(link)}" style="display:inline-block;padding:14px 22px;border-radius:10px;background:#111;color:#fff;text-decoration:none;font-size:14px;font-weight:700">Открыть приглашение</a></div><p style="margin:0;color:#666;font-size:13px;line-height:1.6">Приглашение действует до ${escapeHtml(expiresAt.toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' }))} по московскому времени.</p>`
-  return sendMail(email, `Приглашение в ${organizationName} — Staffly`, `${inviterEmail} приглашает вас присоединиться к организации «${organizationName}».\n${link}`, emailHtml('Приглашение в организацию', `<strong>${safeInviter}</strong> приглашает вас присоединиться к организации <strong>«${safeName}»</strong>. Войдите или зарегистрируйтесь с этим адресом электронной почты.`, button), `organization invitation for ${email}: ${link}`)
+  return sendMail(email, `Приглашение в ${organizationName} — Staffly`, `${inviterEmail} приглашает вас присоединиться к организации «${organizationName}».\n${link}`, emailHtml('Приглашение в организацию', `<strong>${safeInviter}</strong> приглашает вас присоединиться к организации <strong>«${safeName}»</strong>. Войдите или зарегистрируйтесь с этим адресом электронной почты.`, logo + button), `organization invitation for ${email}: ${link}`)
 }
 
 export function deliverSensitiveActionCode(kind: 'ownership' | 'deletion', email: string, organizationName: string, code: string) {
@@ -66,15 +67,16 @@ export function deliverSensitiveActionCode(kind: 'ownership' | 'deletion', email
   return sendMail(email, `${title} — Staffly`, `Используйте код ${code}, чтобы ${action}. Код действует 10 минут.`, emailHtml(title, `Используйте код ниже, чтобы ${escapeHtml(action)}.`, codeBlock(code)), `${kind} code for ${email}: ${code}`)
 }
 
-export function deliverShiftAssignment(email: string, organizationId: string, organizationName: string, startAt: Date, endAt: Date, timezone: string) {
+export function deliverShiftAssignment(email: string, organizationId: string, organizationName: string, startAt: Date, endAt: Date, timezone: string, shiftId?: string, type: 'SHIFT_ASSIGNED' | 'SHIFT_CHANGED' | 'SHIFT_CANCELLED' = 'SHIFT_ASSIGNED') {
+  const title = type === 'SHIFT_ASSIGNED' ? 'Назначена смена' : type === 'SHIFT_CHANGED' ? 'Смена изменена' : 'Смена отменена'
   const start = startAt.toLocaleString('ru-RU', { timeZone: timezone, dateStyle: 'long', timeStyle: 'short' })
   const end = endAt.toLocaleString('ru-RU', { timeZone: timezone, dateStyle: 'long', timeStyle: 'short' })
   const monthParts = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit' }).formatToParts(startAt)
   const part = (type: string) => monthParts.find((item) => item.type === type)?.value ?? ''
-  const link = `${appUrl}/app/organizations/${organizationId}/schedule?view=mine&month=${part('year')}-${part('month')}`
+  const link = `${appUrl}/app/organizations/${organizationId}/schedule?view=mine&month=${part('year')}-${part('month')}${shiftId ? `&shift=${encodeURIComponent(shiftId)}` : ''}`
   const safeName = escapeHtml(organizationName)
   const content = `<div style="margin:24px 0;padding:18px;border:1px solid #e1e1e1;border-radius:12px;background:#fafafa"><strong style="display:block;margin-bottom:8px">${escapeHtml(start)}</strong><span style="color:#666;font-size:13px">До ${escapeHtml(end)}</span></div><div style="margin:28px 0"><a href="${escapeHtml(link)}" style="display:inline-block;padding:14px 22px;border-radius:10px;background:#111;color:#fff;text-decoration:none;font-size:14px;font-weight:700">Открыть мои смены</a></div>`
-  return sendMail(email, `Вам назначена смена в ${organizationName} — Staffly`, `В организации «${organizationName}» вам назначена смена: ${start} — ${end}.\n${link}`, emailHtml('Новая смена', `В организации <strong>«${safeName}»</strong> вам назначена рабочая смена.`, content), `shift assigned for ${email}: ${start} — ${end}; ${link}`)
+  return sendMail(email, `${title} в ${organizationName} — Staffly`, `В организации «${organizationName}» ${title.toLowerCase()}: ${start} — ${end}.\n${link}`, emailHtml(title, `В организации <strong>«${safeName}»</strong> ${type === 'SHIFT_CANCELLED' ? 'отменена ваша смена' : type === 'SHIFT_CHANGED' ? 'изменено время вашей смены' : 'вам назначена рабочая смена'}.`, content), `shift assigned for ${email}: ${start} — ${end}; ${link}`)
 }
 
 export function deliverPasswordChanged(email: string) {
@@ -83,4 +85,12 @@ export function deliverPasswordChanged(email: string) {
 
 export function deliverRoleChanged(email: string, organizationName: string, role: string) {
   return sendMail(email, `Новая роль в ${organizationName} — Staffly`, `В организации «${organizationName}» вам назначена роль: ${role}.`, emailHtml('Роль в организации изменена', `В организации <strong>«${escapeHtml(organizationName)}»</strong> вам назначена роль <strong>«${escapeHtml(role)}»</strong>.`), `role changed for ${email}: ${organizationName} — ${role}`)
+}
+
+export function deliverRequestDecision(email: string, organizationId: string, organizationName: string, requestId: string, requestType: string, decision: 'APPROVED' | 'REJECTED', comment: string | null | undefined) {
+  const title = decision === 'APPROVED' ? 'Заявка одобрена' : 'Заявка отклонена'
+  const link = `${appUrl}/app/organizations/${organizationId}/requests?tab=mine&request=${encodeURIComponent(requestId)}`
+  const text = `${title}: ${requestType}. Организация «${organizationName}».${comment ? ` Комментарий: ${comment}` : ''}`
+  const content = `<div style="margin:28px 0"><a href="${escapeHtml(link)}" style="display:inline-block;padding:14px 22px;border-radius:10px;background:#111;color:#fff;text-decoration:none;font-size:14px;font-weight:700">Открыть заявку</a></div>`
+  return sendMail(email, `${title} — Staffly`, `${text}\n${link}`, emailHtml(title, escapeHtml(text), content), `request decision for ${email}: ${title}; ${link}`)
 }

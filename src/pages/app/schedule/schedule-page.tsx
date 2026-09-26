@@ -1,3 +1,4 @@
+import { invalidateOrganizationWork } from '../../../app/live-query.ts'
 import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
@@ -123,7 +124,7 @@ export default function SchedulePage({ organization }: { organization: Organizat
     setBusy(true); setActionError('')
     try {
       await apiRequest(`/organizations/${organization.id}/shifts/${cancelling.id}/cancel`, { method: 'POST', body: { reason: cancelReason } })
-      await Promise.all([queryClient.invalidateQueries({ queryKey: ['schedule', organization.id] }), queryClient.invalidateQueries({ queryKey: ['work-time-statistics', organization.id] }), queryClient.invalidateQueries({ queryKey: ['member-work-time', organization.id] }), queryClient.invalidateQueries({ queryKey: ['my-work-time', organization.id] }), queryClient.invalidateQueries({ queryKey: ['my-upcoming-shifts', organization.id] })])
+      await invalidateOrganizationWork(queryClient, organization.id)
       close()
     } catch (failure) { setActionError(failure instanceof Error ? failure.message : 'Не удалось отменить смену.') }
     finally { setBusy(false) }

@@ -63,6 +63,9 @@ enum WorkShiftStatus {
 }
 
 enum AccountNotificationType {
+  SHIFT_ASSIGNED
+  SHIFT_CHANGED
+  SHIFT_CANCELLED
   ROLE_CHANGED
   REQUEST_CREATED
   REQUEST_APPROVED
@@ -169,6 +172,8 @@ model AccountNotification {
   userId         String                  @map("user_id") @db.Uuid
   organizationId String                  @map("organization_id") @db.Uuid
   requestId      String?                 @map("request_id") @db.Uuid
+  shiftId        String?                 @map("shift_id") @db.Uuid
+  emailAttemptedAt DateTime?              @map("email_attempted_at") @db.Timestamptz(3)
   type           AccountNotificationType
   title          String                  @db.VarChar(160)
   message        String                  @db.VarChar(500)
@@ -178,8 +183,12 @@ model AccountNotification {
   user         User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
   organization Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   request      OrganizationRequest? @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  shift        WorkShift? @relation(fields: [shiftId], references: [id], onDelete: SetNull)
 
   @@index([userId, readAt, createdAt])
+  @@index([userId, createdAt, id])
+  @@index([shiftId])
+  @@index([userId, organizationId, emailAttemptedAt], map: "account_notifications_user_id_organization_id_email_attempted_i")
   @@index([organizationId])
   @@index([requestId])
   @@map("account_notifications")
@@ -241,6 +250,7 @@ model WorkShift {
   cancelledByMember OrganizationMember?   @relation("ShiftCanceller", fields: [cancelledByMemberId], references: [id], onDelete: Restrict)
   adjustments       WorkShiftAdjustment[]
   changeRequests    OrganizationRequest[]
+  notifications     AccountNotification[]
 
   @@index([organizationId, scheduledStartAt])
   @@index([organizationId, scheduledEndAt])
@@ -402,6 +412,7 @@ model OrganizationInvite {
   invitedEmail     String?                @map("invited_email") @db.VarChar(254)
   tokenHash        String                 @unique @map("token_hash") @db.VarChar(64)
   expiresAt        DateTime               @map("expires_at") @db.Timestamptz(3)
+  readAt           DateTime?              @map("read_at") @db.Timestamptz(3)
   acceptedByUserId String?                @map("accepted_by_user_id") @db.Uuid
   acceptedAt       DateTime?              @map("accepted_at") @db.Timestamptz(3)
   rejectedAt       DateTime?              @map("rejected_at") @db.Timestamptz(3)
@@ -414,6 +425,7 @@ model OrganizationInvite {
 
   @@index([organizationId, createdAt])
   @@index([invitedEmail, type, expiresAt])
+  @@index([invitedEmail, createdAt, id])
   @@index([invitedByUserId])
   @@index([acceptedByUserId])
   @@map("organization_invites")
@@ -446,6 +458,8 @@ model AuthSession {
   userId            String    @map("user_id") @db.Uuid
   refreshTokenHash  String    @unique @map("refresh_token_hash") @db.VarChar(64)
   createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  browserTokenHash  String?   @map("browser_token_hash") @db.VarChar(64)
+  lastActiveAt      DateTime? @map("last_active_at") @db.Timestamptz(3)
   lastUsedAt        DateTime  @default(now()) @map("last_used_at") @db.Timestamptz(3)
   idleExpiresAt     DateTime  @map("idle_expires_at") @db.Timestamptz(3)
   absoluteExpiresAt DateTime  @map("absolute_expires_at") @db.Timestamptz(3)
@@ -455,6 +469,7 @@ model AuthSession {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@index([browserTokenHash, revokedAt])
   @@index([userId, revokedAt])
   @@index([idleExpiresAt])
   @@map("auth_sessions")

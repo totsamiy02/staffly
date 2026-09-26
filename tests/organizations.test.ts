@@ -1,9 +1,11 @@
+import { decodeNotificationCursor, isUrgentShiftEmail, listNotificationHistory, readHistoryNotification, reserveShiftEmail } from '../src/server/organizations/notification-service.ts'
+import { invitationTimeRemaining } from '../src/app/organizations/invitation-time.ts'
 import assert from 'node:assert/strict'
 import { after, before, describe, it } from 'node:test'
 import { randomUUID } from 'node:crypto'
 import { prisma } from '../src/server/db.ts'
 import { changeMemberRole, createOrganization, getOrganization, listAccountNotifications, listMembers, listMembersPage, listOrganizations, readAccountNotification, removeMember, updateOrganization } from '../src/server/organizations/organization-service.ts'
-import { acceptCodeInvitation, acceptEmailInvitation, createCodeInvitation, createEmailInvitation, listActiveOrganizationInvitations, listPendingInvitations, previewCodeInvitation, rejectEmailInvitation, revokeInvitation } from '../src/server/organizations/invitation-service.ts'
+import { acceptCodeInvitation, acceptEmailInvitation, createCodeInvitation, createEmailInvitation, listActiveOrganizationInvitations, listPendingInvitations, previewCodeInvitation, previewEmailInvitation, rejectEmailInvitation, revokeInvitation } from '../src/server/organizations/invitation-service.ts'
 import { confirmOrganizationDeletion, confirmOwnershipTransfer, requestOrganizationDeletion, requestOwnershipTransfer } from '../src/server/organizations/sensitive-action-service.ts'
 import { updateProfileBody } from '../src/server/profile/schemas.ts'
 import { updateOrganizationBody } from '../src/server/organizations/schemas.ts'
@@ -192,8 +194,8 @@ describe('requests workflow, privacy and schedule integration', { concurrency: f
 
     const stale = await createRequest(member.id, organization.id, { requestTypeId: shiftType.id, relatedShiftId: shift.id, proposedStartDate: '2032-05-05', proposedStartTime: '10:00', proposedEndDate: '2032-05-05', proposedEndTime: '19:00', comment: 'Перенос' })
     await updateShift(owner.id, organization.id, shift.id, { memberId: memberRecord.id, startDate: '2032-05-03', startTime: '09:00', endDate: '2032-05-03', endTime: '18:00', breakMinutes: 0, description: null })
-    await expectCode(() => resolveRequest(owner.id, organization.id, stale.id, 'APPROVED', null), 'SHIFT_CHANGED_SINCE_REQUEST')
-    assert.equal((await prisma.organizationRequest.findUniqueOrThrow({ where: { id: stale.id } })).status, 'PENDING')
+    await expectCode(() => resolveRequest(owner.id, organization.id, stale.id, 'APPROVED', null), 'REQUEST_ALREADY_RESOLVED')
+    assert.equal((await prisma.organizationRequest.findUniqueOrThrow({ where: { id: stale.id } })).status, 'CANCELLED')
   })
 
   it('lets only the author edit a pending request and alerts reviewers again', async () => {
@@ -406,7 +408,7 @@ describe('profiles and public organization details', { concurrency: false }, () 
     await prisma.user.update({ where: { id: member.id }, data: { firstName: 'Анна', lastName: 'Иванова', phone: '+79991234567', lastSeenAt: new Date() } })
     const memberProfile = (await listMembers(owner.id, organization.id)).find((item) => item.userId === member.id)
     assert.equal(memberProfile?.displayName, 'Иванова Анна')
-    assert.equal(memberProfile?.online, true)
+    assert.equal(memberProfile?.online, false) // A user timestamp alone is not a live session.
     const filtered = await listMembersPage(owner.id, organization.id, { page: 1, pageSize: 20, role: 'MEMBER', search: 'Иванова Анна' })
     assert.equal(filtered.pagination.total, 1)
     assert.equal(filtered.members[0]?.userId, member.id)
@@ -573,5 +575,423 @@ describe('work schedule and time statistics', { concurrency: false }, () => {
     assert.ok(await prisma.workShift.count({ where: { memberId: scheduleAdminMemberId } }))
     await expectCode(() => createShift(owner.id, scheduleOrganizationId, { memberId: scheduleAdminMemberId, startDate: '2027-05-01', startTime: '10:00', endDate: '2027-05-01', endTime: '18:00', breakMinutes: 0, description: null }), 'MEMBER_NOT_FOUND')
     assert.ok(scheduleOwnerMemberId)
+  })
+})
+
+// Real HTTP cookies/tokens plus separate query caches reproduce cross-user behavior.
+describe('session continuity, presence and cross-user synchronization regressions', { concurrency: false }, () => {
+  let server: import('node:http').Server
+  let base: string
+  let first: { id: string; email: string }
+  let second: { id: string; email: string }
+  let firstAuth: { accessToken: string }
+  let secondAuth: { accessToken: string }
+  let firstCookie = ''
+  let firstBrowserCookie = ''
+  let secondCookie = ''
+  let presenceOrganizationId = ''
+  const password = 'Regression-test-1!'
+  const ua = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome/140.0.0.0 Safari/537.36'
+  async function http(path: string, options: { method?: string; body?: unknown; cookie?: string; token?: string } = {}) {
+    return fetch(`${base}/api${path}`, { method: options.method ?? 'GET', headers: { 'User-Agent': ua, ...(options.body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(options.cookie ? { Cookie: options.cookie } : {}), ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}) }, ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}) })
+  }
+  const cookie = (response: Response) => response.headers.get('set-cookie')!.split(';')[0]
+  before(async () => {
+    process.env.JWT_SECRET ??= 'local-regression-test-secret-with-at-least-32-characters'
+    const { default: express } = await import('express')
+    const { default: cookieParser } = await import('cookie-parser')
+    const { hash } = await import('argon2')
+    const { default: auth } = await import('../src/server/auth.ts')
+    const { default: profiles } = await import('../src/server/profile/routes.ts')
+    const { default: organizations } = await import('../src/server/organizations/routes.ts')
+    const { default: schedule } = await import('../src/server/schedule/routes.ts')
+    const { default: requests } = await import('../src/server/requests/routes.ts')
+    const app = express()
+    app.use(express.json(), cookieParser())
+    app.use('/api/auth', auth)
+    app.use('/api', profiles, organizations, schedule, requests)
+    app.use((error: any, _request: any, response: any, _next: any) => response.status(error.status ?? 500).json({ code: error.code, message: error.message }))
+    server = app.listen(0, '127.0.0.1')
+    await new Promise<void>(resolve => server.once('listening', resolve))
+    base = `http://127.0.0.1:${(server.address() as import('node:net').AddressInfo).port}`
+    const passwordHash = await hash(password)
+    first = await prisma.user.create({ data: { email: email('session-first'), passwordHash, emailVerifiedAt: new Date() } })
+    second = await prisma.user.create({ data: { email: email('session-second'), passwordHash, emailVerifiedAt: new Date() } })
+    const a = await http('/auth/login', { method: 'POST', body: { email: first.email, password } })
+    assert.equal(a.status, 200); firstCookie = cookie(a); firstAuth = await a.json()
+    const b = await http('/auth/login', { method: 'POST', body: { email: second.email, password } })
+    assert.equal(b.status, 200); secondCookie = cookie(b); secondAuth = await b.json()
+  })
+  after(async () => { await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())) })
+
+  it('keeps one session through repeat login and rotations while preserving a separate same-UA device', async () => {
+    const before = await prisma.authSession.findFirstOrThrow({ where: { userId: first.id, revokedAt: null } })
+    const repeat = await http('/auth/login', { method: 'POST', cookie: firstCookie, body: { email: first.email, password } })
+    assert.equal(repeat.status, 200); firstCookie = cookie(repeat); firstBrowserCookie = repeat.headers.getSetCookie().find(value => value.startsWith('staffly_browser='))!.split(';')[0]; firstAuth = await repeat.json()
+    for (let index = 0; index < 3; index++) {
+      const refreshed = await http('/auth/refresh', { method: 'POST', cookie: firstCookie, body: {} })
+      assert.equal(refreshed.status, 200); firstCookie = cookie(refreshed); firstAuth = await refreshed.json()
+    }
+    const active = await prisma.authSession.findMany({ where: { userId: first.id, revokedAt: null } })
+    assert.equal(active.length, 1); assert.equal(active[0].id, before.id)
+    const otherDevice = await http('/auth/login', { method: 'POST', body: { email: first.email, password } })
+    assert.equal(otherDevice.status, 200)
+    assert.equal(await prisma.authSession.count({ where: { userId: first.id, revokedAt: null } }), 2)
+    const deviceToken = (await otherDevice.json()).accessToken
+    const listed = await http('/auth/sessions', { token: deviceToken })
+    const sessions = (await listed.json()).sessions
+    assert.equal(sessions.length, 2); assert.equal(sessions.filter((item: any) => item.current).length, 1)
+    await http('/auth/logout', { method: 'POST', cookie: cookie(otherDevice), body: {} })
+  })
+
+  it('continues the same browser session after its refresh cookie is lost, but never authenticates with browser identity alone', async () => {
+    const previous = await prisma.authSession.findFirstOrThrow({ where: { userId: first.id, revokedAt: null } })
+    const identityOnly = await http('/auth/refresh', { method: 'POST', cookie: firstBrowserCookie, body: {} })
+    assert.equal(identityOnly.status, 401)
+    const login = await http('/auth/login', { method: 'POST', cookie: firstBrowserCookie, body: { email: first.email, password } })
+    assert.equal(login.status, 200); firstCookie = cookie(login); firstAuth = await login.json()
+    assert.equal(await prisma.authSession.count({ where: { userId: first.id, revokedAt: null } }), 1)
+    assert.equal((await prisma.authSession.findFirstOrThrow({ where: { userId: first.id, revokedAt: null } })).id, previous.id)
+  })
+
+  it('does not clear a newly rotated cookie when an obsolete refresh loses the race', async () => {
+    const obsolete = firstCookie
+    const valid = await http('/auth/refresh', { method: 'POST', cookie: firstCookie, body: {} })
+    assert.equal(valid.status, 200); firstCookie = cookie(valid); firstAuth = await valid.json()
+    const stale = await http('/auth/refresh', { method: 'POST', cookie: obsolete, body: {} })
+    assert.equal(stale.status, 401); assert.equal(stale.headers.get('set-cookie'), null)
+    const stillValid = await http('/auth/refresh', { method: 'POST', cookie: firstCookie, body: {} })
+    assert.equal(stillValid.status, 200); firstCookie = cookie(stillValid); firstAuth = await stillValid.json()
+  })
+
+  it('defines online by unexpired non-revoked session heartbeat, not API polling or lastSeen alone', async () => {
+    const { updatePresence, PRESENCE_TTL_MS } = await import('../src/server/profile/presence.ts')
+    const organization = await createOrganization(first.id, { name: 'Presence regression', description: null, timezone: 'Europe/Moscow' })
+    presenceOrganizationId = organization.id
+    await prisma.organizationMember.create({ data: { organizationId: organization.id, userId: second.id } })
+    const session = await prisma.authSession.findFirstOrThrow({ where: { userId: second.id, revokedAt: null } })
+    await updatePresence(second.id, session.id, true)
+    assert.equal((await listMembers(first.id, organization.id)).find(item => item.userId === second.id)?.online, true)
+    await prisma.authSession.update({ where: { id: session.id }, data: { lastActiveAt: new Date(Date.now() - PRESENCE_TTL_MS - 1_000) } })
+    assert.equal((await listMembersPage(first.id, organization.id, {})).members.find(item => item.userId === second.id)?.online, false)
+    await http('/account-notifications', { token: secondAuth.accessToken })
+    assert.equal((await listMembers(first.id, organization.id)).find(item => item.userId === second.id)?.online, false)
+    await updatePresence(second.id, session.id, true)
+    const other = await http('/auth/login', { method: 'POST', body: { email: second.email, password } })
+    assert.equal(other.status, 200)
+    const otherToken = (await other.json()).accessToken
+    const otherSession = (await (await http('/auth/sessions', { token: otherToken })).json()).sessions.find((item: any) => item.current)
+    await updatePresence(second.id, otherSession.id, true)
+    await http('/auth/logout', { method: 'POST', cookie: cookie(other), body: {} })
+    assert.equal((await listMembers(first.id, organization.id)).find(item => item.userId === second.id)?.online, true)
+    await updatePresence(second.id, session.id, false)
+    assert.equal((await listMembers(first.id, organization.id)).find(item => item.userId === second.id)?.online, false)
+  })
+
+  it('polls notification, shift and request changes between two authenticated users without local invalidation', async () => {
+    // QueryObserver only enables browser polling when imported in a browser environment.
+    const oldWindow = Object.getOwnPropertyDescriptor(globalThis, 'window')
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: { addEventListener() {}, removeEventListener() {} } })
+    const { QueryClient, QueryObserver, timeoutManager, focusManager } = await import('@tanstack/query-core')
+    const { liveQueryOptions } = await import('../src/app/live-query.ts')
+    focusManager.setEventListener(() => () => {})
+    focusManager.setFocused(true)
+    const delays: number[] = []
+    timeoutManager.setTimeoutProvider({ setTimeout, clearTimeout, setInterval: (callback, delay) => { delays.push(delay); return setInterval(callback, delay === liveQueryOptions.refetchInterval ? 20 : delay) }, clearInterval })
+    const a = new QueryClient({ defaultOptions: { queries: { gcTime: 0 } } }); const b = new QueryClient({ defaultOptions: { queries: { gcTime: 0 } } })
+    const cleanup: Array<() => void> = []
+    async function waitUntil(predicate: () => boolean) { const until = Date.now() + 3_000; while (!predicate()) { if (Date.now() > until) assert.fail('Cross-user cache did not synchronize'); await new Promise(resolve => setTimeout(resolve, 10)) } }
+    try {
+      const organization = await createOrganization(first.id, { name: 'Two-user sync regression', description: null, timezone: 'Europe/Moscow' })
+      const employee = await prisma.organizationMember.create({ data: { organizationId: organization.id, userId: second.id } })
+      function observe(client: InstanceType<typeof QueryClient>, key: unknown[], path: string, token: string) {
+        const observer = new QueryObserver<any>(client, { ...liveQueryOptions, queryKey: key, queryFn: async () => { const response = await http(path, { token }); assert.equal(response.status, 200); return response.json() } })
+        cleanup.push(observer.subscribe(() => {})); return observer
+      }
+      const schedule = observe(b, ['schedule', organization.id, '2038-01-01', '2038-02-01'], `/organizations/${organization.id}/schedule?from=2038-01-01&to=2038-02-01`, secondAuth.accessToken)
+      const notifications = observe(b, ['shift-notifications'], '/shift-notifications', secondAuth.accessToken)
+      const history = observe(b, ['notifications', { limit: 6 }], '/notifications?limit=6', secondAuth.accessToken)
+      const mine = observe(b, ['requests', organization.id, 'mine', { page: 1 }], `/organizations/${organization.id}/requests/mine?page=1&pageSize=20`, secondAuth.accessToken)
+      const incoming = observe(a, ['requests', organization.id, 'incoming', { page: 1 }], `/organizations/${organization.id}/requests/incoming?page=1&pageSize=20`, firstAuth.accessToken)
+      await waitUntil(() => schedule.getCurrentResult().isSuccess && mine.getCurrentResult().isSuccess && incoming.getCurrentResult().isSuccess)
+      const shiftResponse = await http(`/organizations/${organization.id}/shifts`, { method: 'POST', token: firstAuth.accessToken, body: { memberId: employee.id, startDate: '2038-01-10', startTime: '09:00', endDate: '2038-01-10', endTime: '17:00', breakMinutes: 0, description: null } })
+      assert.equal(shiftResponse.status, 201); const shift = (await shiftResponse.json()).shift
+      await waitUntil(() => notifications.getCurrentResult().data?.notifications.some((item: any) => item.id === shift.id) && schedule.getCurrentResult().data?.shifts.some((item: any) => item.id === shift.id))
+      await waitUntil(() => history.getCurrentResult().data?.notifications.some((item: any) => item.type === 'SHIFT_ASSIGNED' && item.href?.includes(shift.id)))
+      const event = history.getCurrentResult().data.notifications.find((item: any) => item.type === 'SHIFT_ASSIGNED' && item.href?.includes(shift.id))
+      assert.equal((await http(`/notifications/${event.id}/read`, { method: 'POST', token: firstAuth.accessToken, body: {} })).status, 404)
+      assert.equal((await http(`/notifications/${event.id}/read`, { method: 'POST', token: secondAuth.accessToken, body: { unread: 'invalid' } })).status, 400)
+      assert.equal((await http('/notifications?limit=999', { token: secondAuth.accessToken })).status, 400)
+      assert.equal((await http(`/notifications/${event.id}/read`, { method: 'POST', token: secondAuth.accessToken, body: {} })).status, 204)
+      await waitUntil(() => history.getCurrentResult().data?.notifications.find((item: any) => item.id === event.id)?.readAt)
+      const read = await http(`/shift-notifications/${shift.id}/read`, { method: 'POST', token: secondAuth.accessToken, body: {} })
+      assert.equal(read.status, 204)
+      await waitUntil(() => !notifications.getCurrentResult().data?.notifications.some((item: any) => item.id === shift.id))
+      const changed = await http(`/organizations/${organization.id}/shifts/${shift.id}`, { method: 'PATCH', token: firstAuth.accessToken, body: { memberId: employee.id, startDate: '2038-01-10', startTime: '08:00', endDate: '2038-01-10', endTime: '17:00', breakMinutes: 0, description: null } })
+      assert.equal(changed.status, 200)
+      await waitUntil(() => notifications.getCurrentResult().data?.notifications.find((item: any) => item.id === shift.id)?.scheduledStartAt === '2038-01-10T05:00:00.000Z' && schedule.getCurrentResult().data?.shifts.find((item: any) => item.id === shift.id)?.scheduledStartAt === '2038-01-10T05:00:00.000Z')
+      const type = (await listRequestTypes(second.id, organization.id)).find(item => item.systemCode === 'SHIFT_CHANGE')!
+      const requestResponse = await http(`/organizations/${organization.id}/requests`, { method: 'POST', token: secondAuth.accessToken, body: { requestTypeId: type.id, relatedShiftId: shift.id, proposedStartDate: '2038-01-11', proposedStartTime: '10:00', proposedEndDate: '2038-01-11', proposedEndTime: '18:00', comment: 'Перенести' } })
+      assert.equal(requestResponse.status, 201); const request = (await requestResponse.json()).request
+      await waitUntil(() => incoming.getCurrentResult().data?.requests.some((item: any) => item.id === request.id))
+      const approval = await http(`/organizations/${organization.id}/requests/${request.id}/approve`, { method: 'POST', token: firstAuth.accessToken, body: {} })
+      assert.equal(approval.status, 200)
+      await waitUntil(() => mine.getCurrentResult().data?.requests.find((item: any) => item.id === request.id)?.status === 'APPROVED' && schedule.getCurrentResult().data?.shifts.find((item: any) => item.id === shift.id)?.scheduledStartAt === '2038-01-11T07:00:00.000Z')
+      await waitUntil(() => history.getCurrentResult().data?.notifications.some((item: any) => item.type === 'REQUEST_APPROVED' && item.href?.includes(request.id)))
+      assert.ok(delays.includes(10_000))
+      assert.equal((await listAccountNotifications(second.id)).some(item => item.requestId === request.id && item.type === 'REQUEST_APPROVED'), true)
+    } finally {
+      cleanup.forEach(stop => stop()); await Promise.all([a.cancelQueries(), b.cancelQueries()]); a.clear(); b.clear(); focusManager.setFocused(undefined)
+      timeoutManager.setTimeoutProvider({ setTimeout, clearTimeout, setInterval, clearInterval })
+      if (oldWindow) Object.defineProperty(globalThis, 'window', oldWindow); else Reflect.deleteProperty(globalThis, 'window')
+    }
+  })
+
+  it('switching accounts in one cookie jar revokes the displaced session immediately', async () => {
+    const previous = await prisma.authSession.findFirstOrThrow({ where: { userId: first.id, revokedAt: null } })
+    const switched = await http('/auth/login', { method: 'POST', cookie: firstCookie, body: { email: second.email, password } })
+    assert.equal(switched.status, 200)
+    assert.ok((await prisma.authSession.findUniqueOrThrow({ where: { id: previous.id } })).revokedAt)
+    assert.equal((await http('/auth/me', { token: firstAuth.accessToken })).status, 401)
+    await http('/auth/logout', { method: 'POST', cookie: cookie(switched), body: {} })
+    await http('/profile/presence', { method: 'POST', token: secondAuth.accessToken, body: { visible: true } })
+    assert.equal((await listMembers(first.id, presenceOrganizationId)).find(item => item.userId === second.id)?.online, true)
+    await http('/auth/logout', { method: 'POST', cookie: secondCookie, body: {} })
+    assert.equal((await listMembers(first.id, presenceOrganizationId)).find(item => item.userId === second.id)?.online, false)
+  })
+})
+
+describe('pending shift-request lifecycle regressions', { concurrency: false }, () => {
+  let organization: { id: string }
+  let employeeId: string
+  let ownerMemberId: string
+  let shiftTypeId: string
+  const shiftInput = (date: string) => ({ memberId: employeeId, startDate: date, startTime: '09:00', endDate: date, endTime: '17:00', breakMinutes: 0, description: null })
+  const proposal = (shiftId: string, date: string) => createRequest(member.id, organization.id, { requestTypeId: shiftTypeId, relatedShiftId: shiftId, proposedStartDate: date, proposedStartTime: '10:00', proposedEndDate: date, proposedEndTime: '18:00', comment: 'Перенести смену' })
+  async function assertCancelled(id: string) {
+    const record = await prisma.organizationRequest.findUniqueOrThrow({ where: { id }, include: { events: true } })
+    assert.equal(record.status, 'CANCELLED'); assert.ok(record.cancelledAt); assert.ok(record.resolutionComment)
+    assert.equal(record.events.filter(event => event.type === 'CANCELLED').length, 1)
+    assert.equal((await listAccountNotifications(member.id)).some(item => item.requestId === id && item.type === 'REQUEST_CANCELLED'), true)
+    assert.equal((await listRequests(owner.id, organization.id, 'incoming', { page: 1, pageSize: 100 })).requests.some(item => item.id === id), false)
+    assert.equal((await listRequests(owner.id, organization.id, 'history', { page: 1, pageSize: 100 })).requests.some(item => item.id === id), true)
+    await expectCode(() => resolveRequest(owner.id, organization.id, id, 'APPROVED', null), 'REQUEST_ALREADY_RESOLVED')
+  }
+  before(async () => {
+    organization = await createOrganization(owner.id, { name: 'Request conflict regressions', description: null, timezone: 'Europe/Moscow' })
+    employeeId = (await prisma.organizationMember.create({ data: { organizationId: organization.id, userId: member.id } })).id
+    ownerMemberId = (await prisma.organizationMember.findUniqueOrThrow({ where: { organizationId_userId: { organizationId: organization.id, userId: owner.id } } })).id
+    shiftTypeId = (await listRequestTypes(member.id, organization.id)).find(type => type.systemCode === 'SHIFT_CHANGE')!.id
+  })
+  it('keeps a proposal for description-only edits, cancels it atomically for time changes', async () => {
+    const shift = await createShift(owner.id, organization.id, shiftInput('2039-01-01'))
+    const request = await proposal(shift.id, '2039-01-02')
+    await updateShift(owner.id, organization.id, shift.id, { ...shiftInput('2039-01-01'), description: 'Другая заметка' })
+    assert.equal((await prisma.organizationRequest.findUniqueOrThrow({ where: { id: request.id } })).status, 'PENDING')
+    await updateShift(owner.id, organization.id, shift.id, { ...shiftInput('2039-01-01'), startTime: '08:00' })
+    assert.equal((await prisma.organizationRequest.findUniqueOrThrow({ where: { id: request.id } })).status, 'CANCELLED')
+    await assertCancelled(request.id)
+  })
+  it('cancels pending proposals when the original shift is cancelled or assigned to someone else', async () => {
+    const shift = await createShift(owner.id, organization.id, shiftInput('2039-02-01'))
+    const request = await proposal(shift.id, '2039-02-02')
+    await cancelShift(owner.id, organization.id, shift.id, 'Нет работы')
+    await assertCancelled(request.id)
+    const reassigned = await createShift(owner.id, organization.id, shiftInput('2039-02-03'))
+    const secondRequest = await proposal(reassigned.id, '2039-02-04')
+    await updateShift(owner.id, organization.id, reassigned.id, { ...shiftInput('2039-02-03'), memberId: ownerMemberId })
+    await assertCancelled(secondRequest.id)
+  })
+  it('preserves the approved proposal and cancels competing pending proposals for the same original shift', async () => {
+    const shift = await createShift(owner.id, organization.id, shiftInput('2039-03-01'))
+    const a = await proposal(shift.id, '2039-03-02')
+    const b = await proposal(shift.id, '2039-03-03')
+    await resolveRequest(owner.id, organization.id, a.id, 'APPROVED', null)
+    assert.equal((await prisma.organizationRequest.findUniqueOrThrow({ where: { id: a.id } })).status, 'APPROVED')
+    await assertCancelled(b.id)
+    assert.equal((await getRequest(member.id, organization.id, a.id)).request.originalStartAt.toISOString(), '2039-03-01T06:00:00.000Z')
+  })
+  it('cancels shift-change proposals when approving an absence cancels the original shifts', async () => {
+    const shift = await createShift(owner.id, organization.id, shiftInput('2039-04-01'))
+    const change = await proposal(shift.id, '2039-04-02')
+    const dayOff = (await listRequestTypes(member.id, organization.id)).find(type => type.systemCode === 'DAY_OFF')!
+    const absence = await createRequest(member.id, organization.id, { requestTypeId: dayOff.id, startDate: '2039-04-01' })
+    await resolveRequest(owner.id, organization.id, absence.id, 'APPROVED', null, true)
+    await assertCancelled(change.id)
+    assert.equal((await prisma.workShift.findUniqueOrThrow({ where: { id: shift.id } })).status, 'CANCELLED')
+  })
+  it('reconciles expired proposals and legacy external edits with one cancellation event', async () => {
+    const shift = await createShift(owner.id, organization.id, shiftInput('2039-05-01'))
+    const expired = await proposal(shift.id, '2039-05-02')
+    await prisma.organizationRequest.update({ where: { id: expired.id }, data: { proposedStartAt: new Date('2020-01-01T10:00:00Z') } })
+    await getRequest(member.id, organization.id, expired.id)
+    await assertCancelled(expired.id) // List/get reconciliation is the catch-up mechanism.
+    const external = await proposal(shift.id, '2039-05-03')
+    await prisma.workShift.update({ where: { id: shift.id }, data: { scheduledStartAt: new Date('2039-05-01T05:00:00Z') } })
+    await getRequest(member.id, organization.id, external.id)
+    await assertCancelled(external.id)
+    await getRequest(member.id, organization.id, external.id)
+    assert.equal(await prisma.requestEvent.count({ where: { requestId: external.id, type: 'CANCELLED' } }), 1)
+  })
+  it('cannot approve a proposal concurrently with cancelling the original shift', async () => {
+    const shift = await createShift(owner.id, organization.id, shiftInput('2039-06-01'))
+    const request = await proposal(shift.id, '2039-06-02')
+    const results = await Promise.allSettled([resolveRequest(owner.id, organization.id, request.id, 'APPROVED', null), cancelShift(owner.id, organization.id, shift.id, 'Отмена')])
+    assert.ok(results.some(result => result.status === 'fulfilled'))
+    const actualShift = await prisma.workShift.findUniqueOrThrow({ where: { id: shift.id } })
+    const actualRequest = await prisma.organizationRequest.findUniqueOrThrow({ where: { id: request.id } })
+    if (actualRequest.status === 'APPROVED') assert.equal(actualShift.scheduledStartAt.toISOString(), '2039-06-02T07:00:00.000Z')
+    else assert.equal(actualRequest.status, 'CANCELLED')
+    assert.notEqual(actualRequest.status, 'PENDING')
+  })
+})
+
+describe('notification history, invitation presentation and email policy', { concurrency: false }, () => {
+  let organization: Awaited<ReturnType<typeof createOrganization>>
+  let maker: { id: string; email: string }
+  let receiver: { id: string; email: string }
+  let receiverMemberId: string
+  before(async () => {
+    maker = await prisma.user.create({ data: { email: email('notice-owner'), passwordHash: 'test-only', emailVerifiedAt: new Date(), firstName: 'Иван', lastName: 'Петров', middleName: 'Иванович' } })
+    receiver = await prisma.user.create({ data: { email: email('notice-member'), passwordHash: 'test-only', emailVerifiedAt: new Date() } })
+    organization = await createOrganization(maker.id, { name: 'Notification history', description: null, timezone: 'Asia/Vladivostok' })
+  })
+
+  it('includes logo and employee identity in registered, email-token and code invitations; reading does not consume the invite', async () => {
+    const image = await sharp({ create: { width: 8, height: 8, channels: 3, background: '#444' } }).png().toBuffer()
+    const logoUrl = await replaceOrganizationLogo(maker.id, organization.id, image)
+    try {
+      const result = await createEmailInvitation(maker.id, organization.id, receiver.email)
+      assert.equal(result.inviterName, 'Петров Иван Иванович')
+      assert.equal(result.logoUrl, logoUrl)
+      assert.equal(result.invitation.expiresAt.getTime() - result.invitation.createdAt.getTime(), 86_400_000)
+      const pending = (await listPendingInvitations(receiver.email)).find(item => item.id === result.invitation.id)!
+      assert.equal(pending.invitedBy, 'Петров Иван Иванович')
+      assert.equal(pending.organization.logoUrl, logoUrl)
+      assert.equal((await previewEmailInvitation(receiver.email, result.token)).organization.logoUrl, logoUrl)
+      const code = await createCodeInvitation(maker.id, organization.id)
+      const codePreview = await previewCodeInvitation(receiver.id, code.code)
+      assert.equal(codePreview.organization.logoUrl, logoUrl)
+      assert.equal(codePreview.invitedBy, 'Петров Иван Иванович')
+      const id = `invite:${pending.id}`
+      await readHistoryNotification(receiver.id, receiver.email, id, false)
+      let item = (await listNotificationHistory(receiver.id, receiver.email, { limit: 20 })).notifications.find(item => item.id === id)!
+      assert.equal(item.state, 'ACTIVE')
+      assert.ok(item.readAt)
+      assert.equal(item.organization.logoUrl, logoUrl)
+      assert.equal(item.inviter, 'Петров Иван Иванович')
+      assert.equal(item.href, `/app#invitation-${pending.id}`)
+      await readHistoryNotification(receiver.id, receiver.email, id, true)
+      assert.equal((await listNotificationHistory(receiver.id, receiver.email, { limit: 20, unread: true })).notifications.find(item => item.id === id)?.readAt, null)
+      await acceptEmailInvitation(receiver.id, receiver.email, pending.id)
+      item = (await listNotificationHistory(receiver.id, receiver.email, { limit: 20 })).notifications.find(item => item.id === id)!
+      assert.equal(item.state, 'ACCEPTED')
+      assert.ok(item.readAt)
+      assert.equal(item.href, `/app/organizations/${organization.id}`)
+      await expectCode(() => acceptEmailInvitation(receiver.id, receiver.email, pending.id), 'INVITATION_ALREADY_USED')
+      receiverMemberId = (await prisma.organizationMember.findUniqueOrThrow({ where: { organizationId_userId: { organizationId: organization.id, userId: receiver.id } } })).id
+    } finally { await removeOrganizationLogo(maker.id, organization.id); await cleanupPendingFiles() }
+  })
+
+  it('retains a pre-registration invitation for the new matching account and rejects another recipient', async () => {
+    const newEmail = email('notice-new-user')
+    const invite = await createEmailInvitation(maker.id, organization.id, newEmail)
+    assert.equal(await prisma.user.count({ where: { email: newEmail } }), 0)
+    const newcomer = await prisma.user.create({ data: { email: newEmail, passwordHash: 'test-only', emailVerifiedAt: new Date() } })
+    assert.equal((await previewEmailInvitation(newEmail, invite.token)).id, invite.invitation.id)
+    assert.ok((await listNotificationHistory(newcomer.id, newEmail, { limit: 20 })).notifications.some(item => item.id === `invite:${invite.invitation.id}`))
+    await expectCode(() => previewEmailInvitation(receiver.email, invite.token), 'INVITATION_EMAIL_MISMATCH')
+    await expectCode(() => readHistoryNotification(receiver.id, receiver.email, `invite:${invite.invitation.id}`, false), 'NOTIFICATION_NOT_FOUND')
+    await acceptEmailInvitation(newcomer.id, newEmail, invite.invitation.id)
+    assert.equal((await listNotificationHistory(newcomer.id, newEmail, { limit: 20 })).notifications[0].state, 'ACCEPTED')
+  })
+
+  it('preserves expired, rejected and revoked invitations with email fallback and blocks expiration at the exact boundary', async () => {
+    await prisma.user.update({ where: { id: maker.id }, data: { firstName: null, lastName: null, middleName: null } })
+    const recipient = await prisma.user.create({ data: { email: email('notice-expired'), passwordHash: 'test-only', emailVerifiedAt: new Date() } })
+    const expired = await createEmailInvitation(maker.id, organization.id, recipient.email)
+    assert.equal(expired.inviterName, maker.email)
+    await prisma.organizationInvite.update({ where: { id: expired.invitation.id }, data: { expiresAt: new Date() } })
+    await expectCode(() => acceptEmailInvitation(recipient.id, recipient.email, expired.invitation.id), 'INVITATION_EXPIRED')
+    await expectCode(() => previewEmailInvitation(recipient.email, expired.token), 'INVITATION_EXPIRED')
+    const rejected = await createEmailInvitation(maker.id, organization.id, recipient.email)
+    await rejectEmailInvitation(recipient.email, rejected.invitation.id)
+    const revoked = await createEmailInvitation(maker.id, organization.id, recipient.email)
+    await revokeInvitation(maker.id, organization.id, revoked.invitation.id)
+    const states = (await listNotificationHistory(recipient.id, recipient.email, { limit: 20 })).notifications.map(item => item.state)
+    // Creating a replacement can revoke expired records; expiry itself remains impossible to accept.
+    assert.ok(states.includes('EXPIRED'))
+    assert.ok(states.includes('REJECTED'))
+    assert.ok(states.includes('REVOKED'))
+    assert.equal((await listPendingInvitations(recipient.email)).length, 0)
+    assert.equal(invitationTimeRemaining('2026-01-02T00:00:00Z', Date.parse('2026-01-01T12:34:00Z')), 'Осталось 11 ч 26 мин')
+    assert.equal(invitationTimeRemaining('2026-01-02T00:00:00+03:00', Date.parse('2026-01-01T21:00:00Z')), 'Срок истёк')
+    assert.equal(invitationTimeRemaining('2026-01-02T00:00:00Z', Date.parse('2026-01-01T23:59:59Z')), 'Осталось 1 мин')
+  })
+
+  it('includes an accepted one-time code only in its actual recipient history', async () => {
+    const recipient = await prisma.user.create({ data: { email: email('notice-code'), passwordHash: 'test-only', emailVerifiedAt: new Date() } })
+    const code = await createCodeInvitation(maker.id, organization.id)
+    await acceptCodeInvitation(recipient.id, recipient.email, code.code)
+    const id = `invite:${code.invitation.id}`
+    const history = await listNotificationHistory(recipient.id, recipient.email, { limit: 20 })
+    assert.equal(history.notifications.find(item => item.id === id)?.state, 'ACCEPTED')
+    assert.ok(!(await listNotificationHistory(receiver.id, receiver.email, { limit: 50 })).notifications.some(item => item.id === id))
+    await expectCode(() => readHistoryNotification(receiver.id, receiver.email, id, false), 'NOTIFICATION_NOT_FOUND')
+    await readHistoryNotification(recipient.id, recipient.email, id, true)
+    assert.ok((await listNotificationHistory(recipient.id, recipient.email, { limit: 20, unread: true })).notifications.some(item => item.id === id))
+  })
+
+  it('paginates mixed sources at identical timestamps without repetition or omissions and enforces read ownership', async () => {
+    const reader = await prisma.user.create({ data: { email: email('notice-pages'), passwordHash: 'test-only', emailVerifiedAt: new Date() } })
+    const timestamp = new Date('2040-01-01T00:00:00Z')
+    const events = await prisma.accountNotification.createManyAndReturn({ data: Array.from({ length: 42 }, (_, i) => ({ userId: reader.id, organizationId: organization.id, type: 'ROLE_CHANGED' as const, title: `Событие ${i}`, message: 'Проверка', createdAt: timestamp })) })
+    const invite = await createEmailInvitation(maker.id, organization.id, reader.email)
+    await prisma.organizationInvite.update({ where: { id: invite.invitation.id }, data: { createdAt: timestamp } })
+    const ids: string[] = []
+    let cursor: string | undefined
+    do {
+      const page = await listNotificationHistory(reader.id, reader.email, { limit: 7, cursor })
+      assert.ok(page.notifications.length <= 7)
+      ids.push(...page.notifications.map(item => item.id))
+      cursor = page.nextCursor ?? undefined
+    } while (cursor)
+    assert.equal(ids.length, 43)
+    assert.equal(new Set(ids).size, 43)
+    await readHistoryNotification(reader.id, reader.email, `event:${events[0].id}`, false)
+    await readHistoryNotification(reader.id, reader.email, `event:${events[0].id}`, false) // idempotent
+    assert.equal((await listNotificationHistory(reader.id, reader.email, { limit: 50, unread: true })).notifications.length, 42)
+    await readHistoryNotification(reader.id, reader.email, `event:${events[0].id}`, true)
+    await expectCode(() => readHistoryNotification(receiver.id, receiver.email, `event:${events[0].id}`, false), 'NOTIFICATION_NOT_FOUND')
+    await expectCode(() => listNotificationHistory(reader.id, reader.email, { limit: 20, cursor: 'invalid' }), 'INVALID_CURSOR')
+    assert.equal(decodeNotificationCursor(undefined), null)
+  })
+
+  it('keeps immutable assignment/change/cancellation events; description edits never produce another notification', async () => {
+    const input = { memberId: receiverMemberId, startDate: '2041-02-01', startTime: '10:00', endDate: '2041-02-01', endTime: '18:00', breakMinutes: 0, description: null }
+    const shift = await createShift(maker.id, organization.id, input)
+    await updateShift(maker.id, organization.id, shift.id, { ...input, description: 'Уточнение' })
+    assert.equal(await prisma.accountNotification.count({ where: { shiftId: shift.id } }), 1)
+    await updateShift(maker.id, organization.id, shift.id, { ...input, startTime: '11:00' })
+    await cancelShift(maker.id, organization.id, shift.id, 'Отмена')
+    const events = await prisma.accountNotification.findMany({ where: { shiftId: shift.id }, orderBy: { createdAt: 'asc' } })
+    assert.deepEqual(events.map(item => item.type), ['SHIFT_ASSIGNED', 'SHIFT_CHANGED', 'SHIFT_CANCELLED'])
+    assert.ok(events[0].message.includes('10:00'))
+    assert.ok(events[1].message.includes('11:00'))
+    const history = await listNotificationHistory(receiver.id, receiver.email, { limit: 50 })
+    assert.ok(history.notifications.some(item => item.type === 'SHIFT_CANCELLED' && item.href?.includes(`shift=${shift.id}`)))
+  })
+
+  it('limits concurrent urgent shift email attempts per employee and organization while retaining every in-app event', async () => {
+    const now = new Date('2042-01-01T00:00:00Z')
+    const events = await prisma.accountNotification.createManyAndReturn({ data: Array.from({ length: 3 }, () => ({ userId: receiver.id, organizationId: organization.id, type: 'SHIFT_CHANGED' as const, title: 'Изменение', message: 'Тест' })) })
+    const results = await Promise.all(events.map(event => reserveShiftEmail(event.id, receiver.id, organization.id, now)))
+    assert.equal(results.filter(Boolean).length, 1)
+    assert.equal(await prisma.accountNotification.count({ where: { id: { in: events.map(item => item.id) } } }), 3)
+    assert.equal(await reserveShiftEmail(events[results.findIndex(value => !value)].id, receiver.id, organization.id, new Date(now.getTime() + 3_600_000)), true)
+    assert.equal(await reserveShiftEmail(events[results.findIndex(Boolean)].id, receiver.id, organization.id, new Date(now.getTime() + 7_200_000)), false)
+    assert.equal(isUrgentShiftEmail(new Date(now.getTime() + 23 * 3_600_000), new Date(now.getTime() + 25 * 3_600_000), now), true)
+    assert.equal(isUrgentShiftEmail(new Date(now.getTime() + 25 * 3_600_000), new Date(now.getTime() + 26 * 3_600_000), now), false)
+    assert.equal(isUrgentShiftEmail(new Date(now.getTime() - 10_000), new Date(now.getTime() - 1), now), false)
   })
 })

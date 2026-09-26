@@ -1,9 +1,10 @@
+import { cancelShiftRequests, lockShift } from '../requests/shift-conflicts.ts'
 import type { Prisma, WorkShift } from '../../generated/prisma/client.ts'
 import { prisma } from '../db.ts'
 import { ApiError } from '../api-error.ts'
 import { getMembership, requireOrganizationRole } from '../organizations/permissions.ts'
 import { addCalendarDays, startOfZonedDate, zonedDateTimeToUtc } from './timezone.ts'
-import { deliverShiftAssignment } from '../mail.ts'
+import { recordShiftNotification, sendImportantShiftEmail } from '../organizations/notification-service.ts'
 
 const dateText = (value: Date) => value.toISOString().slice(0, 10)
 
@@ -108,9 +109,15 @@ export async function createShift(userId: string, organizationId: string, input:
   const conflict = await prisma.workShift.findFirst({ where: { memberId: input.memberId, status: 'SCHEDULED', scheduledStartAt: { lt: endAt }, scheduledEndAt: { gt: startAt } } })
   if (conflict) throw new ApiError(409, 'SHIFT_OVERLAP', 'У сотрудника уже есть пересекающаяся смена.')
   try {
-    const shift = await prisma.workShift.create({ data: { organizationId, memberId: input.memberId, createdByMemberId: actor.id, scheduledStartAt: startAt, scheduledEndAt: endAt, breakMinutes: input.breakMinutes, description: input.description }, include: shiftInclude })
-    if (endAt > new Date()) void deliverShiftAssignment(target.user.email, organizationId, actor.organization.name, startAt, endAt, actor.organization.timezone).catch((error) => console.error('Shift-assignment email failed:', error))
-    return publicShift(shift)
+    const shift = await prisma.$transaction(async tx => {
+      await activeTarget(tx, organizationId, input.memberId)
+      await assertNoApprovedAbsence(organizationId, input.memberId, startAt, endAt, actor.organization.timezone, tx)
+      const created = await tx.workShift.create({ data: { organizationId, memberId: input.memberId, createdByMemberId: actor.id, scheduledStartAt: startAt, scheduledEndAt: endAt, breakMinutes: input.breakMinutes, description: input.description }, include: shiftInclude })
+      const notification = await recordShiftNotification(tx, created, 'SHIFT_ASSIGNED', actor.organization.timezone)
+      return { created, notification }
+    }, { isolationLevel: 'Serializable' })
+    void sendImportantShiftEmail(shift.notification.id, shift.created, target.user.email, actor.organization.name, actor.organization.timezone, 'SHIFT_ASSIGNED').catch(error => console.error('Shift email failed:', error))
+    return publicShift(shift.created)
   } catch (error) {
     if (isOverlapError(error)) throw new ApiError(409, 'SHIFT_OVERLAP', 'У сотрудника уже есть пересекающаяся смена.')
     throw error
@@ -132,9 +139,33 @@ export async function updateShift(userId: string, organizationId: string, shiftI
   if (conflict) throw new ApiError(409, 'SHIFT_OVERLAP', 'У сотрудника уже есть пересекающаяся смена.')
   try {
     const assignmentChanged = current.memberId !== input.memberId || current.scheduledStartAt.getTime() !== startAt.getTime() || current.scheduledEndAt.getTime() !== endAt.getTime()
-    const shift = await prisma.workShift.update({ where: { id: shiftId }, data: { memberId: input.memberId, scheduledStartAt: startAt, scheduledEndAt: endAt, breakMinutes: input.breakMinutes, description: input.description, ...(assignmentChanged ? { assignmentReadAt: null } : {}) }, include: shiftInclude })
-    if (assignmentChanged && endAt > new Date()) void deliverShiftAssignment(target.user.email, organizationId, actor.organization.name, startAt, endAt, actor.organization.timezone).catch((error) => console.error('Shift-assignment email failed:', error))
-    return publicShift(shift)
+    const shift = await prisma.$transaction(async tx => {
+      await lockShift(tx, shiftId)
+      const fresh = await shiftInOrganization(tx, organizationId, shiftId)
+      if (fresh.updatedAt.getTime() !== current.updatedAt.getTime() || fresh.status !== 'SCHEDULED') throw new ApiError(409, 'SHIFT_CHANGED', 'Смена уже изменилась. Откройте её заново.')
+      await activeTarget(tx, organizationId, input.memberId)
+      await assertNoApprovedAbsence(organizationId, input.memberId, startAt, endAt, actor.organization.timezone, tx)
+      const changed = await tx.workShift.update({ where: { id: shiftId }, data: { memberId: input.memberId, scheduledStartAt: startAt, scheduledEndAt: endAt, breakMinutes: input.breakMinutes, description: input.description, ...(assignmentChanged ? { assignmentReadAt: null } : {}) }, include: shiftInclude })
+      let notification = null
+      let previousAssignment = null
+      if (assignmentChanged) {
+        await cancelShiftRequests(tx, organizationId, [shiftId], actor.id, 'Исходная смена изменена. Создайте новую заявку при необходимости.')
+        if (fresh.memberId !== changed.memberId) {
+          const previousMember = await tx.organizationMember.findUniqueOrThrow({ where: { id: fresh.memberId }, include: { user: { select: { email: true } } } })
+          const previousShift = { ...fresh, member: previousMember }
+          const previousNotification = await recordShiftNotification(tx, previousShift, 'SHIFT_CANCELLED', actor.organization.timezone)
+          previousAssignment = { shift: previousShift, notification: previousNotification }
+        }
+        notification = await recordShiftNotification(tx, changed, fresh.memberId !== changed.memberId ? 'SHIFT_ASSIGNED' : 'SHIFT_CHANGED', actor.organization.timezone)
+      }
+      return { changed, notification, previousAssignment }
+    }, { isolationLevel: 'Serializable' })
+    if (shift.notification) void sendImportantShiftEmail(shift.notification.id, shift.changed, target.user.email, actor.organization.name, actor.organization.timezone, current.memberId !== input.memberId ? 'SHIFT_ASSIGNED' : 'SHIFT_CHANGED', current).catch(error => console.error('Shift email failed:', error))
+    if (shift.previousAssignment) {
+      const previous = shift.previousAssignment
+      void sendImportantShiftEmail(previous.notification.id, previous.shift, previous.shift.member.user.email, actor.organization.name, actor.organization.timezone, 'SHIFT_CANCELLED').catch(error => console.error('Shift email failed:', error))
+    }
+    return publicShift(shift.changed)
   } catch (error) {
     if (isOverlapError(error)) throw new ApiError(409, 'SHIFT_OVERLAP', 'У сотрудника уже есть пересекающаяся смена.')
     throw error
@@ -142,19 +173,21 @@ export async function updateShift(userId: string, organizationId: string, shiftI
 }
 
 export async function listShiftNotifications(userId: string) {
-  const shifts = await prisma.workShift.findMany({
-    where: { member: { userId, leftAt: null }, organization: { deletedAt: null }, status: 'SCHEDULED', assignmentReadAt: null, scheduledEndAt: { gt: new Date() } },
-    include: { organization: { select: { id: true, name: true, timezone: true } } },
-    orderBy: { createdAt: 'desc' },
-    take: 50,
+  const notifications = await prisma.accountNotification.findMany({
+    where: { userId, readAt: null, type: { in: ['SHIFT_ASSIGNED', 'SHIFT_CHANGED'] }, shift: { member: { userId, leftAt: null }, status: 'SCHEDULED', scheduledEndAt: { gt: new Date() } }, organization: { deletedAt: null } },
+    include: { shift: true, organization: { select: { id: true, name: true, timezone: true } } },
+    distinct: ['shiftId'], orderBy: { createdAt: 'desc' }, take: 50,
   })
-  return shifts.map((shift) => ({ id: shift.id, organization: shift.organization, scheduledStartAt: shift.scheduledStartAt, scheduledEndAt: shift.scheduledEndAt, createdAt: shift.createdAt }))
+  return notifications.flatMap(notification => notification.shift ? [{ id: notification.shift.id, organization: notification.organization, scheduledStartAt: notification.shift.scheduledStartAt, scheduledEndAt: notification.shift.scheduledEndAt, createdAt: notification.createdAt }] : [])
 }
 
 export async function readShiftNotification(userId: string, shiftId: string) {
   const shift = await prisma.workShift.findFirst({ where: { id: shiftId, member: { userId } }, select: { id: true } })
   if (!shift) throw new ApiError(404, 'SHIFT_NOTIFICATION_NOT_FOUND', 'Уведомление о смене не найдено.')
-  await prisma.workShift.update({ where: { id: shiftId }, data: { assignmentReadAt: new Date() } })
+  await prisma.$transaction([
+    prisma.workShift.update({ where: { id: shiftId }, data: { assignmentReadAt: new Date() } }),
+    prisma.accountNotification.updateMany({ where: { shiftId, userId, type: { in: ['SHIFT_ASSIGNED', 'SHIFT_CHANGED'] }, readAt: null }, data: { readAt: new Date() } }),
+  ])
 }
 
 export async function getShift(userId: string, organizationId: string, shiftId: string, page = 1, limit = 20) {
@@ -175,8 +208,17 @@ export async function cancelShift(userId: string, organizationId: string, shiftI
   requireOrganizationRole(actor.role, ['OWNER', 'ADMIN'])
   const current = await shiftInOrganization(prisma, organizationId, shiftId)
   if (current.status === 'CANCELLED') throw new ApiError(409, 'SHIFT_CANCELLED', 'Смена уже отменена.')
-  const shift = await prisma.workShift.update({ where: { id: shiftId }, data: { status: 'CANCELLED', cancelledAt: new Date(), cancelledByMemberId: actor.id, cancellationReason: reason }, include: shiftInclude })
-  return publicShift(shift)
+  const shift = await prisma.$transaction(async tx => {
+    await lockShift(tx, shiftId)
+    const fresh = await shiftInOrganization(tx, organizationId, shiftId)
+    if (fresh.status === 'CANCELLED') throw new ApiError(409, 'SHIFT_CANCELLED', 'Смена уже отменена.')
+    const changed = await tx.workShift.update({ where: { id: shiftId }, data: { status: 'CANCELLED', cancelledAt: new Date(), cancelledByMemberId: actor.id, cancellationReason: reason }, include: shiftInclude })
+    await cancelShiftRequests(tx, organizationId, [shiftId], actor.id, 'Исходная смена отменена.')
+    const notification = await recordShiftNotification(tx, changed, 'SHIFT_CANCELLED', actor.organization.timezone)
+    return { changed, notification }
+  }, { isolationLevel: 'Serializable' })
+  void sendImportantShiftEmail(shift.notification.id, shift.changed, shift.changed.member.user.email, actor.organization.name, actor.organization.timezone, 'SHIFT_CANCELLED').catch(error => console.error('Shift email failed:', error))
+  return publicShift(shift.changed)
 }
 
 export async function correctActualTime(userId: string, organizationId: string, shiftId: string, input: ActualInput) {
@@ -190,7 +232,9 @@ export async function correctActualTime(userId: string, organizationId: string, 
   validateDuration(startAt, endAt, input.breakMinutes)
   if (endAt > new Date()) throw new ApiError(400, 'ACTUAL_TIME_IN_FUTURE', 'Фактическое окончание не может быть в будущем.')
   return prisma.$transaction(async (tx) => {
+    await lockShift(tx, shiftId)
     const fresh = await shiftInOrganization(tx, organizationId, shiftId)
+    if (fresh.status === 'CANCELLED') throw new ApiError(409, 'SHIFT_CANCELLED', 'Отменённую смену нельзя корректировать.')
     const previousStartAt = fresh.actualStartAt ?? fresh.scheduledStartAt
     const previousEndAt = fresh.actualEndAt ?? fresh.scheduledEndAt
     const previousBreakMinutes = fresh.actualBreakMinutes ?? fresh.breakMinutes

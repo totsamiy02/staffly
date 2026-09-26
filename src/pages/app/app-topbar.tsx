@@ -8,7 +8,7 @@ import ProfileMenu from './topbar/profile-menu.tsx'
 import type { OrganizationSummary } from '../../app/organizations/types.ts'
 
 export default function AppTopbar({ organization }: { organization?: OrganizationSummary }) {
-  const { user, logout, apiRequest } = useAuth()
+  const { user, logout } = useAuth()
   const navigate = useNavigate()
   const [openPanel, setOpenPanel] = useState<'notifications' | 'profile' | null>(null)
   const [logoutBusy, setLogoutBusy] = useState(false)
@@ -26,13 +26,6 @@ export default function AppTopbar({ organization }: { organization?: Organizatio
     return () => { document.removeEventListener('mousedown', closeOutside); document.removeEventListener('keydown', closeWithEscape) }
   }, [])
 
-  useEffect(() => {
-    const heartbeat = () => { if (document.visibilityState === 'visible') void apiRequest('/profile/presence', { method: 'POST', body: {} }).catch(() => undefined) }
-    heartbeat()
-    const timer = window.setInterval(heartbeat, 60_000)
-    document.addEventListener('visibilitychange', heartbeat)
-    return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', heartbeat) }
-  }, [apiRequest])
 
   async function signOut() {
     setLogoutBusy(true)

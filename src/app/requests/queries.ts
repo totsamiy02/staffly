@@ -1,3 +1,4 @@
+import { liveQueryOptions } from '../live-query.ts'
 import { useQuery } from '@tanstack/react-query'
 import { useAuth } from '../auth/auth-context.tsx'
 import type { RequestDetail, RequestList, RequestStatus, RequestType } from './types.ts'
@@ -5,7 +6,7 @@ import type { OrganizationRole } from '../organizations/types.ts'
 
 export function useRequestTypes(organizationId: string, includeInactive = false) {
   const { apiRequest } = useAuth()
-  return useQuery({ queryKey: ['request-types', organizationId, includeInactive], queryFn: () => apiRequest<{ types: RequestType[] }>(`/organizations/${organizationId}/request-types${includeInactive ? '?includeInactive=true' : ''}`) })
+  return useQuery({ ...liveQueryOptions, queryKey: ['request-types', organizationId, includeInactive], queryFn: () => apiRequest<{ types: RequestType[] }>(`/organizations/${organizationId}/request-types${includeInactive ? '?includeInactive=true' : ''}`) })
 }
 
 export function useRequests(organizationId: string, scope: 'mine' | 'incoming' | 'history', filters: { page: number; status?: RequestStatus; typeId?: string; memberId?: string; role?: OrganizationRole; from?: string; to?: string; search?: string }) {
@@ -18,10 +19,10 @@ export function useRequests(organizationId: string, scope: 'mine' | 'incoming' |
   if (filters.from) query.set('from', filters.from)
   if (filters.to) query.set('to', filters.to)
   if (filters.search) query.set('search', filters.search)
-  return useQuery({ queryKey: ['requests', organizationId, scope, filters], queryFn: () => apiRequest<RequestList>(`/organizations/${organizationId}/requests/${scope}?${query}`), placeholderData: (previous) => previous })
+  return useQuery({ ...liveQueryOptions, queryKey: ['requests', organizationId, scope, filters], queryFn: () => apiRequest<RequestList>(`/organizations/${organizationId}/requests/${scope}?${query}`), placeholderData: (previous) => previous })
 }
 
 export function useRequestDetail(organizationId: string, requestId: string | null) {
   const { apiRequest } = useAuth()
-  return useQuery({ queryKey: ['request', organizationId, requestId], queryFn: () => apiRequest<RequestDetail>(`/organizations/${organizationId}/requests/${requestId}`), enabled: Boolean(requestId) })
+  return useQuery({ ...liveQueryOptions, queryKey: ['request', organizationId, requestId], queryFn: () => apiRequest<RequestDetail>(`/organizations/${organizationId}/requests/${requestId}`), enabled: Boolean(requestId) })
 }
