@@ -1,4 +1,4 @@
-import { reportSickness, listAbsences, changeAbsence, absencePeriodBody, absenceEditBody, absenceCancelBody, absenceListQuery } from './absence-service.ts'
+import { reportSickness, listAbsences, changeAbsence, absenceReportBody, absenceEditBody, absenceCancelBody, absenceListQuery } from './absence-service.ts'
 import { planningData, savePosition, saveTemplate, assignPositions, saveWorkload, positionBody, templateBody, assignmentBody, workloadBody } from './planning.ts'
 import { Router, type Request } from 'express'
 import { rateLimit } from 'express-rate-limit'
@@ -34,7 +34,11 @@ router.get('/organizations/:organizationId/absences', async (request, response) 
 })
 router.post('/organizations/:organizationId/absences/sick', mutationLimiter, async (request, response) => {
   const { organizationId } = parse(organizationParams, request.params)
-  response.status(201).json(await reportSickness(auth(request).userId, organizationId, parse(absencePeriodBody, request.body)))
+  response.status(201).json(await reportSickness(auth(request).userId, organizationId, parse(absenceReportBody, request.body)))
+})
+router.post('/organizations/:organizationId/absences/report', mutationLimiter, async (request, response) => {
+  const { organizationId } = parse(organizationParams, request.params)
+  response.status(201).json(await reportSickness(auth(request).userId, organizationId, parse(absenceReportBody, request.body)))
 })
 router.patch('/organizations/:organizationId/absences/:id', mutationLimiter, async (request, response) => {
   const { organizationId, id } = parse(organizationParams.extend({ id: z.string().uuid() }), request.params)
@@ -77,8 +81,8 @@ router.post('/organizations/:organizationId/shifts/batch', mutationLimiter, asyn
 
 router.get('/organizations/:organizationId/schedule', async (request, response) => {
   const { organizationId } = parse(organizationParams, request.params)
-  const { from, to } = parse(scheduleRangeQuery, request.query)
-  response.json(await listSchedule(auth(request).userId, organizationId, from, to))
+  const { from, to, mode } = parse(scheduleRangeQuery, request.query)
+  response.json(await listSchedule(auth(request).userId, organizationId, from, to, mode))
 })
 
 router.get('/organizations/:organizationId/schedule/mine/upcoming', async (request, response) => {

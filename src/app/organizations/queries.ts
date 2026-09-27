@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { liveQueryOptions } from '../live-query.ts'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '../auth/auth-context.tsx'
@@ -17,9 +18,9 @@ export function usePendingInvitations() {
   })
 }
 
-export function useAccountNotifications() {
+export function useAccountNotifications(organizationId?: string) {
   const { apiRequest, user } = useAuth()
-  return useQuery({ ...liveQueryOptions, queryKey: ['account-notifications'], queryFn: () => apiRequest<{ notifications: AccountNotification[] }>('/account-notifications'), enabled: Boolean(user) })
+  return useQuery({ ...liveQueryOptions, queryKey: ['account-notifications', organizationId], queryFn: () => apiRequest<{ notifications: AccountNotification[] }>(`/account-notifications${organizationId ? `?organizationId=${organizationId}` : ''}`), enabled: Boolean(user) })
 }
 
 export function useOrganization(organizationId: string | undefined) {
@@ -45,18 +46,23 @@ export function useActiveOrganizationInvitations(organizationId: string | undefi
   return useQuery({ ...liveQueryOptions, queryKey: ['organization-invitations', organizationId], queryFn: () => apiRequest<{ invitations: ActiveOrganizationInvitation[] }>(`/organizations/${organizationId}/invitations`), enabled: Boolean(user && organizationId && enabled) })
 }
 
-export function useNotificationHistory(options: { limit?: number; cursor?: string; unread?: boolean } = {}) {
+export function useNotificationHistory(options: { limit?: number; cursor?: string; unread?: boolean; organizationId?: string; category?: string } = {}) {
   const { apiRequest, user } = useAuth()
   const params = new URLSearchParams({ limit: String(options.limit ?? 20), unread: String(options.unread ?? false) })
   if (options.cursor) params.set('cursor', options.cursor)
+  if (options.organizationId) params.set('organizationId', options.organizationId)
+  if (options.category) params.set('category', options.category)
   return useQuery({ ...liveQueryOptions, queryKey: ['notifications', options], queryFn: () => apiRequest<import('./types.ts').NotificationPage>(`/notifications?${params}`), enabled: Boolean(user) })
 }
 
-export function useNotificationActions() {
+export function useNotificationActions(organizationId?: string) {
+  const [removingId, setRemovingId] = useState<string | null>(null)
   const { apiRequest } = useAuth()
   const client = useQueryClient()
   const refresh = () => Promise.all(['notifications', 'invitations', 'organizations', 'account-notifications', 'shift-notifications'].map(key => client.invalidateQueries({ queryKey: [key] })))
-  const read = useMutation({ mutationFn: ({ id, unread = false }: { id: string; unread?: boolean }) => apiRequest(`/notifications/${id}/read`, { method: 'POST', body: { unread } }), onSuccess: refresh })
+  const read = useMutation({ mutationFn: ({ id, unread = false }: { id: string; unread?: boolean }) => apiRequest(`/notifications/${id}/read`, { method: 'POST', body: { unread, organizationId } }), onSuccess: refresh })
   const invitation = useMutation({ mutationFn: ({ id, action }: { id: string; action: 'accept' | 'reject' }) => apiRequest(`/invitations/${id.replace('invite:', '')}/${action}`, { method: 'POST', body: {} }), onSuccess: refresh })
-  return { read, invitation, error: invitation.error || read.error }
+  const readAll = useMutation({ mutationFn: () => apiRequest('/notifications/read-all', { method: 'POST', body: { organizationId } }), onSuccess: refresh })
+  const remove = useMutation({ mutationFn: async (id: string) => { await apiRequest(`/notifications/${id}${organizationId ? `?organizationId=${organizationId}` : ''}`, { method: 'DELETE' }); setRemovingId(id); await new Promise(resolve => window.setTimeout(resolve, 180)) }, onSuccess: refresh })
+  return { read, invitation, readAll, remove, removingId, error: invitation.error || read.error || readAll.error || remove.error }
 }

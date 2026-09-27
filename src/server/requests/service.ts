@@ -1,4 +1,4 @@
-import { assertAbsencePeriod } from '../schedule/absence-service.ts'
+import { assertAbsencePeriod, absencePeriodBody, notifyAbsence } from '../schedule/absence-service.ts'
 import { checkMonthlyWorkload } from '../schedule/workload.ts'
 import { cancelShiftRequests, lockShift, reconcileShiftRequests } from './shift-conflicts.ts'
 import type { OrganizationRole, Prisma, RequestDateMode, RequestSystemCode, RequestStatus } from '../../generated/prisma/client.ts'
@@ -12,6 +12,7 @@ import { recordShiftNotification } from '../organizations/notification-service.t
 import { mediaUrl } from '../storage/image-service.ts'
 
 export const SYSTEM_REQUEST_TYPES = [
+  { systemCode: 'SICK', name: 'Сообщить об отсутствии', description: 'Сообщение без согласования. Смены сохраняются, запись остаётся в истории заявок.', dateMode: 'RANGE', requiresComment: false, allowsAttachments: false },
   { systemCode: 'VACATION', name: 'Отпуск', description: 'Плановый период отсутствия', dateMode: 'RANGE', requiresComment: false, allowsAttachments: true },
   { systemCode: 'DAY_OFF', name: 'Отгул', description: 'Отсутствие в течение одного дня', dateMode: 'SINGLE', requiresComment: false, allowsAttachments: true },
   { systemCode: 'ABSENCE', name: 'Отсутствие', description: 'Другое запланированное отсутствие', dateMode: 'RANGE', requiresComment: true, allowsAttachments: true },
@@ -20,7 +21,7 @@ export const SYSTEM_REQUEST_TYPES = [
   { systemCode: 'OTHER', name: 'Другое', description: 'Организационный запрос в свободной форме', dateMode: 'NONE', requiresComment: true, allowsAttachments: true },
 ] as const
 
-const absenceCodes: RequestSystemCode[] = ['VACATION', 'DAY_OFF', 'SICK_LEAVE', 'ABSENCE']
+const absenceCodes: RequestSystemCode[] = ['VACATION', 'DAY_OFF', 'SICK_LEAVE', 'ABSENCE', 'SICK']
 const dateValue = (value: string | null | undefined) => value ? new Date(`${value}T00:00:00.000Z`) : null
 const dateText = (value: Date | null) => value?.toISOString().slice(0, 10) ?? null
 const memberName = (user: { firstName: string | null; lastName: string | null; middleName: string | null; email: string }) => [user.lastName, user.firstName, user.middleName].filter(Boolean).join(' ') || user.email.split('@')[0]
@@ -31,6 +32,7 @@ export async function seedSystemRequestTypes(tx: Prisma.TransactionClient, organ
 
 async function ensureSystemTypes(organizationId: string) {
   await prisma.requestType.createMany({ data: SYSTEM_REQUEST_TYPES.map((item) => ({ ...item, organizationId })), skipDuplicates: true })
+  await prisma.requestType.updateMany({ where: { organizationId, systemCode: 'SICK', isActive: false }, data: { isActive: true } })
 }
 
 export async function listRequestTypes(userId: string, organizationId: string, includeInactive = false) {
@@ -50,6 +52,7 @@ export async function updateRequestType(userId: string, organizationId: string, 
   requireOrganizationRole(actor.role, ['OWNER'])
   const type = await prisma.requestType.findFirst({ where: { id: typeId, organizationId } })
   if (!type) throw new ApiError(404, 'REQUEST_TYPE_NOT_FOUND', 'Тип заявки не найден.')
+  if (type.systemCode === 'SICK' && !input.isActive) throw new ApiError(409, 'MANDATORY_REQUEST_TYPE', 'Сообщение об отсутствии — обязательный тип заявки.')
   if (type.systemCode) {
     if (input.name !== type.name || input.description !== type.description || input.dateMode !== type.dateMode || input.requiresComment !== type.requiresComment || input.allowsAttachments !== type.allowsAttachments) throw new ApiError(409, 'SYSTEM_REQUEST_TYPE', 'У системного типа можно менять только доступность.')
     return prisma.requestType.update({ where: { id: type.id }, data: { isActive: input.isActive } })
@@ -57,7 +60,7 @@ export async function updateRequestType(userId: string, organizationId: string, 
   return prisma.requestType.update({ where: { id: type.id }, data: { ...input, description: input.description || null } })
 }
 
-type CreateInput = { requestTypeId: string; startDate?: string | null; endDate?: string | null; comment?: string | null; relatedShiftId?: string | null; proposedStartDate?: string | null; proposedStartTime?: string | null; proposedEndDate?: string | null; proposedEndTime?: string | null }
+type CreateInput = { requestTypeId: string; startDate?: string | null; endDate?: string | null; comment?: string | null; relatedShiftId?: string | null; proposedStartDate?: string | null; proposedStartTime?: string | null; proposedEndDate?: string | null; proposedEndTime?: string | null; absenceReason?: 'SICK' | 'PERSONAL' | 'OTHER' | null }
 
 function validateTypeFields(type: { dateMode: RequestDateMode; requiresComment: boolean; systemCode: RequestSystemCode | null }, input: CreateInput) {
   if (type.requiresComment && !input.comment?.trim()) throw new ApiError(400, 'REQUEST_COMMENT_REQUIRED', 'Для этого типа заявки нужен комментарий.')
@@ -65,7 +68,7 @@ function validateTypeFields(type: { dateMode: RequestDateMode; requiresComment: 
   if (type.dateMode === 'RANGE' && (!input.startDate || !input.endDate)) throw new ApiError(400, 'REQUEST_RANGE_REQUIRED', 'Укажите начало и окончание периода.')
   if (input.startDate && input.endDate && input.startDate > input.endDate) throw new ApiError(400, 'INVALID_REQUEST_RANGE', 'Дата окончания не может быть раньше даты начала.')
   if (type.systemCode === 'SHIFT_CHANGE' && !input.relatedShiftId) throw new ApiError(400, 'SHIFT_REQUIRED', 'Выберите смену, которую нужно изменить.')
-  if (type.systemCode !== 'SHIFT_CHANGE' && input.relatedShiftId) throw new ApiError(400, 'SHIFT_NOT_ALLOWED', 'Смена доступна только для заявки на изменение смены.')
+  if (!['SHIFT_CHANGE', 'DAY_OFF'].includes(type.systemCode ?? '') && input.relatedShiftId) throw new ApiError(400, 'SHIFT_NOT_ALLOWED', 'Смена доступна только для заявки на изменение смены.')
   const proposal = [input.proposedStartDate, input.proposedStartTime, input.proposedEndDate, input.proposedEndTime]
   if (['SHIFT_CHANGE', 'SHIFT_PROPOSAL'].includes(type.systemCode ?? '') && proposal.some((value) => !value)) throw new ApiError(400, 'SHIFT_PROPOSAL_REQUIRED', 'Укажите желаемые даты и время смены.')
   if (!['SHIFT_CHANGE', 'SHIFT_PROPOSAL'].includes(type.systemCode ?? '') && proposal.some(Boolean)) throw new ApiError(400, 'SHIFT_PROPOSAL_NOT_ALLOWED', 'Новое время доступно только для изменения смены.')
@@ -77,14 +80,16 @@ export async function createRequest(userId: string, organizationId: string, inpu
   await ensureSystemTypes(organizationId)
   const type = await prisma.requestType.findFirst({ where: { id: input.requestTypeId, organizationId, isActive: true } })
   if (!type) throw new ApiError(404, 'REQUEST_TYPE_NOT_FOUND', 'Активный тип заявки не найден.')
-  if (type.systemCode === 'SICK_LEAVE' || type.systemCode === 'SICK') throw new ApiError(400, 'SICK_REPORT_ONLY', 'Используйте действие «Сообщить о болезни» без согласования.')
+  if (type.systemCode === 'SICK_LEAVE') throw new ApiError(400, 'SICK_REPORT_ONLY', 'Используйте действие «Сообщить о болезни» без согласования.')
   validateTypeFields(type, input)
+  if (type.systemCode === 'SICK') return saveAbsenceRequest(userId, organizationId, type, input)
   const shift = input.relatedShiftId ? await prisma.workShift.findFirst({ where: { id: input.relatedShiftId, organizationId, memberId: actor.id } }) : null
   if (input.relatedShiftId && (!shift || shift.status !== 'SCHEDULED' || shift.scheduledStartAt <= new Date())) throw new ApiError(404, 'SHIFT_NOT_FOUND', 'Выберите свою будущую смену этой организации.')
-  const proposedStartAt = (shift || type.systemCode === 'SHIFT_PROPOSAL') ? zonedDateTimeToUtc(input.proposedStartDate!, input.proposedStartTime!, actor.organization.timezone) : null
-  const proposedEndAt = (shift || type.systemCode === 'SHIFT_PROPOSAL') ? zonedDateTimeToUtc(input.proposedEndDate!, input.proposedEndTime!, actor.organization.timezone) : null
+  const proposedStartAt = (type.systemCode === 'SHIFT_CHANGE' || type.systemCode === 'SHIFT_PROPOSAL') ? zonedDateTimeToUtc(input.proposedStartDate!, input.proposedStartTime!, actor.organization.timezone) : null
+  const proposedEndAt = (type.systemCode === 'SHIFT_CHANGE' || type.systemCode === 'SHIFT_PROPOSAL') ? zonedDateTimeToUtc(input.proposedEndDate!, input.proposedEndTime!, actor.organization.timezone) : null
   if (proposedStartAt && (proposedEndAt! <= proposedStartAt! || proposedStartAt! < new Date())) throw new ApiError(400, 'INVALID_SHIFT_PROPOSAL', 'Новое время должно быть в будущем, а окончание — позже начала.')
-  if (shift && proposedStartAt!.getTime() === shift.scheduledStartAt.getTime() && proposedEndAt!.getTime() === shift.scheduledEndAt.getTime()) throw new ApiError(400, 'UNCHANGED_SHIFT_PROPOSAL', 'Укажите время, отличающееся от текущей смены.')
+  if (type.systemCode === 'SHIFT_CHANGE' && shift && proposedStartAt!.getTime() === shift.scheduledStartAt.getTime() && proposedEndAt!.getTime() === shift.scheduledEndAt.getTime()) throw new ApiError(400, 'UNCHANGED_SHIFT_PROPOSAL', 'Укажите время, отличающееся от текущей смены.')
+  if (type.systemCode === 'DAY_OFF' && shift && input.startDate !== new Intl.DateTimeFormat('en-CA', { timeZone: actor.organization.timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(shift.scheduledStartAt)) throw new ApiError(400, 'DAY_OFF_SHIFT_DATE', 'Дата отгула должна совпадать с датой выбранной смены.')
   const startDate = dateValue(input.startDate)
   const endDate = type.dateMode === 'SINGLE' ? startDate : dateValue(input.endDate)
   return prisma.$transaction(async (tx) => {
@@ -105,19 +110,26 @@ export async function updateRequest(userId: string, organizationId: string, requ
   const actor = await getMembership(userId, organizationId)
   const current = await prisma.organizationRequest.findFirst({ where: { id: requestId, organizationId, createdByMemberId: actor.id } })
   if (!current) throw new ApiError(404, 'REQUEST_NOT_FOUND', 'Заявка не найдена.')
-  if (current.status !== 'PENDING') throw new ApiError(409, 'REQUEST_ALREADY_RESOLVED', 'Изменить можно только заявку, ожидающую решения.')
+  const informational = current.systemCodeSnapshot === 'SICK' && current.status === 'APPROVED'
+  if (current.status !== 'PENDING' && !informational) throw new ApiError(409, 'REQUEST_ALREADY_RESOLVED', 'Изменить можно только заявку, ожидающую решения.')
   const type = await prisma.requestType.findFirst({ where: { id: input.requestTypeId, organizationId, isActive: true } })
   if (!type) throw new ApiError(404, 'REQUEST_TYPE_NOT_FOUND', 'Выберите доступный тип заявки.')
-  if (type.systemCode === 'SICK_LEAVE' || type.systemCode === 'SICK') throw new ApiError(400, 'SICK_REPORT_ONLY', 'Используйте действие «Сообщить о болезни».')
+  if (type.systemCode === 'SICK_LEAVE') throw new ApiError(400, 'SICK_REPORT_ONLY', 'Используйте действие «Сообщить о болезни».')
+  if (informational && type.systemCode !== 'SICK') throw new ApiError(409, 'REQUEST_TYPE_LOCKED', 'У сообщения об отсутствии нельзя изменить тип.')
   validateTypeFields(type, input)
+  if (type.systemCode === 'SICK') {
+    if (await prisma.requestAttachment.count({ where: { requestId } })) throw new ApiError(409, 'REQUEST_HAS_ATTACHMENTS', 'Сначала удалите вложения.')
+    return saveAbsenceRequest(userId, organizationId, type, input, current)
+  }
   const shift = input.relatedShiftId ? await prisma.workShift.findFirst({ where: { id: input.relatedShiftId, organizationId, memberId: actor.id } }) : null
   if (input.relatedShiftId && (!shift || shift.status !== 'SCHEDULED' || shift.scheduledStartAt <= new Date())) throw new ApiError(404, 'SHIFT_NOT_FOUND', 'Выберите свою будущую смену этой организации.')
-  const proposedStartAt = (shift || type.systemCode === 'SHIFT_PROPOSAL') ? zonedDateTimeToUtc(input.proposedStartDate!, input.proposedStartTime!, actor.organization.timezone) : null
-  const proposedEndAt = (shift || type.systemCode === 'SHIFT_PROPOSAL') ? zonedDateTimeToUtc(input.proposedEndDate!, input.proposedEndTime!, actor.organization.timezone) : null
+  const proposedStartAt = (type.systemCode === 'SHIFT_CHANGE' || type.systemCode === 'SHIFT_PROPOSAL') ? zonedDateTimeToUtc(input.proposedStartDate!, input.proposedStartTime!, actor.organization.timezone) : null
+  const proposedEndAt = (type.systemCode === 'SHIFT_CHANGE' || type.systemCode === 'SHIFT_PROPOSAL') ? zonedDateTimeToUtc(input.proposedEndDate!, input.proposedEndTime!, actor.organization.timezone) : null
   if (proposedStartAt && (proposedEndAt! <= proposedStartAt! || proposedStartAt! < new Date())) throw new ApiError(400, 'INVALID_SHIFT_PROPOSAL', 'Новое время должно быть в будущем, а окончание — позже начала.')
-  if (shift && proposedStartAt!.getTime() === shift.scheduledStartAt.getTime() && proposedEndAt!.getTime() === shift.scheduledEndAt.getTime()) throw new ApiError(400, 'UNCHANGED_SHIFT_PROPOSAL', 'Укажите время, отличающееся от текущей смены.')
+  if (type.systemCode === 'SHIFT_CHANGE' && shift && proposedStartAt!.getTime() === shift.scheduledStartAt.getTime() && proposedEndAt!.getTime() === shift.scheduledEndAt.getTime()) throw new ApiError(400, 'UNCHANGED_SHIFT_PROPOSAL', 'Укажите время, отличающееся от текущей смены.')
   if (!type.allowsAttachments && current.requestTypeId !== type.id && await prisma.requestAttachment.count({ where: { requestId } })) throw new ApiError(409, 'REQUEST_HAS_ATTACHMENTS', 'Сначала удалите вложения, чтобы выбрать тип без файлов.')
   const author = await prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { email: true, firstName: true, lastName: true, middleName: true } })
+  if (type.systemCode === 'DAY_OFF' && shift && input.startDate !== new Intl.DateTimeFormat('en-CA', { timeZone: actor.organization.timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(shift.scheduledStartAt)) throw new ApiError(400, 'DAY_OFF_SHIFT_DATE', 'Дата отгула должна совпадать с датой выбранной смены.')
   const startDate = dateValue(input.startDate)
   const endDate = type.dateMode === 'SINGLE' ? startDate : dateValue(input.endDate)
   return prisma.$transaction(async (tx) => {
@@ -141,13 +153,14 @@ const requestInclude = {
   creator: { include: { user: { select: { email: true, firstName: true, lastName: true, middleName: true, avatarFileId: true } } } },
   resolvedBy: { include: { user: { select: { email: true, firstName: true, lastName: true, middleName: true } } } },
   relatedShift: true,
+  absence: { select: { reason: true } },
   attachments: { include: { storedFile: { select: { mimeType: true, size: true } } }, orderBy: { createdAt: 'asc' } },
   events: { include: { actor: { include: { user: { select: { email: true, firstName: true, lastName: true, middleName: true } } } } }, orderBy: { createdAt: 'asc' } },
   reads: { orderBy: { readAt: 'asc' } },
 } as const
 
 function publicRequest(item: any, viewerMemberId?: string) {
-  return { ...item, startDate: dateText(item.startDate), endDate: dateText(item.endDate), creatorName: memberName(item.creator.user), creatorRole: item.creator.role, creatorEmail: item.creator.user.email, creatorAvatarUrl: mediaUrl(item.creator.user.avatarFileId), resolvedByName: item.resolvedBy ? memberName(item.resolvedBy.user) : null, firstReadAt: item.reads?.[0]?.readAt ?? null, readByViewer: viewerMemberId ? item.reads?.some((read: { memberId: string }) => read.memberId === viewerMemberId) : false, attachments: item.attachments?.map((attachment: any) => ({ id: attachment.id, fileName: attachment.fileName, mimeType: attachment.storedFile.mimeType, size: attachment.storedFile.size, downloadUrl: `/api/organizations/${item.organizationId}/requests/${item.id}/attachments/${attachment.id}` })) ?? [], events: item.events?.map((event: any) => ({ id: event.id, type: event.type, comment: event.comment, createdAt: event.createdAt, actorName: memberName(event.actor.user) })) ?? [] }
+  return { ...item, absenceReason: item.absence?.reason ?? null, startDate: dateText(item.startDate), endDate: dateText(item.endDate), creatorName: memberName(item.creator.user), creatorRole: item.creator.role, creatorEmail: item.creator.user.email, creatorAvatarUrl: mediaUrl(item.creator.user.avatarFileId), resolvedByName: item.resolvedBy ? memberName(item.resolvedBy.user) : null, firstReadAt: item.reads?.[0]?.readAt ?? null, readByViewer: viewerMemberId ? item.reads?.some((read: { memberId: string }) => read.memberId === viewerMemberId) : false, attachments: item.attachments?.map((attachment: any) => ({ id: attachment.id, fileName: attachment.fileName, mimeType: attachment.storedFile.mimeType, size: attachment.storedFile.size, downloadUrl: `/api/organizations/${item.organizationId}/requests/${item.id}/attachments/${attachment.id}` })) ?? [], events: item.events?.map((event: any) => ({ id: event.id, type: event.type, comment: event.comment, createdAt: event.createdAt, actorName: memberName(event.actor.user) })) ?? [] }
 }
 
 type ListOptions = { page: number; pageSize: number; status?: RequestStatus; typeId?: string; memberId?: string; role?: OrganizationRole; from?: string; to?: string; search?: string }
@@ -198,6 +211,7 @@ export async function resolveRequest(userId: string, organizationId: string, req
   await reconcileShiftRequests(organizationId)
   const current = await prisma.organizationRequest.findFirst({ where: { id: requestId, organizationId }, include: { creator: true } })
   if (!current) throw new ApiError(404, 'REQUEST_NOT_FOUND', 'Заявка не найдена.')
+  if (current.systemCodeSnapshot === 'SICK') throw new ApiError(409, 'INFORMATIONAL_REQUEST', 'Сообщение об отсутствии не требует решения.')
   if (decision === 'REJECTED' && !comment?.trim()) throw new ApiError(400, 'RESOLUTION_COMMENT_REQUIRED', 'Укажите причину отклонения.')
   if (decision === 'APPROVED' && current.systemCodeSnapshot === 'SICK_LEAVE') throw new ApiError(409, 'SICK_REPORT_ONLY', 'Болезнь больше не требует одобрения. Сотруднику нужно сообщить о болезни через новое действие; старая заявка остаётся в истории.')
   const result = await prisma.$transaction(async (tx) => {
@@ -263,10 +277,15 @@ export async function cancelRequest(userId: string, organizationId: string, requ
   const current = await prisma.organizationRequest.findFirst({ where: { id: requestId, organizationId } })
   if (!current || current.createdByMemberId !== actor.id) throw new ApiError(404, 'REQUEST_NOT_FOUND', 'Заявка не найдена.')
   const changed = await prisma.$transaction(async (tx) => {
-    const updated = await tx.organizationRequest.updateMany({ where: { id: requestId, status: 'PENDING' }, data: { status: 'CANCELLED', cancelledAt: new Date(), resolutionComment: systemReason || null } })
+    const updated = await tx.organizationRequest.updateMany({ where: { id: requestId, updatedAt: current.updatedAt, status: current.systemCodeSnapshot === 'SICK' ? 'APPROVED' : 'PENDING' }, data: { status: 'CANCELLED', cancelledAt: new Date(), resolutionComment: systemReason || null } })
     if (!updated.count) throw new ApiError(409, 'REQUEST_ALREADY_RESOLVED', 'Обработанную заявку нельзя отменить.')
+    if (current.systemCodeSnapshot === 'SICK') await tx.employeeAbsence.updateMany({ where: { sourceRequestId: requestId, organizationId, cancelledAt: null }, data: { cancelledAt: new Date(), cancelledByMemberId: actor.id, updatedByMemberId: actor.id, cancellationReason: systemReason || 'Сообщение отменено автором' } })
     await tx.requestEvent.create({ data: { requestId, actorMemberId: actor.id, type: 'CANCELLED', comment: systemReason || null } })
-    await tx.accountNotification.updateMany({ where: { requestId, type: 'REQUEST_CREATED', readAt: null }, data: { readAt: new Date() } })
+    await tx.accountNotification.updateMany({ where: { requestId, readAt: null }, data: { readAt: new Date() } })
+    if (current.systemCodeSnapshot === 'SICK') {
+      const absence = await tx.employeeAbsence.findUniqueOrThrow({ where: { sourceRequestId: requestId } })
+      await notifyAbsence(tx, organizationId, actor.id, absence.id, 'ABSENCE_CANCELLED', absence.startDate, absence.endDate)
+    }
     return true
   }, { isolationLevel: 'Serializable' })
   return changed
@@ -274,4 +293,40 @@ export async function cancelRequest(userId: string, organizationId: string, requ
 
 export async function assertRequestFileAccess(userId: string, organizationId: string, requestId: string) {
   return requestForAccess(userId, organizationId, requestId)
+}
+
+async function saveAbsenceRequest(userId: string, organizationId: string, type: { id: string; name: string }, input: CreateInput, current?: { id: string; status: RequestStatus; updatedAt: Date }) {
+  const actor = await getMembership(userId, organizationId)
+  const employee = await prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { email: true, firstName: true, lastName: true, middleName: true } })
+  const parsed = absencePeriodBody.safeParse({ startDate: input.startDate, endDate: input.endDate })
+  if (!parsed.success) throw new ApiError(400, 'INVALID_ABSENCE_PERIOD', parsed.error.issues[0].message)
+  if (input.comment && input.comment.length > 500) throw new ApiError(400, 'ABSENCE_COMMENT_TOO_LONG', 'Комментарий не должен превышать 500 символов.')
+  const startDate = dateValue(parsed.data.startDate)!, endDate = dateValue(parsed.data.endDate)!
+  const reason = input.absenceReason ?? 'SICK'
+  return prisma.$transaction(async tx => {
+    const existing = current ? await tx.employeeAbsence.findUnique({ where: { sourceRequestId: current.id } }) : null
+    if (current && ((current.status === 'APPROVED' && !existing) || existing?.cancelledAt)) throw new ApiError(409, 'ABSENCE_CHANGED', 'Отсутствие уже изменено или отменено.')
+    await assertAbsencePeriod(tx, organizationId, actor.id, startDate, endDate, existing?.id)
+    const data = { startDate, endDate, comment: input.comment?.trim() || null }
+    let request
+    if (current) {
+      const changed = await tx.organizationRequest.updateMany({ where: { id: current.id, organizationId, createdByMemberId: actor.id, status: current.status, updatedAt: current.updatedAt }, data: { ...data, requestTypeId: type.id, typeNameSnapshot: type.name, systemCodeSnapshot: 'SICK', status: 'APPROVED', resolvedAt: current.status === 'PENDING' ? new Date() : undefined, relatedShiftId: null, originalStartAt: null, originalEndAt: null, proposedStartAt: null, proposedEndAt: null } })
+      if (!changed.count) throw new ApiError(409, 'REQUEST_CHANGED', 'Сообщение уже изменилось. Откройте его заново.')
+      request = await tx.organizationRequest.findUniqueOrThrow({ where: { id: current.id } })
+      if (existing) await tx.employeeAbsence.update({ where: { id: existing.id }, data: { ...data, reason, type: reason === 'SICK' ? 'SICK' : 'ABSENCE', updatedByMemberId: actor.id } })
+      else await tx.employeeAbsence.create({ data: { ...data, organizationId, memberId: actor.id, sourceRequestId: request.id, type: reason === 'SICK' ? 'SICK' : 'ABSENCE', reason, updatedByMemberId: actor.id } })
+    } else {
+      request = await tx.organizationRequest.create({ data: { ...data, organizationId, createdByMemberId: actor.id, requestTypeId: type.id, typeNameSnapshot: type.name, systemCodeSnapshot: 'SICK', status: 'APPROVED', resolvedAt: new Date() } })
+      await tx.employeeAbsence.create({ data: { ...data, organizationId, memberId: actor.id, sourceRequestId: request.id, type: reason === 'SICK' ? 'SICK' : 'ABSENCE', reason, updatedByMemberId: actor.id } })
+    }
+    await tx.requestEvent.create({ data: { requestId: request.id, actorMemberId: actor.id, type: current ? 'EDITED' : 'CREATED' } })
+    const absence = await tx.employeeAbsence.findUniqueOrThrow({ where: { sourceRequestId: request.id } })
+    const reviewers = await tx.organizationMember.findMany({ where: { organizationId, leftAt: null, role: { in: ['OWNER', 'ADMIN'] }, user: { deletedAt: null } }, select: { userId: true } })
+    await tx.accountNotification.updateMany({ where: { requestId: request.id, readAt: null }, data: { readAt: new Date() } })
+    if (reviewers.length) await tx.accountNotification.createMany({ data: reviewers.map(({ userId: recipient }) => ({ userId: recipient, organizationId, requestId: request.id, absenceId: absence.id, type: current ? 'ABSENCE_CHANGED' as const : 'ABSENCE_REPORTED' as const, title: current ? 'Сообщение об отсутствии изменено' : 'Сотрудник сообщил об отсутствии', message: `${memberName(employee)} · ${parsed.data.startDate}–${parsed.data.endDate}` })) })
+    return request
+  }, { isolationLevel: 'Serializable' }).catch((error: unknown) => {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'P2034') throw new ApiError(409, 'ABSENCE_CONFLICT', 'Отсутствие изменилось одновременно с другим действием. Обновите данные и повторите.')
+    throw error
+  })
 }

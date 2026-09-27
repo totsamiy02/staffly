@@ -646,3 +646,63 @@
 .member-action-item--danger > svg { color: inherit; }
 .member-action-item--danger:hover { background: #faf1f1; }
 .member-role-description { margin-top: 12px; color: #777; font-size: 13px; line-height: 1.6; }
+
+.notification-item, .notification-item--compact { position: relative; gap: 10px; padding: 14px 16px; border: 0; border-bottom: 1px solid #eee; border-radius: 0; transition: background 160ms; }
+.notification-item:hover, .notification-item--unread { background: #fafafa; }
+.notification-organization-avatar { display: grid; place-items: center; width: 30px; height: 30px; flex: 0 0 30px; border-radius: 8px; background: #eee; font-size: 12px; }
+.notification-item__source i { background: #222; }
+.notification-item__actions { margin-top: 4px; }
+.notification-context-menu { margin-left: auto; position: relative; }
+.topbar-invitations { gap: 0; }
+.notifications-history-link { width: 100%; cursor: pointer; }
+.notification-history-backdrop { z-index: 160; background: rgba(0,0,0,.25); }
+.notification-history-modal { display: flex; flex-direction: column; width: min(1160px, calc(100vw - 64px)); height: 85dvh; border-radius: 18px; background: #fff; overflow: hidden; animation: schedule-modal-in 200ms ease both; }
+.notification-history-modal > header { display: flex; align-items: center; justify-content: space-between; padding: 22px 26px; border-bottom: 1px solid #eee; }
+.notification-history-modal > header button { font-size: 26px; cursor: pointer; }
+.notification-history-modal .notifications-filter { flex-wrap: wrap; padding: 14px 26px; margin: 0; }
+.notification-history-modal select { padding: 8px; border: 1px solid #ddd; border-radius: 8px; background: #fff; }
+.notification-history-modal__list { flex: 1; min-height: 0; overflow-y: auto; }
+.notification-history-modal .members-pagination { padding: 16px; margin: 0; border-top: 1px solid #eee; }
+.notification-history-modal .members-pagination button { padding: 8px 16px; cursor: pointer; }
+.notification-history-modal button:disabled { opacity: .4; cursor: default; }
+.notification-history-modal :focus-visible, .notification-context-menu :focus-visible { outline: 2px solid #333; outline-offset: 3px; }
+@media (max-width: 600px) { .notification-history-modal { width: calc(100vw - 16px); height: 94dvh; } .notification-history-modal .notifications-filter { padding: 12px; } }
+
+.notification-item__top { display: flex; align-items: center; gap: 8px; float: right; margin-left: 10px; color: #888; font-size: 11px; }
+.notification-unread-dot { width: 6px; height: 6px; border-radius: 50%; }
+.notification-unread-dot[data-unread="true"] { background: #222; }
+.notification-context-menu > button { padding: 0 6px; cursor: pointer; font-size: 18px; }
+.notification-context-menu__options { position: absolute; right: 0; top: 25px; z-index: 3; display: grid; min-width: 215px; padding: 5px; border: 1px solid #ddd; border-radius: 10px; background: #fff; box-shadow: 0 5px 20px #0002; }
+.notification-context-menu__options button { padding: 10px; text-align: left; white-space: nowrap; cursor: pointer; }
+.notification-context-menu__options button:hover { background: #f5f5f5; }
+.notification-item__source { margin: 6px 0 0; font-size: 12px; flex-wrap: wrap; }
+.notification-status { padding: 1px 6px; border-radius: 5px; background: #f0f0f0; color: #555; }
+.notification-item__content-button { width: 100%; text-align: left; cursor: pointer; }
+.notification-item--compact strong { font-size: 14px; }
+.notification-item--compact p { font-size: 12px; }
+.notification-item { animation: notification-item-in 180ms ease both; }
+.notification-item.is-removing, .active-invitation.is-removing { overflow: hidden; animation: notification-item-out 180ms ease both; }
+.notification-history-modal { animation-name: schedule-modal-in; }
+@keyframes notification-item-in { from { opacity: 0; transform: translateY(3px); } }
+@keyframes notification-item-out { to { opacity: 0; max-height: 0; padding-top: 0; padding-bottom: 0; margin: 0; border-width: 0; } }
+.notification-item.is-removing { max-height: 220px; }
+.active-invitation.is-removing { max-height: 120px; }
+@media (prefers-reduced-motion: reduce) { .notification-item, .notification-item.is-removing, .active-invitation.is-removing, .notification-history-modal { animation-duration: 1ms; transition: none; } }
+.topbar-popover--notifications { animation: notification-popover-in 180ms ease both; }
+.topbar-popover--notifications.is-closing { pointer-events: none; animation: notification-popover-out 180ms ease both; }
+@keyframes notification-popover-in { from { opacity: 0; transform: translateY(-5px); } }
+@keyframes notification-popover-out { to { opacity: 0; transform: translateY(-5px); } }
+@media (prefers-reduced-motion: reduce) { .topbar-popover--notifications, .topbar-popover--notifications.is-closing { animation-duration: 1ms; } }
+.topbar-popover > header .notification-read-all, .notification-history-modal > header .notification-read-all { font-size: 12px; white-space: nowrap; width: auto; height: auto; padding: 6px; margin-left: auto; margin-right: 10px; }
+.topbar-popover--notifications .topbar-invitations { gap: 0; padding: 0; }
+.notification-history-backdrop { backdrop-filter: none; }
+.schedule-modal.notification-history-backdrop { background: rgba(0,0,0,.25); backdrop-filter: none; padding: 0; }
+.notification-history-modal .notifications-filter { display: flex; flex-shrink: 0; width: 100%; border: 0; border-radius: 0; border-bottom: 1px solid #eee; background: #fff; gap: 10px; font-size: 13px; }
+.request-alert { border-color: #e2e2e2; box-shadow: 0 8px 26px #0002; animation: floating-notice-in 200ms ease both; transition: background 160ms, border-color 160ms; }
+.request-alert:hover { border-color: #ccc; background: #fafafa; }
+.request-alert small, .request-alert__actions a { color: #666; }
+.request-alert__organization { display: flex; align-items: center; gap: 8px; }
+.request-alert.is-closing { max-height: 160px; overflow: hidden; pointer-events: none; animation: floating-notice-out 180ms ease both; }
+@keyframes floating-notice-in { from { opacity: 0; transform: translateX(8px); } }
+@keyframes floating-notice-out { to { opacity: 0; transform: translateX(8px); max-height: 0; padding-top: 0; padding-bottom: 0; border-width: 0; } }
+@media (prefers-reduced-motion: reduce) { .request-alert, .request-alert.is-closing { animation-duration: 1ms; } .schedule-modal.notification-history-backdrop > * { animation-duration: 1ms; } }

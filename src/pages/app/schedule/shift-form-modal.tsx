@@ -1,3 +1,4 @@
+import { useToast, useToastFeedback } from '../../../component/ui/toast/toast-context.ts'
 import Select from '../../../component/ui/select/select.tsx'
 import { useSchedulePlanning } from '../../../app/schedule/planning.ts'
 import { invalidateOrganizationWork } from '../../../app/live-query.ts'
@@ -14,6 +15,7 @@ import AnimatedOverlay from './animated-overlay.tsx'
 type Props = { organization: OrganizationSummary; members: OrganizationMember[]; date: string; shift?: WorkShift | null; actual?: boolean; onClose: () => void }
 
 export default function ShiftFormModal({ organization, members, date, shift, actual = false, onClose }: Props) {
+  const toast = useToast()
   const { apiRequest } = useAuth()
   const queryClient = useQueryClient()
   const scheduledStart = shift ? zonedDateAndTime(shift.scheduledStartAt, organization.timezone) : { date, time: '09:00' }
@@ -28,6 +30,7 @@ export default function ShiftFormModal({ organization, members, date, shift, act
   const [description, setDescription] = useState(shift?.description ?? '')
   const [reason, setReason] = useState('')
   const [error, setError] = useState('')
+  useToastFeedback('', error)
   const [busy, setBusy] = useState(false)
   const planning = useSchedulePlanning(organization.id)
   const [positionId, setPositionId] = useState(shift?.positionId ?? '')
@@ -92,6 +95,7 @@ export default function ShiftFormModal({ organization, members, date, shift, act
       }
       else await apiRequest(`/organizations/${organization.id}/shifts${shift ? `/${shift.id}` : ''}`, { method: shift ? 'PATCH' : 'POST', body: { acknowledgeAbsence, acknowledgeWorkload, positionId: positionId || null, memberId, startDate, startTime, endDate, endTime, breakMinutes: 0, description } })
       await invalidateOrganizationWork(queryClient, organization.id)
+      toast(actual ? 'Рабочее время обновлено' : shift ? 'Смена изменена' : 'Смены добавлены', 'success')
       close()
     } catch (failure) { if ((failure as { code?: string }).code === 'EMPLOYEE_ABSENT') setAbsenceWarning(true); if ((failure as { code?: string }).code === 'WORKLOAD_WARNING') setWorkloadWarning(true); setError(failure instanceof Error ? failure.message : 'Не удалось сохранить смену.') }
     finally { setBusy(false) }

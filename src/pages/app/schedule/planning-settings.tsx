@@ -1,3 +1,4 @@
+import { useToastFeedback } from '../../../component/ui/toast/toast-context.ts'
 import { useEffect, useState, type FormEvent } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '../../../app/auth/auth-context.tsx'
@@ -26,8 +27,9 @@ export default function PlanningSettings({ organization }: { organization: Organ
   const [feedbackScope, setFeedbackScope] = useState('')
   const [tab, setTab] = useState('positions')
   useEffect(() => { if (!message) return; const timer = window.setTimeout(() => setMessage(''), 4500); return () => window.clearTimeout(timer) }, [message])
-  function feedback(scope: string) { return feedbackScope === scope ? <>{error && <p className="form-inline-error" role="alert">{error}</p>}{message && <p className="planning-feedback" role="status">{message}</p>}</> : null }
+  function feedback(scope: string) { return feedbackScope === scope ? <>{error && <p className="form-inline-error" role="alert">{error}</p>}</> : null }
   const [error, setError] = useState('')
+  useToastFeedback(message, error)
   const canManage = organization.role !== 'MEMBER'
   useEffect(() => { setHours(planning.data?.monthlyWorkMinutes ? String(planning.data.monthlyWorkMinutes / 60) : '') }, [planning.data?.monthlyWorkMinutes])
   async function save(path: string, body: unknown, method: 'POST' | 'PATCH' | 'PUT' = 'POST') {

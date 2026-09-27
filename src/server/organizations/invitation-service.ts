@@ -1,9 +1,28 @@
-import { createHash, randomBytes, randomInt } from 'node:crypto'
+import { createHash, createCipheriv, createDecipheriv, randomBytes, randomInt } from 'node:crypto'
 import { prisma } from '../db.ts'
 import { mediaUrl } from '../storage/image-service.ts'
 import { ApiError } from '../api-error.ts'
 import { getMembership, requireOrganizationRole } from './permissions.ts'
 
+// Domain-separated key keeps invitation material encrypted across navigation/restarts.
+function codeKey() {
+  const secret = process.env.INVITE_CODE_SECRET || process.env.JWT_SECRET
+  if (!secret || secret.length < 32) throw new Error('Invitation encryption requires a secret of at least 32 characters')
+  return createHash('sha256').update('staffly-invite-code-v1:').update(secret).digest()
+}
+function encryptCode(code: string) {
+  const iv = randomBytes(12)
+  const cipher = createCipheriv('aes-256-gcm', codeKey(), iv)
+  const ciphertext = Buffer.concat([cipher.update(code, 'utf8'), cipher.final()])
+  return Buffer.concat([iv, cipher.getAuthTag(), ciphertext]).toString('base64url')
+}
+function decryptCode(value: string | null) {
+  if (!value) return null
+  const bytes = Buffer.from(value, 'base64url')
+  const decipher = createDecipheriv('aes-256-gcm', codeKey(), bytes.subarray(0, 12))
+  decipher.setAuthTag(bytes.subarray(12, 28))
+  return Buffer.concat([decipher.update(bytes.subarray(28)), decipher.final()]).toString('utf8')
+}
 const EMAIL_INVITE_MS = 24 * 60 * 60 * 1000
 const CODE_INVITE_MS = 10 * 60 * 1000
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
@@ -68,6 +87,7 @@ export async function createCodeInvitation(actorUserId: string, organizationId: 
         invitedByUserId: actorUserId,
         type: 'CODE',
         tokenHash: digest(code),
+        codeCiphertext: encryptCode(code),
         expiresAt: new Date(Date.now() + CODE_INVITE_MS),
       } })
       return { invitation, code }
@@ -97,10 +117,10 @@ export async function listActiveOrganizationInvitations(actorUserId: string, org
   requireOrganizationRole(actor.role, ['OWNER', 'ADMIN'])
   const invitations = await prisma.organizationInvite.findMany({
     where: { organizationId, ...activeInviteWhere() },
-    select: { id: true, type: true, invitedEmail: true, expiresAt: true, createdAt: true },
+    select: { id: true, type: true, invitedEmail: true, expiresAt: true, createdAt: true, codeCiphertext: true },
     orderBy: { createdAt: 'desc' },
   })
-  return invitations
+  return invitations.map(({ codeCiphertext, ...item }) => ({ ...item, code: decryptCode(codeCiphertext) }))
 }
 
 export async function previewEmailInvitation(userEmail: string, token: string) {

@@ -1,4 +1,4 @@
-import { listNotificationHistory, readHistoryNotification } from './notification-service.ts'
+import { listNotificationHistory, readHistoryNotification, updateAllNotifications } from './notification-service.ts'
 import { Router, type Request } from 'express'
 import { rateLimit } from 'express-rate-limit'
 import { z } from 'zod'
@@ -26,17 +26,29 @@ function auth(request: Request) { return (request as AuthenticatedRequest).auth!
 
 router.get('/organizations', async (request, response) => response.json({ organizations: await listOrganizations(auth(request).userId) }))
 router.get('/notifications', async (request, response) => {
-  const options = parse(z.object({ limit: z.coerce.number().int().min(1).max(50).default(20), cursor: z.string().max(512).optional(), unread: z.enum(['true', 'false']).optional() }), request.query)
+  const options = parse(z.object({ limit: z.coerce.number().int().min(1).max(50).default(20), cursor: z.string().max(512).optional(), unread: z.enum(['true', 'false']).optional(), organizationId: z.string().uuid().optional(), category: z.enum(['SHIFT', 'REQUEST', 'ABSENCE', 'ROLE', 'ORGANIZATION']).optional() }), request.query)
   response.json(await listNotificationHistory(auth(request).userId, auth(request).email, { ...options, unread: options.unread === 'true' }))
 })
 router.post('/notifications/:id/read', async (request, response) => {
   const { id } = parse(z.object({ id: z.string().regex(/^(event|invite):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/) }), request.params)
-  const { unread } = parse(z.object({ unread: z.boolean().default(false) }), request.body)
-  await readHistoryNotification(auth(request).userId, auth(request).email, id, unread)
+  const { unread, organizationId } = parse(z.object({ unread: z.boolean().default(false), organizationId: z.string().uuid().optional() }), request.body)
+  await readHistoryNotification(auth(request).userId, auth(request).email, id, unread, organizationId)
   response.status(204).end()
 })
 
-router.get('/account-notifications', async (request, response) => response.json({ notifications: await listAccountNotifications(auth(request).userId) }))
+router.post('/notifications/read-all', async (request, response) => {
+  const options = parse(z.object({ organizationId: z.string().uuid().optional() }), request.body)
+  await updateAllNotifications(auth(request).userId, auth(request).email, options)
+  response.status(204).end()
+})
+router.delete('/notifications/:id', async (request, response) => {
+  const { id } = parse(z.object({ id: z.string().regex(/^(event|invite):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/) }), request.params)
+  const options = parse(z.object({ organizationId: z.string().uuid().optional() }), request.query)
+  await updateAllNotifications(auth(request).userId, auth(request).email, options, id)
+  response.status(204).end()
+})
+
+router.get('/account-notifications', async (request, response) => response.json({ notifications: await listAccountNotifications(auth(request).userId, parse(z.object({ organizationId: z.string().uuid().optional() }), request.query).organizationId) }))
 router.post('/account-notifications/:notificationId/read', async (request, response) => {
   const notificationId = parse(z.object({ notificationId: z.string().uuid() }), request.params).notificationId
   await readAccountNotification(auth(request).userId, notificationId)

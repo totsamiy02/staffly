@@ -3,7 +3,7 @@ import { absenceDays } from '../src/app/schedule/absence-format.ts'
 import { writeFile, access } from 'node:fs/promises'
 import path from 'node:path'
 import { planningData, savePosition, saveTemplate, assignPositions, saveWorkload, templateBody } from '../src/server/schedule/planning.ts'
-import { decodeNotificationCursor, isUrgentShiftEmail, listNotificationHistory, readHistoryNotification, reserveShiftEmail } from '../src/server/organizations/notification-service.ts'
+import { decodeNotificationCursor, isUrgentShiftEmail, listNotificationHistory, readHistoryNotification, updateAllNotifications, reserveShiftEmail } from '../src/server/organizations/notification-service.ts'
 import { invitationTimeRemaining } from '../src/app/organizations/invitation-time.ts'
 import assert from 'node:assert/strict'
 import { after, before, describe, it } from 'node:test'
@@ -111,7 +111,7 @@ describe('requests workflow, privacy and schedule integration', { concurrency: f
   it('supports system and custom types while protecting type management', async () => {
     const organization = (await listOrganizations(owner.id))[0]
     const types = await listRequestTypes(member.id, organization.id)
-    assert.equal(types.filter((type) => type.systemCode).length, 6)
+    assert.equal(types.filter((type) => type.systemCode).length, 7)
     const custom = await createRequestType(owner.id, organization.id, { name: 'Удалённый день', description: 'Работа вне офиса', dateMode: 'SINGLE', requiresComment: true, allowsAttachments: true })
     await expectCode(() => createRequestType(member.id, organization.id, { name: 'Запрещённый', dateMode: 'NONE', requiresComment: false, allowsAttachments: false }), 'INSUFFICIENT_PERMISSIONS')
     await expectCode(() => createRequest(member.id, organization.id, { requestTypeId: custom.id, startDate: '2027-01-10' }), 'REQUEST_COMMENT_REQUIRED')
@@ -982,6 +982,8 @@ describe('notification history, invitation presentation and email policy', { con
     const events = await prisma.accountNotification.createManyAndReturn({ data: Array.from({ length: 42 }, (_, i) => ({ userId: reader.id, organizationId: organization.id, type: 'ROLE_CHANGED' as const, title: `Событие ${i}`, message: 'Проверка', createdAt: timestamp })) })
     const invite = await createEmailInvitation(maker.id, organization.id, reader.email)
     await prisma.organizationInvite.update({ where: { id: invite.invitation.id }, data: { createdAt: timestamp } })
+    await prisma.organizationMember.create({ data: { organizationId: organization.id, userId: reader.id, role: 'MEMBER' } })
+
     const ids: string[] = []
     let cursor: string | undefined
     do {
@@ -999,6 +1001,54 @@ describe('notification history, invitation presentation and email policy', { con
     await expectCode(() => readHistoryNotification(receiver.id, receiver.email, `event:${events[0].id}`, false), 'NOTIFICATION_NOT_FOUND')
     await expectCode(() => listNotificationHistory(reader.id, reader.email, { limit: 20, cursor: 'invalid' }), 'INVALID_CURSOR')
     assert.equal(decodeNotificationCursor(undefined), null)
+  })
+
+  it('isolates history, badge, floating alerts, read-all and removal across organizations and rejects lost membership', async () => {
+    const other = await createOrganization(maker.id, { name: 'Other notices', description: null, timezone: 'Europe/Moscow' })
+    const privateOrg = await createOrganization(maker.id, { name: 'Private notices', description: null, timezone: 'Europe/Moscow' })
+    await prisma.organizationMember.create({ data: { organizationId: other.id, userId: receiver.id, role: 'MEMBER' } })
+    const a = await prisma.accountNotification.create({ data: { userId: receiver.id, organizationId: organization.id, type: 'REQUEST_CREATED', title: 'A', message: 'A' } })
+    const b = await prisma.accountNotification.create({ data: { userId: receiver.id, organizationId: other.id, type: 'REQUEST_CREATED', title: 'B', message: 'B' } })
+    const inaccessible = await prisma.accountNotification.create({ data: { userId: receiver.id, organizationId: privateOrg.id, type: 'ROLE_CHANGED', title: 'Private', message: 'Private' } })
+    const global = await listNotificationHistory(receiver.id, receiver.email, { limit: 50, unread: true })
+    assert.ok(global.notifications.some(item => item.id === `event:${a.id}`))
+    assert.ok(global.notifications.some(item => item.id === `event:${b.id}`))
+    assert.ok(!global.notifications.some(item => item.id === `event:${inaccessible.id}`))
+    const scoped = await listNotificationHistory(receiver.id, receiver.email, { limit: 50, organizationId: other.id, unread: true, category: 'REQUEST' })
+    assert.deepEqual(scoped.notifications.map(item => item.id), [`event:${b.id}`])
+    assert.equal(scoped.unreadCount, 1)
+    assert.deepEqual((await listAccountNotifications(receiver.id, other.id)).map(item => item.id), [b.id])
+    await expectCode(() => listNotificationHistory(receiver.id, receiver.email, { limit: 20, organizationId: privateOrg.id }), 'ORGANIZATION_NOT_FOUND')
+    await expectCode(() => readHistoryNotification(receiver.id, receiver.email, `event:${a.id}`, false, other.id), 'NOTIFICATION_NOT_FOUND')
+    await expectCode(() => updateAllNotifications(receiver.id, receiver.email, { organizationId: other.id }, `event:${a.id}`), 'NOTIFICATION_NOT_FOUND')
+    await updateAllNotifications(receiver.id, receiver.email, { organizationId: other.id })
+    assert.equal((await listNotificationHistory(receiver.id, receiver.email, { limit: 20, organizationId: other.id, unread: true })).notifications.length, 0)
+    assert.equal((await listNotificationHistory(receiver.id, receiver.email, { limit: 20, organizationId: other.id })).notifications.length, 1)
+    assert.equal((await prisma.accountNotification.findUniqueOrThrow({ where: { id: a.id } })).readAt, null)
+    await readHistoryNotification(receiver.id, receiver.email, `event:${b.id}`, true, other.id)
+    assert.equal((await listNotificationHistory(receiver.id, receiver.email, { limit: 20, organizationId: other.id })).unreadCount, 1)
+    await updateAllNotifications(receiver.id, receiver.email, { organizationId: other.id }, `event:${b.id}`)
+    assert.equal((await listNotificationHistory(receiver.id, receiver.email, { limit: 20, organizationId: other.id })).notifications.length, 0)
+    assert.ok((await prisma.accountNotification.findUniqueOrThrow({ where: { id: b.id } })).hiddenAt)
+    await prisma.organizationMember.update({ where: { organizationId_userId: { organizationId: other.id, userId: receiver.id } }, data: { leftAt: new Date() } })
+    await expectCode(() => listAccountNotifications(receiver.id, other.id), 'ORGANIZATION_NOT_FOUND')
+    await expectCode(() => readHistoryNotification(receiver.id, receiver.email, `event:${b.id}`, true), 'NOTIFICATION_NOT_FOUND')
+  })
+
+  it('reloads encrypted one-time codes from backend and hiding an invitation notification never revokes it', async () => {
+    const code = await createCodeInvitation(maker.id, organization.id)
+    assert.equal((await listActiveOrganizationInvitations(maker.id, organization.id)).find(item => item.id === code.invitation.id)?.code, code.code)
+    const stored = await prisma.organizationInvite.findUniqueOrThrow({ where: { id: code.invitation.id } })
+    assert.ok(stored.codeCiphertext && !stored.codeCiphertext.includes(code.code))
+    await expectCode(() => listActiveOrganizationInvitations(receiver.id, organization.id), 'INSUFFICIENT_PERMISSIONS')
+    await revokeInvitation(maker.id, organization.id, code.invitation.id)
+    assert.ok(!(await listActiveOrganizationInvitations(maker.id, organization.id)).some(item => item.id === code.invitation.id))
+    const recipient = await prisma.user.create({ data: { email: email('hidden-invite'), passwordHash: 'test-only', emailVerifiedAt: new Date() } })
+    const invite = await createEmailInvitation(maker.id, organization.id, recipient.email)
+    await updateAllNotifications(recipient.id, recipient.email, {}, `invite:${invite.invitation.id}`)
+    assert.equal((await listNotificationHistory(recipient.id, recipient.email, { limit: 20 })).notifications.length, 0)
+    assert.ok((await listPendingInvitations(recipient.email)).some(item => item.id === invite.invitation.id))
+    await acceptEmailInvitation(recipient.id, recipient.email, invite.invitation.id)
   })
 
   it('keeps immutable assignment/change/cancellation events; description edits never produce another notification', async () => {
@@ -1221,16 +1271,16 @@ describe('employee absences: lifecycle, privacy and schedule consistency', { con
     assert.equal(absencePeriodBody.safeParse({ startDate: '2028-03-02', endDate: '2028-03-01' }).success, false)
     assert.equal(absenceDays('2028-02-28', '2028-03-01'), 3)
   })
-  it('reports sickness without request or approval and notifies only managers', async () => {
+  it('registers absence as an informational request without approval and notifies only managers', async () => {
     const before = await prisma.organizationRequest.count({ where: { organizationId: org } })
     const sick = await reportSickness(member.id, org, { startDate: '2052-02-28', endDate: '2052-03-01' })
-    assert.equal(sick.type, 'SICK'); assert.equal(sick.sourceRequestId, null)
-    assert.equal(await prisma.organizationRequest.count({ where: { organizationId: org } }), before)
+    assert.equal(sick.type, 'SICK'); assert.ok(sick.sourceRequestId)
+    assert.equal(await prisma.organizationRequest.count({ where: { organizationId: org } }), before + 1)
     const notifications = await prisma.accountNotification.findMany({ where: { absenceId: sick.id } })
     assert.deepEqual(notifications.map(n => n.userId).sort(), [owner.id, admin.id].sort())
     assert.ok(notifications.every(n => n.emailAttemptedAt === null))
     const history = await listNotificationHistory(owner.id, owner.email, { limit: 50 })
-    assert.ok(history.notifications.some(n => n.href === `/app/organizations/${org}/schedule?absences=1&absence=${sick.id}`))
+    assert.ok(history.notifications.some(n => n.href === `/app/organizations/${org}/requests?tab=history&request=${sick.sourceRequestId}`))
     await expectCode(() => reportSickness(member.id, org, { startDate: '2052-03-01', endDate: '2052-03-03' }), 'ABSENCE_OVERLAP')
     await expectCode(() => reportSickness(outsider.id, org, { startDate: '2052-03-01', endDate: '2052-03-03' }), 'ORGANIZATION_NOT_FOUND')
   })
@@ -1308,9 +1358,88 @@ describe('employee absences: lifecycle, privacy and schedule consistency', { con
     await changeAbsence(owner.id, org, changed.id, { updatedAt: changed.updatedAt.toISOString(), reason: 'Вернулся к работе' })
     assert.equal((await prisma.workShift.findUniqueOrThrow({ where: { id: shift.id } })).status, 'SCHEDULED')
   })
+  it('stores personal absence reason and comment without approval and allows only authorized self changes', async () => {
+    const item = await reportSickness(member.id, org, { startDate: '2053-02-01', endDate: '2053-02-02', reason: 'PERSONAL', comment: 'Личные обстоятельства' })
+    assert.equal(item.type, 'ABSENCE')
+    assert.ok(item.sourceRequestId)
+    const view = await listAbsences(owner.id, org, absenceListQuery.parse({ id: item.id, history: 'true' }))
+    assert.equal(view.absences[0].reason, 'PERSONAL')
+    assert.equal(view.absences[0].comment, 'Личные обстоятельства')
+    await expectCode(() => changeAbsence(outsider.id, org, item.id, { startDate: '2053-02-01', endDate: '2053-02-03', updatedAt: item.updatedAt.toISOString() }), 'ORGANIZATION_NOT_FOUND')
+    const edited = await changeAbsence(member.id, org, item.id, { startDate: '2053-02-01', endDate: '2053-02-03', updatedAt: item.updatedAt.toISOString() })
+    assert.equal(edited.endDate.toISOString().slice(0, 10), '2053-02-03')
+    const privateView = await listSchedule(admin.id, org, '2053-02-01', '2053-03-01')
+    assert.equal(privateView.absences.find(row => row.id === item.id)?.reason, 'PERSONAL')
+    await changeAbsence(member.id, org, item.id, { updatedAt: edited.updatedAt.toISOString(), reason: 'Планы изменились' })
+  })
+
+  it('keeps informational requests mandatory, editable and cancellable in the shared history', async () => {
+    const type = (await listRequestTypes(member.id, org)).find(t => t.systemCode === 'SICK')!
+    await expectCode(() => updateRequestType(owner.id, org, type.id, { name: type.name, description: type.description, dateMode: type.dateMode, requiresComment: type.requiresComment, allowsAttachments: type.allowsAttachments, isActive: false }), 'MANDATORY_REQUEST_TYPE')
+    const report = await createRequest(member.id, org, { requestTypeId: type.id, startDate: '2055-03-01', endDate: '2055-03-02', absenceReason: 'OTHER', comment: 'Проверка сообщения' })
+    assert.equal(report.status, 'APPROVED')
+    assert.equal((await listRequests(owner.id, org, 'incoming', { page: 1, pageSize: 50 })).requests.some(r => r.id === report.id), false)
+    assert.ok((await listRequests(owner.id, org, 'history', { page: 1, pageSize: 50 })).requests.some(r => r.id === report.id))
+    await expectCode(() => resolveRequest(owner.id, org, report.id, 'APPROVED', null), 'INFORMATIONAL_REQUEST')
+    await expectCode(() => updateRequest(outsider.id, org, report.id, { requestTypeId: type.id, startDate: '2055-03-01', endDate: '2055-03-02' }), 'ORGANIZATION_NOT_FOUND')
+    await updateRequest(member.id, org, report.id, { requestTypeId: type.id, startDate: '2055-03-01', endDate: '2055-03-03', absenceReason: 'PERSONAL', comment: 'Изменено' })
+    const detail = await getRequest(member.id, org, report.id)
+    assert.equal(detail.request.absenceReason, 'PERSONAL')
+    const absence = await prisma.employeeAbsence.findUniqueOrThrow({ where: { sourceRequestId: report.id } })
+    assert.equal(absence.endDate.toISOString().slice(0, 10), '2055-03-03')
+    await expectCode(() => cancelRequest(admin.id, org, report.id), 'REQUEST_NOT_FOUND')
+    await cancelRequest(member.id, org, report.id)
+    assert.ok((await prisma.employeeAbsence.findUniqueOrThrow({ where: { id: absence.id } })).cancelledAt)
+    assert.equal((await getRequest(owner.id, org, report.id)).request.status, 'CANCELLED')
+    await expectCode(() => cancelRequest(member.id, org, report.id), 'REQUEST_ALREADY_RESOLVED')
+    const current = await listAbsences(owner.id, org, absenceListQuery.parse({}))
+    const archived = await listAbsences(owner.id, org, absenceListQuery.parse({ history: 'true' }))
+    assert.ok(!current.absences.some(a => a.id === absence.id))
+    assert.ok(archived.absences.some(a => a.id === absence.id))
+    assert.ok(archived.absences.every(a => a.cancelledAt || a.endDate < '2050-01-01'))
+  })
+  it('binds day-off requests to an own future shift and validates its organization and date', async () => {
+    const type = (await listRequestTypes(member.id, org)).find(t => t.systemCode === 'DAY_OFF')!
+    const shift = await createShift(owner.id, org, input('2056-03-04'))
+    await expectCode(() => createRequest(admin.id, org, { requestTypeId: type.id, startDate: '2056-03-04', relatedShiftId: shift.id }), 'SHIFT_NOT_FOUND')
+    await expectCode(() => createRequest(member.id, org, { requestTypeId: type.id, startDate: '2056-03-05', relatedShiftId: shift.id }), 'DAY_OFF_SHIFT_DATE')
+    const request = await createRequest(member.id, org, { requestTypeId: type.id, startDate: '2056-03-04', relatedShiftId: shift.id })
+    assert.equal(request.status, 'PENDING')
+    assert.equal(request.relatedShiftId, shift.id)
+    assert.equal(request.proposedStartAt, null)
+    await resolveRequest(owner.id, org, request.id, 'APPROVED', null)
+    assert.ok(await prisma.employeeAbsence.findUnique({ where: { sourceRequestId: request.id } }))
+    assert.equal((await prisma.workShift.findUniqueOrThrow({ where: { id: shift.id } })).status, 'SCHEDULED')
+  })
+
+  it('returns uploaded avatars in shifts and statistics and separates completed and cancelled history', async () => {
+    const image = await sharp({ create: { width: 8, height: 8, channels: 3, background: '#555' } }).png().toBuffer()
+    const avatar = await replaceUserAvatar(member.id, image)
+    try {
+      const past = await createShift(owner.id, org, input('2020-03-04'))
+      const future = await createShift(owner.id, org, input('2054-03-04'))
+      const cancelled = await createShift(owner.id, org, input('2054-03-05'))
+      await cancelShift(owner.id, org, cancelled.id, 'Проверка истории')
+      assert.equal(past.memberAvatarUrl, avatar)
+      assert.equal((await listSchedule(member.id, org, '2020-03-01', '2020-04-01', 'current')).shifts.length, 1)
+      await expectCode(() => listSchedule(member.id, org, '2020-03-01', '2020-04-01', 'history'), 'INSUFFICIENT_PERMISSIONS')
+      assert.equal((await listSchedule(owner.id, org, '2020-03-01', '2020-04-01', 'history')).shifts.length, 0)
+      const current = await listSchedule(member.id, org, '2054-03-01', '2054-04-01', 'current')
+      assert.ok(current.shifts.some(shift => shift.id === future.id && shift.memberAvatarUrl === avatar))
+      const history = await listSchedule(admin.id, org, '2054-03-01', '2054-04-01', 'history')
+      assert.ok(history.shifts.some(shift => shift.id === cancelled.id && shift.status === 'CANCELLED'))
+      assert.ok(!history.shifts.some(shift => shift.id === future.id))
+      const statistics = await organizationStatistics(owner.id, org, { memberState: 'active', sort: 'name', direction: 'asc', page: 1, limit: 50 })
+      assert.equal(statistics.members.find(row => row.userId === member.id)?.avatarUrl, avatar)
+      assert.equal((await memberStatistics(member.id, org, employee, { memberState: 'all', sort: 'name', direction: 'asc', page: 1, limit: 20 })).member.avatarUrl, avatar)
+    } finally { await removeUserAvatar(member.id); await cleanupPendingFiles() }
+  })
+
   it('serializes overlapping reports and preserves history for former employees', async () => {
     const results = await Promise.allSettled([reportSickness(member.id, org, { startDate: '2052-07-01', endDate: '2052-07-03' }), reportSickness(member.id, org, { startDate: '2052-07-02', endDate: '2052-07-04' })])
     assert.equal(results.filter(r => r.status === 'fulfilled').length, 1)
+    const activeAbsence = await prisma.employeeAbsence.findFirstOrThrow({ where: { organizationId: org, memberId: employee, startDate: new Date('2052-07-01T00:00:00Z') } })
+    await changeAbsence(member.id, org, activeAbsence.id, { updatedAt: activeAbsence.updatedAt.toISOString(), reason: 'Проверка архива' })
     const types = await listRequestTypes(member.id, org)
     const pending = await createRequest(member.id, org, { requestTypeId: types.find(t => t.systemCode === 'DAY_OFF')!.id, startDate: '2052-08-01' })
     await removeMember(owner.id, org, employee)

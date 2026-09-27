@@ -348,6 +348,7 @@
 .schedule-header-actions, .requests-header-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px; }
 .absence-panel { width: min(600px, 100%); }
 .absence-panel > .app-alert { margin: 0 24px 20px; }
+.absence-toolbar .schedule-view-switch { margin: 0; }
 .absence-toolbar { display: flex; flex-wrap: wrap; gap: 10px; padding: 0 24px 24px; }
 .absence-list { display: grid; gap: 16px; padding: 0 24px 24px; }
 .absence-item { min-width: 0; padding: 20px; border: 1px solid #dedede; border-radius: 14px; background: #fff; }
@@ -389,3 +390,13 @@
   .absence-form .planning-time { grid-template-columns: minmax(0, 1fr); }
   .absence-form > footer > button { flex: 1 1 auto; }
 }
+
+.statistics-table__head, .statistics-table__row { min-width: 710px; grid-template-columns: minmax(210px, 1.4fr) repeat(4, minmax(100px, .8fr)); }
+.statistics-table__row > span.statistics-employee { flex-direction: row; align-items: center; justify-content: flex-start; gap: 10px; }
+.statistics-employee > span:last-child { display: grid; gap: 4px; }
+.statistics-avatar { display: grid; place-items: center; width: 34px; height: 34px; flex: 0 0 34px; border-radius: 50%; background: #eee; }
+.schedule-calendar { border-color: #eaeaea; background: #ececec; }
+.absence-person { display: flex; gap: 10px; align-items: center; }
+.work-time-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.statistics-period { flex-shrink: 0; }
+.statistics-period button { white-space: nowrap; }

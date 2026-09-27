@@ -1,3 +1,4 @@
+import { mediaUrl } from '../storage/image-service.ts'
 import { Prisma } from '../../generated/prisma/client.ts'
 import { prisma } from '../db.ts'
 import { ApiError } from '../api-error.ts'
@@ -20,6 +21,7 @@ type Row = {
   memberId: string
   userId: string
   name: string
+  avatarFileId: string | null
   role: 'OWNER' | 'ADMIN' | 'MEMBER'
   joinedAt: Date
   leftAt: Date | null
@@ -39,6 +41,7 @@ async function aggregate(organizationId: string, timezone: string, options: Pick
       m.id AS "memberId",
       m.user_id AS "userId",
       COALESCE(NULLIF(concat_ws(' ', u.last_name, u.first_name, u.middle_name), ''), split_part(u.email, '@', 1)) AS name,
+      u.avatar_file_id AS "avatarFileId",
       m.role,
       m.joined_at AS "joinedAt",
       m.left_at AS "leftAt",
@@ -69,6 +72,7 @@ function present(row: Row) {
     memberId: row.memberId,
     userId: row.userId,
     name: row.name,
+    avatarUrl: mediaUrl(row.avatarFileId),
     role: row.role,
     active: !row.leftAt,
     joinedAt: row.joinedAt,
@@ -128,7 +132,7 @@ async function memberRows(userId: string, organizationId: string, memberId: stri
     return { id: shift.id, scheduledStartAt: shift.scheduledStartAt, scheduledEndAt: shift.scheduledEndAt, actualStartAt: shift.actualStartAt, actualEndAt: shift.actualEndAt, status: shift.status, minutes: countedMinutes(start, end), plannedMinutes: countedMinutes(shift.scheduledStartAt, shift.scheduledEndAt), actualMinutes: shift.actualStartAt && shift.actualEndAt ? countedMinutes(shift.actualStartAt, shift.actualEndAt) : null, breakMinutes: shift.breakMinutes, actualBreakMinutes: shift.actualBreakMinutes, cancellationReason: shift.cancellationReason, adjusted: shift._count.adjustments > 0, description: shift.description }
   }
   return {
-    member: { id: target.id, name: [target.user.lastName, target.user.firstName, target.user.middleName].filter(Boolean).join(' ') || target.user.email.split('@')[0], role: target.role, active: !target.leftAt },
+    member: { avatarUrl: mediaUrl(target.user.avatarFileId), id: target.id, name: [target.user.lastName, target.user.firstName, target.user.middleName].filter(Boolean).join(' ') || target.user.email.split('@')[0], role: target.role, active: !target.leftAt },
     period: period ? present(period) : null,
     allTime: allTime ? present(allTime) : null,
     history: history.map(mapShift),

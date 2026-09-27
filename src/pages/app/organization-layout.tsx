@@ -1,5 +1,5 @@
 import RoleBadge from '../../component/ui/role-badge/role-badge.tsx'
-import { Link, NavLink, Route, Routes, useLocation, useParams } from 'react-router-dom'
+import { Navigate, Link, NavLink, Route, Routes, useLocation, useParams } from 'react-router-dom'
 import { useState, type ReactNode } from 'react'
 import { useOrganization } from '../../app/organizations/queries.ts'
 import AppTopbar from './app-topbar.tsx'
@@ -45,8 +45,8 @@ function ModuleNotFound({ organizationPath }: { organizationPath: string }) {
   </section>
 }
 
-function WorkspaceLoadError({ retry, notFound }: { retry: () => void; notFound: boolean }) {
-  return <div className="app-page"><AppTopbar /><main className="workspace-load-error" role="alert">
+function WorkspaceLoadError({ retry, notFound, organizationId }: { retry: () => void; notFound: boolean; organizationId?: string }) {
+  return <div className="app-page"><AppTopbar notificationOrganizationId={organizationId} /><main className="workspace-load-error" role="alert">
     <p className="app-eyebrow">{notFound ? 'Организация не найдена' : 'Не удалось открыть организацию'}</p>
     <h1>{notFound ? 'Нет доступа или организация удалена' : 'Страница временно недоступна'}</h1>
     <p>{notFound ? 'Проверьте адрес или вернитесь к доступным организациям.' : 'Проверьте подключение и попробуйте ещё раз.'}</p>
@@ -61,7 +61,7 @@ export default function OrganizationLayout() {
   const query = useOrganization(organizationId)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem('staffly:sidebar-collapsed') === 'true')
   if (query.isLoading) return <main className="app-loading"><span /></main>
-  if (query.isError || !query.data) return <WorkspaceLoadError retry={() => void query.refetch()} notFound={Boolean(query.error && 'status' in query.error && query.error.status === 404)} />
+  if (query.isError || !query.data) return <WorkspaceLoadError organizationId={organizationId} retry={() => void query.refetch()} notFound={Boolean(query.error && 'status' in query.error && query.error.status === 404)} />
   const organization = query.data.organization
   const organizationPath = `/app/organizations/${organization.id}`
   const currentSegment = location.pathname.slice(organizationPath.length).split('/').filter(Boolean)[0] ?? ''
@@ -84,7 +84,8 @@ export default function OrganizationLayout() {
       <Routes>
         <Route index element={module(<OrganizationDashboard organization={organization} />)} />
         <Route path="employees" element={module(<OrganizationMembers organization={organization} />)} />
-        <Route path="schedule" element={module(<SchedulePage organization={organization} />)} />
+        <Route path="schedule" element={module(<SchedulePage key="calendar" organization={organization} />)} />
+        <Route path="schedule/history" element={organization.role === 'MEMBER' ? <Navigate to={`/app/organizations/${organization.id}/schedule`} replace /> : module(<SchedulePage key="history" organization={organization} historyMode />)} />
         <Route path="schedule/statistics" element={module(<StatisticsPage organization={organization} />)} />
         <Route path="schedule/work-time" element={module(<MyWorkTimePage organization={organization} />)} />
         <Route path="requests" element={module(<RequestsPage organization={organization} />)} />

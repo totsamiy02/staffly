@@ -1,3 +1,4 @@
+import { mediaUrl } from '../storage/image-service.ts'
 import { absenceLabels } from './absence-service.ts'
 import { checkMonthlyWorkload } from './workload.ts'
 import { cancelShiftRequests, lockShift } from '../requests/shift-conflicts.ts'
@@ -53,7 +54,7 @@ export async function assertNoApprovedAbsence(organizationId: string, memberId: 
   if (absence && !acknowledge) throw new ApiError(409, 'EMPLOYEE_ABSENT', `Сотрудник отсутствует ${dateText(absence.startDate)}–${dateText(absence.endDate)}: ${absenceLabels[absence.type] ?? 'Отсутствие'}. Подтвердите назначение смены несмотря на отсутствие.`, { absenceId: absence.id })
 }
 
-function publicShift(shift: WorkShift & { member: { user: { email: string; firstName: string | null; lastName: string | null; middleName: string | null } }; _count?: { adjustments: number } }) {
+function publicShift(shift: WorkShift & { member: { user: { email: string; firstName: string | null; lastName: string | null; middleName: string | null; avatarFileId: string | null } }; _count?: { adjustments: number } }) {
   const effectiveStartAt = shift.actualStartAt ?? shift.scheduledStartAt
   const effectiveEndAt = shift.actualEndAt ?? shift.scheduledEndAt
   return {
@@ -62,6 +63,7 @@ function publicShift(shift: WorkShift & { member: { user: { email: string; first
     positionName: shift.positionNameSnapshot,
     memberId: shift.memberId,
     memberName: displayName(shift.member.user),
+    memberAvatarUrl: mediaUrl(shift.member.user.avatarFileId),
     scheduledStartAt: shift.scheduledStartAt,
     scheduledEndAt: shift.scheduledEndAt,
     breakMinutes: shift.breakMinutes,
@@ -77,19 +79,20 @@ function publicShift(shift: WorkShift & { member: { user: { email: string; first
   }
 }
 
-const shiftInclude = { member: { include: { user: { select: { email: true, firstName: true, lastName: true, middleName: true } } } }, _count: { select: { adjustments: true } } } as const
+const shiftInclude = { member: { include: { user: { select: { email: true, firstName: true, lastName: true, middleName: true, avatarFileId: true } } } }, _count: { select: { adjustments: true } } } as const
 
-export async function listSchedule(userId: string, organizationId: string, fromDate: string, toDate: string) {
+export async function listSchedule(userId: string, organizationId: string, fromDate: string, toDate: string, mode?: 'current' | 'history') {
   const actor = await getMembership(userId, organizationId)
   const from = startOfZonedDate(fromDate, actor.organization.timezone)
   const to = startOfZonedDate(toDate, actor.organization.timezone)
+  if (mode === 'history') requireOrganizationRole(actor.role, ['OWNER', 'ADMIN'])
   const shifts = await prisma.workShift.findMany({
-    where: { organizationId, status: 'SCHEDULED', scheduledStartAt: { lt: to }, scheduledEndAt: { gt: from } },
+    where: { organizationId, status: mode === 'history' ? 'CANCELLED' : 'SCHEDULED', scheduledStartAt: { lt: to }, scheduledEndAt: { gt: from } },
     include: shiftInclude,
     orderBy: [{ scheduledStartAt: 'asc' }, { member: { user: { lastName: 'asc' } } }],
   })
-  const absences = await prisma.employeeAbsence.findMany({ where: { organizationId, cancelledAt: null, startDate: { lt: new Date(`${toDate}T00:00:00.000Z`) }, endDate: { gte: new Date(`${fromDate}T00:00:00.000Z`) } }, include: { member: { include: { user: { select: { email: true, firstName: true, lastName: true, middleName: true } } } } }, orderBy: { startDate: 'asc' } })
-  return { timezone: actor.organization.timezone, shifts: shifts.map(publicShift), absences: absences.map((item) => ({ id: item.id, memberId: item.memberId, memberName: displayName(item.member.user), type: actor.role === 'MEMBER' && item.memberId !== actor.id ? 'ABSENCE' as const : item.type, startDate: dateText(item.startDate), endDate: dateText(item.endDate) })) }
+  const absences = await prisma.employeeAbsence.findMany({ where: { organizationId, cancelledAt: null, startDate: { lt: new Date(`${toDate}T00:00:00.000Z`) }, endDate: { gte: new Date(`${fromDate}T00:00:00.000Z`) } }, include: { member: { include: { user: { select: { email: true, firstName: true, lastName: true, middleName: true, avatarFileId: true } } } } }, orderBy: { startDate: 'asc' } })
+  return { timezone: actor.organization.timezone, shifts: shifts.map(publicShift), absences: (mode === 'history' ? [] : absences).map((item) => ({ id: item.id, memberId: item.memberId, memberName: displayName(item.member.user), memberAvatarUrl: mediaUrl(item.member.user.avatarFileId), reason: actor.role === 'MEMBER' && item.memberId !== actor.id ? null : item.reason, type: actor.role === 'MEMBER' && item.memberId !== actor.id ? 'ABSENCE' as const : item.type, startDate: dateText(item.startDate), endDate: dateText(item.endDate) })) }
 }
 
 export async function listMyUpcomingShifts(userId: string, organizationId: string) {
@@ -202,7 +205,7 @@ export async function updateShift(userId: string, organizationId: string, shiftI
 
 export async function listShiftNotifications(userId: string) {
   const notifications = await prisma.accountNotification.findMany({
-    where: { userId, readAt: null, type: { in: ['SHIFT_ASSIGNED', 'SHIFT_CHANGED'] }, shift: { member: { userId, leftAt: null }, status: 'SCHEDULED', scheduledEndAt: { gt: new Date() } }, organization: { deletedAt: null } },
+    where: { userId, hiddenAt: null, readAt: null, type: { in: ['SHIFT_ASSIGNED', 'SHIFT_CHANGED'] }, shift: { member: { userId, leftAt: null }, status: 'SCHEDULED', scheduledEndAt: { gt: new Date() } }, organization: { deletedAt: null } },
     include: { shift: true, organization: { select: { id: true, name: true, timezone: true } } },
     distinct: ['shiftId'], orderBy: { createdAt: 'desc' }, take: 50,
   })
@@ -210,7 +213,7 @@ export async function listShiftNotifications(userId: string) {
 }
 
 export async function readShiftNotification(userId: string, shiftId: string) {
-  const shift = await prisma.workShift.findFirst({ where: { id: shiftId, member: { userId } }, select: { id: true } })
+  const shift = await prisma.workShift.findFirst({ where: { id: shiftId, member: { userId, leftAt: null }, organization: { deletedAt: null } }, select: { id: true } })
   if (!shift) throw new ApiError(404, 'SHIFT_NOTIFICATION_NOT_FOUND', 'Уведомление о смене не найдено.')
   await prisma.$transaction([
     prisma.workShift.update({ where: { id: shiftId }, data: { assignmentReadAt: new Date() } }),
@@ -225,7 +228,7 @@ export async function getShift(userId: string, organizationId: string, shiftId: 
     if (!shift) throw new ApiError(404, 'SHIFT_NOT_FOUND', 'Смена не найдена.')
     return { ...publicShift(shift), adjustments: [], adjustmentPagination: { page: 1, limit, total: 0, pages: 1 } }
   }
-  const shift = await prisma.workShift.findFirst({ where: { id: shiftId, organizationId }, include: { ...shiftInclude, adjustments: { include: { changedByMember: { include: { user: { select: { email: true, firstName: true, lastName: true, middleName: true } } } } }, orderBy: { createdAt: 'desc' }, skip: (page - 1) * limit, take: limit } } })
+  const shift = await prisma.workShift.findFirst({ where: { id: shiftId, organizationId }, include: { ...shiftInclude, adjustments: { include: { changedByMember: { include: { user: { select: { email: true, firstName: true, lastName: true, middleName: true, avatarFileId: true } } } } }, orderBy: { createdAt: 'desc' }, skip: (page - 1) * limit, take: limit } } })
   if (!shift) throw new ApiError(404, 'SHIFT_NOT_FOUND', 'Смена не найдена.')
   const total = shift._count.adjustments
   return { ...publicShift(shift), adjustments: shift.adjustments.map((item) => ({ ...item, changedByName: displayName(item.changedByMember.user) })), adjustmentPagination: { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) } }

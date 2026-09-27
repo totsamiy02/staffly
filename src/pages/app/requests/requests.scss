@@ -129,3 +129,4 @@
 .request-shift-original strong, .request-shift-requested strong { font-size: 11px; }
 @media (max-width: 480px) { .request-card { gap: 10px; } .request-card .request-status { max-width: 110px; white-space: normal; text-align: center; } }
 .request-card strong { white-space: normal; }
+.request-list-avatar { display: inline-grid; place-items: center; width: 26px; height: 26px; flex: 0 0 26px; border-radius: 50%; background: #eee; }

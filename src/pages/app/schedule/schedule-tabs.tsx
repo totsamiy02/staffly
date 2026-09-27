@@ -6,5 +6,6 @@ export default function ScheduleTabs({ organization }: { organization: Organizat
   return <nav className="schedule-tabs" aria-label="Разделы расписания">
     <NavLink end to={base}>Календарь</NavLink>
     {organization.role === 'MEMBER' ? <NavLink to={`${base}/work-time`}>Рабочее время</NavLink> : <NavLink to={`${base}/statistics`}>Статистика</NavLink>}
+    {organization.role !== 'MEMBER' && <NavLink to={`${base}/history`}>История смен</NavLink>}
   </nav>
 }

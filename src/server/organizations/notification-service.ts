@@ -1,5 +1,7 @@
 import { Prisma } from '../../generated/prisma/client.ts'
 import { prisma } from '../db.ts'
+import { formatNotificationPeriod } from '../../app/organizations/notification-format.ts'
+import { getMembership } from './permissions.ts'
 import { ApiError } from '../api-error.ts'
 import { mediaUrl } from '../storage/image-service.ts'
 import { deliverShiftAssignment } from '../mail.ts'
@@ -9,8 +11,7 @@ export type ShiftEventType = keyof typeof labels
 
 type ShiftEvent = { id: string; organizationId: string; scheduledStartAt: Date; scheduledEndAt: Date; member: { userId: string } }
 export async function recordShiftNotification(tx: Prisma.TransactionClient, shift: ShiftEvent, type: ShiftEventType, timezone: string) {
-  const format = (date: Date) => date.toLocaleString('ru-RU', { timeZone: timezone, dateStyle: 'short', timeStyle: 'short' })
-  return tx.accountNotification.create({ data: { userId: shift.member.userId, organizationId: shift.organizationId, shiftId: shift.id, type, title: labels[type], message: `${format(shift.scheduledStartAt)} — ${format(shift.scheduledEndAt)} (${timezone})` } })
+  return tx.accountNotification.create({ data: { userId: shift.member.userId, organizationId: shift.organizationId, shiftId: shift.id, type, title: labels[type], message: formatNotificationPeriod(shift.scheduledStartAt, shift.scheduledEndAt, timezone) } })
 }
 
 export function isUrgentShiftEmail(start: Date, end: Date, now = new Date()) {
@@ -45,7 +46,8 @@ export function decodeNotificationCursor(cursor: string | undefined) {
   } catch { throw new ApiError(400, 'INVALID_CURSOR', 'Некорректная страница уведомлений.') }
 }
 
-export async function listNotificationHistory(userId: string, email: string, options: { limit: number; cursor?: string; unread?: boolean }) {
+export async function listNotificationHistory(userId: string, email: string, options: { limit: number; cursor?: string; unread?: boolean; organizationId?: string; category?: string }) {
+  if (options.organizationId) await getMembership(userId, options.organizationId)
   const cursor = decodeNotificationCursor(options.cursor)
   // Both sources are existing records; invitations can predate the recipient's registration.
   const rows = await prisma.$queryRaw<HistoryRow[]>(Prisma.sql`
@@ -57,7 +59,7 @@ export async function listNotificationHistory(userId: string, email: string, opt
       FROM account_notifications n JOIN organizations o ON o.id = n.organization_id AND o.deleted_at IS NULL
       LEFT JOIN organization_members m ON m.organization_id = o.id AND m.user_id = ${userId}::uuid AND m.left_at IS NULL
       LEFT JOIN requests r ON r.id = n.request_id LEFT JOIN work_shifts s ON s.id = n.shift_id
-      WHERE n.user_id = ${userId}::uuid ${options.unread ? Prisma.sql`AND n.read_at IS NULL` : Prisma.empty}
+      WHERE n.user_id = ${userId}::uuid AND m.id IS NOT NULL AND n.hidden_at IS NULL ${options.unread ? Prisma.sql`AND n.read_at IS NULL` : Prisma.empty}
       UNION ALL
       SELECT 'invite:' || i.id, 'invite', 'ORGANIZATION_INVITATION', 'Приглашение в организацию', o.name,
         i.created_at, i.read_at, o.id, o.name, o.logo_file_id, o.timezone, m.role::text, NULL::uuid, NULL::uuid, NULL::uuid, NULL::timestamptz,
@@ -65,9 +67,11 @@ export async function listNotificationHistory(userId: string, email: string, opt
         i.expires_at, COALESCE(NULLIF(trim(concat_ws(' ', u.last_name, u.first_name, u.middle_name)), ''), u.email)
       FROM organization_invites i JOIN organizations o ON o.id = i.organization_id AND o.deleted_at IS NULL JOIN users u ON u.id = i.invited_by_user_id
       LEFT JOIN organization_members m ON m.organization_id = o.id AND m.user_id = ${userId}::uuid AND m.left_at IS NULL
-      WHERE ((i.type = 'EMAIL' AND i.invited_email = ${email}) OR (i.type = 'CODE' AND i.accepted_by_user_id = ${userId}::uuid)) ${options.unread ? Prisma.sql`AND i.read_at IS NULL` : Prisma.empty}
+      WHERE i.notification_hidden_at IS NULL AND ((i.type = 'EMAIL' AND i.invited_email = ${email}) OR (i.type = 'CODE' AND i.accepted_by_user_id = ${userId}::uuid)) ${options.unread ? Prisma.sql`AND i.read_at IS NULL` : Prisma.empty}
     ) SELECT * FROM history
-    ${cursor ? Prisma.sql`WHERE ("createdAt", id) < (${cursor.date}, ${cursor.id})` : Prisma.empty}
+    WHERE (${options.organizationId ?? null}::uuid IS NULL OR "organizationId" = ${options.organizationId ?? null}::uuid)
+    AND (${options.category ?? null}::text IS NULL OR type LIKE ${options.category ? options.category + '_%' : null})
+    ${cursor ? Prisma.sql`AND ("createdAt", id) < (${cursor.date}, ${cursor.id})` : Prisma.empty}
     ORDER BY "createdAt" DESC, id DESC LIMIT ${options.limit + 1}
   `)
   const hasMore = rows.length > options.limit
@@ -77,21 +81,34 @@ export async function listNotificationHistory(userId: string, email: string, opt
     const month = row.shiftStartAt ? new Intl.DateTimeFormat('en-CA', { timeZone: row.timezone, year: 'numeric', month: '2-digit' }).formatToParts(row.shiftStartAt) : []
     const monthText = `${month.find(part => part.type === 'year')?.value}-${month.find(part => part.type === 'month')?.value}`
     return { id: row.id, source: row.source, type: row.type, title: row.title, message: row.message, createdAt: row.createdAt, readAt: row.readAt, state: row.state, expiresAt: row.expiresAt, inviter: row.inviter, organization: { id: row.organizationId, name: row.organizationName, logoUrl: mediaUrl(row.logoFileId) },
-      href: row.role ? row.absenceId ? `${organizationPath}/schedule?absences=1&absence=${row.absenceId}` : row.shiftId ? `${organizationPath}/schedule?view=mine&month=${monthText}&shift=${row.shiftId}` : row.requestId ? `${organizationPath}/requests?tab=${row.type === 'REQUEST_CREATED' && row.role !== 'MEMBER' ? 'incoming' : 'mine'}&request=${row.requestId}` : organizationPath : row.source === 'invite' && row.state === 'ACTIVE' ? `/app#invitation-${row.id.split(':')[1]}` : null }
+      href: row.role ? row.requestId && row.absenceId ? `${organizationPath}/requests?tab=${row.role === 'MEMBER' ? 'mine' : 'history'}&request=${row.requestId}` : row.absenceId ? `${organizationPath}/schedule?absences=1&absence=${row.absenceId}` : row.shiftId ? `${organizationPath}/schedule?view=mine&month=${monthText}&shift=${row.shiftId}` : row.requestId ? `${organizationPath}/requests?tab=${row.type === 'REQUEST_CREATED' && row.role !== 'MEMBER' ? 'incoming' : 'mine'}&request=${row.requestId}` : organizationPath : row.source === 'invite' && row.state === 'ACTIVE' ? `/app#invitation-${row.id.split(':')[1]}` : null }
   })
   const last = page.at(-1)
   const [eventUnread, invitationUnread] = await Promise.all([
-    prisma.accountNotification.count({ where: { userId, readAt: null, organization: { deletedAt: null } } }),
-    prisma.organizationInvite.count({ where: { OR: [{ invitedEmail: email, type: 'EMAIL' }, { acceptedByUserId: userId, type: 'CODE' }], readAt: null, organization: { deletedAt: null } } }),
+    prisma.accountNotification.count({ where: { userId, readAt: null, hiddenAt: null, organizationId: options.organizationId, organization: { deletedAt: null, members: { some: { userId, leftAt: null } } } } }),
+    prisma.organizationInvite.count({ where: { OR: [{ invitedEmail: email, type: 'EMAIL' }, { acceptedByUserId: userId, type: 'CODE' }], readAt: null, notificationHiddenAt: null, organizationId: options.organizationId, organization: { deletedAt: null } } }),
   ])
   return { notifications, unreadCount: eventUnread + invitationUnread, nextCursor: hasMore && last ? Buffer.from(JSON.stringify({ date: last.createdAt.toISOString(), id: last.id })).toString('base64url') : null }
 }
 
-export async function readHistoryNotification(userId: string, email: string, id: string, unread: boolean) {
+export async function readHistoryNotification(userId: string, email: string, id: string, unread: boolean, organizationId?: string) {
+  if (organizationId) await getMembership(userId, organizationId)
   const [source, recordId] = id.split(':')
   const data = { readAt: unread ? null : new Date() }
   const result = source === 'event'
-    ? await prisma.accountNotification.updateMany({ where: { id: recordId, userId }, data })
-    : await prisma.organizationInvite.updateMany({ where: { id: recordId, OR: [{ type: 'EMAIL', invitedEmail: email }, { type: 'CODE', acceptedByUserId: userId }] }, data })
+    ? await prisma.accountNotification.updateMany({ where: { id: recordId, userId, organizationId, hiddenAt: null, organization: { deletedAt: null, members: { some: { userId, leftAt: null } } } }, data })
+    : await prisma.organizationInvite.updateMany({ where: { id: recordId, organizationId, notificationHiddenAt: null, organization: { deletedAt: null }, OR: [{ type: 'EMAIL', invitedEmail: email }, { type: 'CODE', acceptedByUserId: userId }] }, data })
   if (!result.count) throw new ApiError(404, 'NOTIFICATION_NOT_FOUND', 'Уведомление не найдено.')
+}
+
+export async function updateAllNotifications(userId: string, email: string, options: { organizationId?: string }, removeId?: string) {
+  if (options.organizationId) await getMembership(userId, options.organizationId)
+  const [source, recordId] = removeId?.split(':') ?? []
+  const organizationId = options.organizationId
+  const now = new Date()
+  const results = await prisma.$transaction([
+    prisma.accountNotification.updateMany({ where: { userId, organizationId, hiddenAt: null, ...(removeId ? { id: source === 'event' ? recordId : '00000000-0000-0000-0000-000000000000' } : { readAt: null }), organization: { deletedAt: null, members: { some: { userId, leftAt: null } } } }, data: removeId ? { hiddenAt: now } : { readAt: now } }),
+    prisma.organizationInvite.updateMany({ where: { organizationId, notificationHiddenAt: null, ...(removeId ? { id: source === 'invite' ? recordId : '00000000-0000-0000-0000-000000000000' } : { readAt: null }), OR: [{ type: 'EMAIL', invitedEmail: email }, { type: 'CODE', acceptedByUserId: userId }], organization: { deletedAt: null } }, data: removeId ? { notificationHiddenAt: now } : { readAt: now } }),
+  ])
+  if (removeId && !results.some(result => result.count)) throw new ApiError(404, 'NOTIFICATION_NOT_FOUND', 'Уведомление не найдено.')
 }

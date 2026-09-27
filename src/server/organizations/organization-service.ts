@@ -132,12 +132,14 @@ export async function changeMemberRole(actorUserId: string, organizationId: stri
   return member
 }
 
-export async function listAccountNotifications(userId: string) {
-  return prisma.accountNotification.findMany({ where: { userId, readAt: null, type: { notIn: ['SHIFT_ASSIGNED', 'SHIFT_CHANGED', 'SHIFT_CANCELLED'] }, organization: { deletedAt: null } }, include: { organization: { select: { id: true, name: true } } }, orderBy: { createdAt: 'desc' }, take: 50 })
+export async function listAccountNotifications(userId: string, organizationId?: string) {
+  if (organizationId) await getMembership(userId, organizationId)
+  const notifications = await prisma.accountNotification.findMany({ where: { userId, organizationId, hiddenAt: null, readAt: null, type: { notIn: ['SHIFT_ASSIGNED', 'SHIFT_CHANGED', 'SHIFT_CANCELLED'] }, organization: { deletedAt: null, members: { some: { userId, leftAt: null } } } }, include: { organization: { select: { id: true, name: true, logoFileId: true } } }, orderBy: { createdAt: 'desc' }, take: 50 })
+  return notifications.map(item => ({ ...item, organization: { id: item.organization.id, name: item.organization.name, logoUrl: mediaUrl(item.organization.logoFileId) } }))
 }
 
 export async function readAccountNotification(userId: string, notificationId: string) {
-  const updated = await prisma.accountNotification.updateMany({ where: { id: notificationId, userId }, data: { readAt: new Date() } })
+  const updated = await prisma.accountNotification.updateMany({ where: { id: notificationId, userId, hiddenAt: null, organization: { deletedAt: null, members: { some: { userId, leftAt: null } } } }, data: { readAt: new Date() } })
   if (!updated.count) throw new ApiError(404, 'NOTIFICATION_NOT_FOUND', 'Уведомление не найдено.')
 }
 

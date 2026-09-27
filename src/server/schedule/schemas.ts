@@ -14,7 +14,7 @@ export const organizationParams = z.object({ organizationId: uuid })
 export const shiftParams = organizationParams.extend({ shiftId: uuid })
 export const memberWorkTimeParams = organizationParams.extend({ memberId: uuid })
 
-export const scheduleRangeQuery = z.object({ from: date, to: date }).superRefine((value, context) => {
+export const scheduleRangeQuery = z.object({ from: date, to: date, mode: z.enum(['current', 'history']).optional() }).superRefine((value, context) => {
   const days = (Date.parse(`${value.to}T00:00:00Z`) - Date.parse(`${value.from}T00:00:00Z`)) / 86_400_000
   if (days <= 0 || days > 62) context.addIssue({ code: 'custom', message: 'Диапазон расписания должен содержать от 1 до 62 дней.' })
 })

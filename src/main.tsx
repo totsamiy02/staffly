@@ -1,3 +1,4 @@
+import ToastProvider from './component/ui/toast/toast.tsx'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
@@ -13,7 +14,7 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BrowserRouter>
       <QueryClientProvider client={queryClient}>
-        <RootErrorBoundary><AuthProvider><App /></AuthProvider></RootErrorBoundary>
+        <RootErrorBoundary><AuthProvider><ToastProvider><App /></ToastProvider></AuthProvider></RootErrorBoundary>
       </QueryClientProvider>
     </BrowserRouter>
   </StrictMode>,

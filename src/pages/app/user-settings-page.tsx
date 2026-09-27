@@ -1,3 +1,4 @@
+import { useToastFeedback } from '../../component/ui/toast/toast-context.ts'
 import { liveQueryOptions } from '../../app/live-query.ts'
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useLocation } from 'react-router-dom'
@@ -55,6 +56,7 @@ export default function UserSettingsPage() {
   const revokeOthers = useMutation({ mutationFn: () => apiRequest('/auth/sessions/revoke-others', { method: 'POST', body: {} }), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['auth-sessions'] }) })
   const revokeAll = useMutation({ mutationFn: () => apiRequest('/auth/logout-all', { method: 'POST', body: {} }), onSuccess: async () => { await logout(); navigate('/', { replace: true }) } })
 
+  useToastFeedback(message, profileError || passwordError)
   useEffect(() => {
     if (!message) return
     const timer = window.setTimeout(() => setMessage(''), 5_000)
@@ -100,7 +102,7 @@ export default function UserSettingsPage() {
     <Link className="app-back" to={returnTo}>{returnLabel}</Link>
     <header><p className="app-eyebrow">Личный профиль</p><h1>Настройки</h1>{section === 'profile' && <p>Данные профиля видят ваши коллеги в организациях Staffly.</p>}</header>
     <nav className="account-settings-tabs" aria-label="Разделы настроек"><button className={section === 'profile' ? 'active' : ''} onClick={() => setSection('profile')}>Профиль</button><button className={section === 'security' ? 'active' : ''} onClick={() => setSection('security')}>Безопасность</button></nav>
-    {message && <p className="app-alert" role="status">{message}</p>}
+
 
     {section === 'profile' && <section className="profile-editor">
       <aside><ImageUpload endpoint="/profile/avatar" imageUrl={user?.avatarUrl ?? null} name={user?.displayName ?? initial} avatarClassName="account-profile-card__avatar" onChange={(avatarUrl) => { if (user) updateUser({ ...user, avatarUrl }); void queryClient.invalidateQueries({ queryKey: ['organization-members'] }) }} onMessage={setMessage} onError={setProfileError} /><div className="profile-editor__identity"><span>Ваша учетная запись</span><h2>{user?.displayName}</h2><p>{user?.email}</p></div></aside>

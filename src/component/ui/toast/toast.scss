@@ -1,0 +1,11 @@
+.staffly-toasts { position: fixed; z-index: 240; top: 18px; left: 50%; width: min(460px, calc(100vw - 24px)); transform: translateX(-50%); display: grid; gap: 8px; pointer-events: none; }
+.staffly-toast { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border: 1px solid #e5e5e5; border-radius: 12px; background: #fff; box-shadow: 0 8px 28px #0002; pointer-events: auto; animation: toast-in 200ms ease both; font-size: 13px; }
+.staffly-toast p { flex: 1; margin: 0; }
+.staffly-toast > span { color: #666; font-weight: 700; }
+.staffly-toast--success > span { color: #477257; }
+.staffly-toast--error > span { color: #a64d4d; }
+.staffly-toast button { font-size: 20px; cursor: pointer; }
+.staffly-toast.is-closing { animation: toast-out 180ms ease both; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(-8px); } }
+@keyframes toast-out { to { opacity: 0; transform: translateY(-6px); } }
+@media (prefers-reduced-motion: reduce) { .staffly-toast, .staffly-toast.is-closing { animation-duration: 1ms; } }

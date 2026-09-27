@@ -4,6 +4,7 @@ export type WorkShift = { positionId?: string | null; positionName?: string | nu
   id: string
   memberId: string
   memberName: string
+  memberAvatarUrl?: string | null
   scheduledStartAt: string
   scheduledEndAt: string
   breakMinutes: number
@@ -19,7 +20,7 @@ export type WorkShift = { positionId?: string | null; positionName?: string | nu
 }
 
 export type ShiftNotification = { id: string; organization: { id: string; name: string; timezone: string }; scheduledStartAt: string; scheduledEndAt: string; createdAt: string }
-export type EmployeeAbsence = { id: string; memberId: string; memberName: string; type: 'VACATION' | 'DAY_OFF' | 'SICK' | 'SICK_LEAVE' | 'ABSENCE'; startDate: string; endDate: string }
+export type EmployeeAbsence = { memberAvatarUrl?: string | null; reason?: string | null; comment?: string | null; id: string; memberId: string; memberName: string; type: 'VACATION' | 'DAY_OFF' | 'SICK' | 'SICK_LEAVE' | 'ABSENCE'; startDate: string; endDate: string }
 
 export type ShiftDetails = WorkShift & {
   adjustments: Array<{
@@ -41,6 +42,7 @@ export type WorkTimeMember = {
   memberId: string
   userId: string
   name: string
+  avatarUrl: string | null
   role: OrganizationRole
   active: boolean
   joinedAt: string
@@ -59,7 +61,7 @@ export type WorkTimeStatistics = {
 }
 
 export type MemberWorkTime = {
-  member: { id: string; name: string; role: OrganizationRole; active: boolean }
+  member: { avatarUrl: string | null; id: string; name: string; role: OrganizationRole; active: boolean }
   period: WorkTimeMember | null
   allTime: WorkTimeMember | null
   history: Array<{ id: string; scheduledStartAt: string; scheduledEndAt: string; actualStartAt: string | null; actualEndAt: string | null; status: 'SCHEDULED' | 'CANCELLED'; minutes: number; plannedMinutes: number; actualMinutes: number | null; breakMinutes: number; actualBreakMinutes: number | null; cancellationReason: string | null; adjusted: boolean; description: string | null }>

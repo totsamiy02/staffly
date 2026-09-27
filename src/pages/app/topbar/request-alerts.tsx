@@ -1,3 +1,4 @@
+import Avatar from '../../../component/ui/avatar/avatar.tsx'
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
@@ -7,10 +8,10 @@ import type { AccountNotification } from '../../../app/organizations/types.ts'
 
 const dismissed = new Set<string>()
 
-export default function RequestAlerts() {
+export default function RequestAlerts({ organizationId, suppressed }: { organizationId?: string; suppressed?: boolean }) {
   const { apiRequest, user } = useAuth()
   const queryClient = useQueryClient()
-  const notifications = useAccountNotifications()
+  const notifications = useAccountNotifications(organizationId)
   const [visible, setVisible] = useState<Array<{ item: AccountNotification; seconds: number }>>([])
   const [pageVisible, setPageVisible] = useState(document.visibilityState === 'visible')
 
@@ -31,11 +32,11 @@ export default function RequestAlerts() {
 
   useEffect(() => {
     if (!pageVisible) return
-    const timer = window.setInterval(() => setVisible((current) => current.map((entry) => ({ ...entry, seconds: entry.seconds - 1 })).filter((entry) => entry.seconds > 0)), 1_000)
+    const timer = window.setInterval(() => setVisible((current) => current.map((entry) => ({ ...entry, seconds: entry.seconds - 1 })).filter((entry) => entry.seconds >= 0)), 1_000)
     return () => window.clearInterval(timer)
   }, [pageVisible])
 
-  function close(id: string) { setVisible((current) => current.filter((entry) => entry.item.id !== id)) }
+  function close(id: string) { setVisible(current => current.map(entry => entry.item.id === id ? { ...entry, seconds: 0 } : entry)) }
   function open(item: AccountNotification) {
     close(item.id)
     void apiRequest(`/account-notifications/${item.id}/read`, { method: 'POST', body: {} })
@@ -43,9 +44,9 @@ export default function RequestAlerts() {
       .catch(() => undefined)
   }
 
-  if (!visible.length) return null
-  return <aside className="request-alerts" aria-label="Новые заявки">{visible.map(({ item }) => <div className="request-alert" role="status" key={item.id}>
-    <div><small>{item.organization.name}</small><strong>{item.title}</strong><p>{item.message}</p></div>
+  if (suppressed || !visible.length) return null
+  return <aside className="request-alerts" aria-label="Новые заявки">{visible.filter(({ item }) => !organizationId || item.organization.id === organizationId).map(({ item, seconds }) => <div className={`request-alert${seconds === 0 ? ' is-closing' : ''}`}  role="status" key={item.id}>
+    <div>{!organizationId && <div className="request-alert__organization"><Avatar url={item.organization.logoUrl} name={item.organization.name} className="notification-organization-avatar" /><small>{item.organization.name}</small></div>}<strong>{item.title}</strong><p>{item.message}</p></div>
     <div className="request-alert__actions"><button type="button" aria-label="Закрыть уведомление" onClick={() => close(item.id)}>×</button><Link to={`/app/organizations/${item.organization.id}/requests?tab=incoming&request=${item.requestId}`} onClick={() => open(item)}>Открыть</Link></div>
   </div>)}</aside>
 }
