@@ -65,7 +65,7 @@ router.patch('/organizations/:organizationId', async (request, response) => {
 router.get('/organizations/:organizationId/members', async (request, response) => {
   const { organizationId } = parse(organizationIdParams, request.params)
   const options = parse(memberListQuery, request.query)
-  if (options.page || options.pageSize || options.role || options.search) {
+  if (options.page || options.pageSize || options.role || options.search || options.positionId) {
     response.json(await listMembersPage(auth(request).userId, organizationId, options))
     return
   }

@@ -3,17 +3,18 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react'
 type Props = {
   variant: 'modal' | 'drawer'
   className?: string
+  dismissible?: boolean
   onClose: () => void
   children: (requestClose: () => void) => ReactNode
 }
 
-export default function AnimatedOverlay({ variant, className = '', onClose, children }: Props) {
+export default function AnimatedOverlay({ variant, className = '', dismissible = true, onClose, children }: Props) {
   const [closing, setClosing] = useState(false)
   const requestClose = useCallback(() => {
-    if (closing) return
+    if (closing || !dismissible) return
     setClosing(true)
     window.setTimeout(onClose, 180)
-  }, [closing, onClose])
+  }, [closing, dismissible, onClose])
 
   useEffect(() => {
     function escape(event: KeyboardEvent) { if (event.key === 'Escape') requestClose() }

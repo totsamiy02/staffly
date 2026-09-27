@@ -17,7 +17,7 @@ function auth(request: Request) { return (request as AuthenticatedRequest).auth!
 router.get('/media/:fileId', async (request, response) => {
   const parsed = z.string().uuid().safeParse(request.params.fileId)
   if (!parsed.success) throw new ApiError(404, 'MEDIA_NOT_FOUND', 'Изображение не найдено.')
-  const file = await prisma.storedFile.findFirst({ where: { id: parsed.data, purpose: { in: ['USER_AVATAR', 'ORGANIZATION_LOGO'] } } })
+  const file = await prisma.storedFile.findFirst({ where: { id: parsed.data, pendingDeletionAt: null, purpose: { in: ['USER_AVATAR', 'ORGANIZATION_LOGO'] } } })
   if (!file) throw new ApiError(404, 'MEDIA_NOT_FOUND', 'Изображение не найдено.')
   let contents: Buffer
   try { contents = await readObject(file.objectKey) }

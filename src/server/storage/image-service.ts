@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import sharp from 'sharp'
 import { prisma } from '../db.ts'
 import { ApiError } from '../api-error.ts'
+import type { StoredFilePurpose } from '../../generated/prisma/enums.ts'
 import { deleteObject, writeObject } from './local-file-storage.ts'
 import { getMembership } from '../organizations/permissions.ts'
 
@@ -58,7 +59,7 @@ export async function deletePendingFile(fileId: string, removeObject: RemoveObje
 
 export async function cleanupPendingFiles(options: { limit?: number; removeObject?: RemoveObject } = {}) {
   const files = await prisma.storedFile.findMany({
-    where: { pendingDeletionAt: { not: null } },
+    where: { pendingDeletionAt: { lte: new Date() } },
     orderBy: { pendingDeletionAt: 'asc' },
     take: Math.min(Math.max(options.limit ?? 100, 1), 500),
     select: { id: true },
@@ -66,6 +67,18 @@ export async function cleanupPendingFiles(options: { limit?: number; removeObjec
   let deleted = 0
   for (const file of files) if (await deletePendingFile(file.id, options.removeObject)) deleted += 1
   return { checked: files.length, deleted }
+}
+
+// Register an upload intent before disk writes. A crashed process leaves a durable
+// cleanup record; successful binding clears it atomically with the owning object.
+export async function stageStoredFile(data: { objectKey: string; mimeType: string; size: number; checksumSha256: string; purpose: StoredFilePurpose; uploadedByUserId: string; organizationId?: string }, contents: Buffer) {
+  const file = await prisma.storedFile.create({ data: { ...data, pendingDeletionAt: new Date(Date.now() + 60 * 60 * 1000) } })
+  try { await writeObject(file.objectKey, contents); return file }
+  catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'EEXIST') await prisma.storedFile.delete({ where: { id: file.id } })
+    else await deletePendingFile(file.id)
+    throw error
+  }
 }
 
 export function startStorageCleanup() {
@@ -86,20 +99,18 @@ export function startStorageCleanup() {
 export async function replaceUserAvatar(userId: string, input: unknown) {
   const image = await normalizeImage(input)
   const objectKey = `users/${userId}/avatars/${randomUUID()}.webp`
-  await writeObject(objectKey, image.buffer)
+  const staged = await stageStoredFile({ objectKey, mimeType: 'image/webp', size: image.buffer.length, checksumSha256: image.checksum, purpose: 'USER_AVATAR', uploadedByUserId: userId }, image.buffer)
   let stored: { file: { id: string }; previousId: string | null }
   try {
     stored = await prisma.$transaction(async (tx) => {
       const previous = await tx.user.findUniqueOrThrow({ where: { id: userId }, select: { avatarFileId: true } })
-      const file = await tx.storedFile.create({
-        data: { objectKey, mimeType: 'image/webp', size: image.buffer.length, checksumSha256: image.checksum, purpose: 'USER_AVATAR', uploadedByUserId: userId },
-      })
+      const file = await tx.storedFile.update({ where: { id: staged.id }, data: { pendingDeletionAt: null } })
       await tx.user.update({ where: { id: userId }, data: { avatarFileId: file.id } })
       if (previous.avatarFileId) await tx.storedFile.updateMany({ where: { id: previous.avatarFileId }, data: { pendingDeletionAt: new Date(), lastDeletionError: null } })
       return { file, previousId: previous.avatarFileId }
     }, { isolationLevel: 'Serializable' })
   } catch (error) {
-    await deleteObject(objectKey).catch(() => undefined)
+    await deletePendingFile(staged.id)
     throw error
   }
   if (stored.previousId) await deletePendingFile(stored.previousId).catch((error) => console.error('Immediate avatar cleanup failed:', error))
@@ -126,20 +137,18 @@ export async function replaceOrganizationLogo(userId: string, organizationId: st
   await requireOrganizationEditor(userId, organizationId)
   const image = await normalizeImage(input)
   const objectKey = `organizations/${organizationId}/logos/${randomUUID()}.webp`
-  await writeObject(objectKey, image.buffer)
+  const staged = await stageStoredFile({ objectKey, mimeType: 'image/webp', size: image.buffer.length, checksumSha256: image.checksum, purpose: 'ORGANIZATION_LOGO', uploadedByUserId: userId, organizationId }, image.buffer)
   let stored: { file: { id: string }; previousId: string | null }
   try {
     stored = await prisma.$transaction(async (tx) => {
       const previous = await tx.organization.findUniqueOrThrow({ where: { id: organizationId }, select: { logoFileId: true } })
-      const file = await tx.storedFile.create({
-        data: { objectKey, mimeType: 'image/webp', size: image.buffer.length, checksumSha256: image.checksum, purpose: 'ORGANIZATION_LOGO', uploadedByUserId: userId, organizationId },
-      })
+      const file = await tx.storedFile.update({ where: { id: staged.id }, data: { pendingDeletionAt: null } })
       await tx.organization.update({ where: { id: organizationId }, data: { logoFileId: file.id } })
       if (previous.logoFileId) await tx.storedFile.updateMany({ where: { id: previous.logoFileId }, data: { pendingDeletionAt: new Date(), lastDeletionError: null } })
       return { file, previousId: previous.logoFileId }
     }, { isolationLevel: 'Serializable' })
   } catch (error) {
-    await deleteObject(objectKey).catch(() => undefined)
+    await deletePendingFile(staged.id)
     throw error
   }
   if (stored.previousId) await deletePendingFile(stored.previousId).catch((error) => console.error('Immediate organization logo cleanup failed:', error))

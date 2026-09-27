@@ -1,4 +1,4 @@
-import { writeFile } from 'node:fs/promises'
+import { chmod, writeFile } from 'node:fs/promises'
 import pg from 'pg'
 
 const source = new URL(process.env.DATABASE_URL)
@@ -35,4 +35,5 @@ await writeFile('src/server/.env.test', [
   'NODE_ENV="test"',
   '',
 ].join('\n'), { mode: 0o600 })
+await chmod('src/server/.env.test', 0o600)
 console.log('staffly_test is ready; src/server/.env.test created')

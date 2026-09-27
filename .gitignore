@@ -24,7 +24,6 @@ dist-ssr
 .env
 .env.*
 !src/server/.env.example
-.DS_Store
 /src/generated/prisma
 
 # Files uploaded to the local development storage.

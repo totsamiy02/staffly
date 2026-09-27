@@ -27,13 +27,14 @@ export function useOrganization(organizationId: string | undefined) {
   return useQuery({ ...liveQueryOptions, queryKey: ['organization', organizationId], queryFn: () => apiRequest<{ organization: OrganizationSummary }>(`/organizations/${organizationId}`), enabled: Boolean(user && organizationId) })
 }
 
-export function useOrganizationMembers(organizationId: string | undefined, options?: { page: number; pageSize: number; search?: string; role?: OrganizationRole }) {
+export function useOrganizationMembers(organizationId: string | undefined, options?: { page: number; pageSize: number; search?: string; role?: OrganizationRole; positionId?: string }) {
   const { apiRequest, user } = useAuth()
   const query = new URLSearchParams()
   if (options) {
     query.set('page', String(options.page)); query.set('pageSize', String(options.pageSize))
     if (options.search) query.set('search', options.search)
     if (options.role) query.set('role', options.role)
+    if (options.positionId) query.set('positionId', options.positionId)
   }
   const suffix = query.size ? `?${query}` : ''
   return useQuery({ ...liveQueryOptions, queryKey: ['organization-members', organizationId, options], queryFn: () => apiRequest<{ members: OrganizationMember[]; pagination?: MemberPagination }>(`/organizations/${organizationId}/members${suffix}`), enabled: Boolean(user && organizationId), placeholderData: (previous) => previous })

@@ -2,9 +2,9 @@ import { createHash, randomUUID } from 'node:crypto'
 import sharp from 'sharp'
 import { prisma } from '../db.ts'
 import { ApiError } from '../api-error.ts'
-import { deleteObject, readObject, writeObject } from '../storage/local-file-storage.ts'
+import { readObject } from '../storage/local-file-storage.ts'
 import { assertRequestFileAccess } from './service.ts'
-import { deletePendingFile } from '../storage/image-service.ts'
+import { deletePendingFile, stageStoredFile } from '../storage/image-service.ts'
 
 export const MAX_REQUEST_FILE_BYTES = 10 * 1024 * 1024
 const allowed = new Map([['application/pdf', 'pdf'], ['image/jpeg', 'jpg'], ['image/png', 'png'], ['image/webp', 'webp']])
@@ -12,8 +12,11 @@ const allowed = new Map([['application/pdf', 'pdf'], ['image/jpeg', 'jpg'], ['im
 function safeName(value: string | undefined, extension: string) {
   let decoded = `attachment.${extension}`
   try { if (value) decoded = decodeURIComponent(value) } catch { throw new ApiError(400, 'INVALID_FILE_NAME', 'Некорректное имя файла.') }
-  const leaf = decoded.replaceAll('\0', '_').replace(/[/\\\r\n]/g, '_').trim().slice(0, 240)
-  return leaf || `attachment.${extension}`
+  // Strip control characters from download display names; never use them as disk paths.
+  // oxlint-disable-next-line no-control-regex
+  const leaf = decoded.replace(/[\x00-\x1f\x7f/\\]/g, '_').trim().slice(0, 220)
+  const base = leaf.replace(/\.[^.]*$/, '').replace(/^[. ]+|[. ]+$/g, '')
+  return `${base || 'attachment'}.${extension}`
 }
 
 async function validateContents(input: Buffer, mimeType: string) {
@@ -25,9 +28,11 @@ async function validateContents(input: Buffer, mimeType: string) {
     return
   }
   try {
-    const metadata = await sharp(input, { failOn: 'error', limitInputPixels: 25_000_000 }).metadata()
+    const image = sharp(input, { failOn: 'error', limitInputPixels: 25_000_000 })
+    const metadata = await image.metadata()
     const expected = mimeType === 'image/jpeg' ? 'jpeg' : mimeType.slice(6)
     if (metadata.format !== expected || (metadata.pages ?? 1) > 1) throw new Error('format mismatch')
+    await image.raw().toBuffer() // Decode pixels too: a valid header alone can hide a truncated image.
   } catch { throw new ApiError(400, 'INVALID_ATTACHMENT', 'Изображение повреждено или его содержимое не соответствует формату.') }
 }
 
@@ -43,13 +48,13 @@ export async function addRequestAttachment(userId: string, organizationId: strin
   const extension = allowed.get(mimeType)!
   const objectKey = `organizations/${organizationId}/requests/${requestId}/${randomUUID()}.${extension}`
   const fileName = safeName(originalName, extension)
-  await writeObject(objectKey, input)
+  const staged = await stageStoredFile({ objectKey, mimeType, size: input.length, checksumSha256: createHash('sha256').update(input).digest('hex'), purpose: 'REQUEST_ATTACHMENT', uploadedByUserId: userId, organizationId }, input)
   try {
     return await prisma.$transaction(async (tx) => {
-      const file = await tx.storedFile.create({ data: { objectKey, mimeType, size: input.length, checksumSha256: createHash('sha256').update(input).digest('hex'), purpose: 'REQUEST_ATTACHMENT', uploadedByUserId: userId, organizationId } })
+      const file = await tx.storedFile.update({ where: { id: staged.id }, data: { pendingDeletionAt: null } })
       return tx.requestAttachment.create({ data: { requestId, storedFileId: file.id, fileName }, include: { storedFile: true } })
     })
-  } catch (error) { await deleteObject(objectKey).catch(() => undefined); throw error }
+  } catch (error) { await deletePendingFile(staged.id); throw error }
 }
 
 export async function downloadRequestAttachment(userId: string, organizationId: string, requestId: string, attachmentId: string) {

@@ -3,7 +3,7 @@ import Avatar from '../../../component/ui/avatar/avatar.tsx'
 import type { HistoryNotification } from '../../../app/organizations/types.ts'
 import { invitationTimeRemaining } from '../../../app/organizations/invitation-time.ts'
 
-const typeLabels: Record<string, string> = { ORGANIZATION_INVITATION: 'Приглашение', SHIFT_ASSIGNED: 'Расписание', SHIFT_CHANGED: 'Расписание', SHIFT_CANCELLED: 'Расписание', ROLE_CHANGED: 'Доступ', REQUEST_CREATED: 'Заявка', REQUEST_APPROVED: 'Заявка', REQUEST_REJECTED: 'Заявка', REQUEST_CANCELLED: 'Заявка' }
+const typeLabels: Record<string, string> = { ABSENCE_REPORTED: 'Отсутствие', ABSENCE_CHANGED: 'Отсутствие', ABSENCE_CANCELLED: 'Отсутствие', ORGANIZATION_INVITATION: 'Приглашение', SHIFT_ASSIGNED: 'Расписание', SHIFT_CHANGED: 'Расписание', SHIFT_CANCELLED: 'Расписание', ROLE_CHANGED: 'Доступ', REQUEST_CREATED: 'Заявка', REQUEST_APPROVED: 'Заявка', REQUEST_REJECTED: 'Заявка', REQUEST_CANCELLED: 'Заявка' }
 const stateLabels: Record<string, string> = { ACCEPTED: 'Принято', REJECTED: 'Отклонено', REVOKED: 'Отозвано', EXPIRED: 'Срок истёк', APPROVED: 'Одобрено', CANCELLED: 'Отменено', PENDING: 'На рассмотрении' }
 
 type Props = { item: HistoryNotification; now: number; compact?: boolean; busy: boolean; onRead: (id: string, unread?: boolean) => void; onInvite: (id: string, action: 'accept' | 'reject') => void; onNavigate?: () => void }

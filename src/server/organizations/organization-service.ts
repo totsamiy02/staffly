@@ -69,16 +69,16 @@ export async function listMembers(userId: string, organizationId: string) {
   await getMembership(userId, organizationId)
   const members = await prisma.organizationMember.findMany({
     where: { organizationId, leftAt: null, organization: { deletedAt: null }, user: { deletedAt: null } },
-    include: { user: { select: { id: true, email: true, firstName: true, lastName: true, middleName: true, phone: true, bio: true, lastSeenAt: true, avatarFileId: true, sessions: { where: onlineSessions(), select: { id: true }, take: 1 } } } },
+    include: { positions: { where: { position: { isActive: true } }, include: { position: { select: { id: true, name: true } } } }, user: { select: { id: true, email: true, firstName: true, lastName: true, middleName: true, phone: true, bio: true, lastSeenAt: true, avatarFileId: true, sessions: { where: onlineSessions(), select: { id: true }, take: 1 } } } },
     orderBy: [{ role: 'asc' }, { joinedAt: 'asc' }],
   })
   return members.map((member) => {
     const displayName = [member.user.lastName, member.user.firstName, member.user.middleName].filter(Boolean).join(' ') || member.user.email.split('@')[0]
-    return { id: member.id, userId: member.userId, email: member.user.email, displayName, firstName: member.user.firstName, lastName: member.user.lastName, middleName: member.user.middleName, phone: member.user.phone, bio: member.user.bio, avatarUrl: mediaUrl(member.user.avatarFileId), lastSeenAt: member.user.lastSeenAt, online: member.user.sessions.length > 0, role: member.role, joinedAt: member.joinedAt }
+    return { positions: member.positions.map(item => item.position), id: member.id, userId: member.userId, email: member.user.email, displayName, firstName: member.user.firstName, lastName: member.user.lastName, middleName: member.user.middleName, phone: member.user.phone, bio: member.user.bio, avatarUrl: mediaUrl(member.user.avatarFileId), lastSeenAt: member.user.lastSeenAt, online: member.user.sessions.length > 0, role: member.role, joinedAt: member.joinedAt }
   })
 }
 
-export async function listMembersPage(userId: string, organizationId: string, options: { page?: number; pageSize?: number; role?: OrganizationRole; search?: string }) {
+export async function listMembersPage(userId: string, organizationId: string, options: { page?: number; pageSize?: number; role?: OrganizationRole; search?: string; positionId?: string }) {
   await getMembership(userId, organizationId)
   const page = options.page ?? 1
   const pageSize = options.pageSize ?? 20
@@ -89,6 +89,7 @@ export async function listMembersPage(userId: string, organizationId: string, op
     organization: { deletedAt: null },
     user: { deletedAt: null },
     ...(options.role ? { role: options.role } : {}),
+    ...(options.positionId ? { positions: options.positionId === 'unassigned' ? { none: { position: { isActive: true } } } : { some: { positionId: options.positionId, position: { organizationId, isActive: true } } } } : {}),
     ...(terms.length ? { AND: terms.map((term) => ({ user: { OR: [
       { email: { contains: term, mode: 'insensitive' } },
       { firstName: { contains: term, mode: 'insensitive' } },
@@ -100,7 +101,7 @@ export async function listMembersPage(userId: string, organizationId: string, op
     prisma.organizationMember.count({ where }),
     prisma.organizationMember.findMany({
       where,
-      include: { user: { select: { id: true, email: true, firstName: true, lastName: true, middleName: true, phone: true, bio: true, lastSeenAt: true, avatarFileId: true, sessions: { where: onlineSessions(), select: { id: true }, take: 1 } } } },
+      include: { positions: { where: { position: { isActive: true } }, include: { position: { select: { id: true, name: true } } } }, user: { select: { id: true, email: true, firstName: true, lastName: true, middleName: true, phone: true, bio: true, lastSeenAt: true, avatarFileId: true, sessions: { where: onlineSessions(), select: { id: true }, take: 1 } } } },
       orderBy: [{ role: 'asc' }, { user: { lastName: 'asc' } }, { user: { firstName: 'asc' } }, { user: { email: 'asc' } }],
       skip: (page - 1) * pageSize,
       take: pageSize,
@@ -109,7 +110,7 @@ export async function listMembersPage(userId: string, organizationId: string, op
   return {
     members: members.map((member) => {
       const displayName = [member.user.lastName, member.user.firstName, member.user.middleName].filter(Boolean).join(' ') || member.user.email.split('@')[0]
-      return { id: member.id, userId: member.userId, email: member.user.email, displayName, firstName: member.user.firstName, lastName: member.user.lastName, middleName: member.user.middleName, phone: member.user.phone, bio: member.user.bio, avatarUrl: mediaUrl(member.user.avatarFileId), lastSeenAt: member.user.lastSeenAt, online: member.user.sessions.length > 0, role: member.role, joinedAt: member.joinedAt }
+      return { positions: member.positions.map(item => item.position), id: member.id, userId: member.userId, email: member.user.email, displayName, firstName: member.user.firstName, lastName: member.user.lastName, middleName: member.user.middleName, phone: member.user.phone, bio: member.user.bio, avatarUrl: mediaUrl(member.user.avatarFileId), lastSeenAt: member.user.lastSeenAt, online: member.user.sessions.length > 0, role: member.role, joinedAt: member.joinedAt }
     }),
     pagination: { page, pageSize, total, pages: Math.max(1, Math.ceil(total / pageSize)) },
   }

@@ -5,7 +5,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 
 export type AuthUser = { id: string; email: string; displayName: string; firstName: string | null; lastName: string | null; middleName: string | null; phone: string | null; bio: string | null; avatarUrl: string | null }
 type AuthResult = { user: AuthUser; accessToken: string }
-type ApiOptions = { method?: 'GET' | 'POST' | 'PATCH' | 'DELETE'; body?: unknown }
+type ApiOptions = { method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'; body?: unknown }
 type AuthContextValue = {
   user: AuthUser | null
   loading: boolean

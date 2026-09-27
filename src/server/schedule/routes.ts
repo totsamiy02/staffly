@@ -1,10 +1,12 @@
+import { reportSickness, listAbsences, changeAbsence, absencePeriodBody, absenceEditBody, absenceCancelBody, absenceListQuery } from './absence-service.ts'
+import { planningData, savePosition, saveTemplate, assignPositions, saveWorkload, positionBody, templateBody, assignmentBody, workloadBody } from './planning.ts'
 import { Router, type Request } from 'express'
 import { rateLimit } from 'express-rate-limit'
 import { z } from 'zod'
 import { requireAuth, type AuthenticatedRequest } from '../auth.ts'
 import { ApiError } from '../api-error.ts'
-import { actualShiftBody, cancelShiftBody, historyPaginationQuery, memberWorkTimeParams, organizationParams, scheduleRangeQuery, shiftBody, shiftParams, statisticsQuery } from './schemas.ts'
-import { cancelShift, correctActualTime, createShift, getShift, listMyUpcomingShifts, listSchedule, listShiftNotifications, readShiftNotification, updateShift } from './service.ts'
+import { batchShiftBody, actualShiftBody, cancelShiftBody, historyPaginationQuery, memberWorkTimeParams, organizationParams, scheduleRangeQuery, shiftBody, shiftParams, statisticsQuery } from './schemas.ts'
+import { createShiftBatch, cancelShift, correctActualTime, createShift, getShift, listMyUpcomingShifts, listSchedule, listShiftNotifications, readShiftNotification, updateShift } from './service.ts'
 import { memberStatistics, myStatistics, organizationStatistics } from './statistics.ts'
 
 const router = Router()
@@ -24,6 +26,54 @@ function parse<T>(schema: z.ZodType<T>, value: unknown): T {
   if (!result.success) throw new ApiError(400, 'VALIDATION_ERROR', 'Проверьте данные расписания.', z.flattenError(result.error).fieldErrors)
   return result.data
 }
+
+
+router.get('/organizations/:organizationId/absences', async (request, response) => {
+  const { organizationId } = parse(organizationParams, request.params)
+  response.json(await listAbsences(auth(request).userId, organizationId, parse(absenceListQuery, request.query)))
+})
+router.post('/organizations/:organizationId/absences/sick', mutationLimiter, async (request, response) => {
+  const { organizationId } = parse(organizationParams, request.params)
+  response.status(201).json(await reportSickness(auth(request).userId, organizationId, parse(absencePeriodBody, request.body)))
+})
+router.patch('/organizations/:organizationId/absences/:id', mutationLimiter, async (request, response) => {
+  const { organizationId, id } = parse(organizationParams.extend({ id: z.string().uuid() }), request.params)
+  response.json(await changeAbsence(auth(request).userId, organizationId, id, parse(absenceEditBody, request.body)))
+})
+router.post('/organizations/:organizationId/absences/:id/cancel', mutationLimiter, async (request, response) => {
+  const { organizationId, id } = parse(organizationParams.extend({ id: z.string().uuid() }), request.params)
+  response.json(await changeAbsence(auth(request).userId, organizationId, id, parse(absenceCancelBody, request.body)))
+})
+router.get('/organizations/:organizationId/schedule/planning', async (request, response) => {
+  const { organizationId } = parse(organizationParams, request.params)
+  response.json(await planningData(auth(request).userId, organizationId))
+})
+router.put('/organizations/:organizationId/schedule/workload', mutationLimiter, async (request, response) => {
+  const { organizationId } = parse(organizationParams, request.params)
+  await saveWorkload(auth(request).userId, organizationId, parse(workloadBody, request.body).monthlyWorkMinutes)
+  response.status(204).end()
+})
+router.put('/organizations/:organizationId/members/:memberId/positions', mutationLimiter, async (request, response) => {
+  const { organizationId, memberId } = parse(memberWorkTimeParams, request.params)
+  await assignPositions(auth(request).userId, organizationId, memberId, parse(assignmentBody, request.body).positionIds)
+  response.status(204).end()
+})
+for (const kind of ['positions', 'templates'] as const) {
+  router.post('/organizations/:organizationId/schedule/' + kind, mutationLimiter, async (request, response) => {
+    const { organizationId } = parse(organizationParams, request.params)
+    const result = kind === 'positions' ? await savePosition(auth(request).userId, organizationId, null, parse(positionBody, request.body)) : await saveTemplate(auth(request).userId, organizationId, null, parse(templateBody, request.body))
+    response.status(201).json(result)
+  })
+  router.patch('/organizations/:organizationId/schedule/' + kind + '/:id', mutationLimiter, async (request, response) => {
+    const { organizationId, id } = parse(organizationParams.extend({ id: z.string().uuid() }), request.params)
+    response.json(kind === 'positions' ? await savePosition(auth(request).userId, organizationId, id, parse(positionBody, request.body)) : await saveTemplate(auth(request).userId, organizationId, id, parse(templateBody, request.body)))
+  })
+}
+router.post('/organizations/:organizationId/shifts/batch', mutationLimiter, async (request, response) => {
+  const { organizationId } = parse(organizationParams, request.params)
+  const body = parse(batchShiftBody, request.body)
+  response.status(201).json(await createShiftBatch(auth(request).userId, organizationId, body.shifts.map(shift => ({ ...shift, acknowledgeAbsence: body.acknowledgeAbsence })), body.acknowledgeWorkload))
+})
 
 router.get('/organizations/:organizationId/schedule', async (request, response) => {
   const { organizationId } = parse(organizationParams, request.params)

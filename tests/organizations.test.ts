@@ -1,3 +1,8 @@
+import { reportSickness, changeAbsence, listAbsences, absenceListQuery, absencePeriodBody } from '../src/server/schedule/absence-service.ts'
+import { absenceDays } from '../src/app/schedule/absence-format.ts'
+import { writeFile, access } from 'node:fs/promises'
+import path from 'node:path'
+import { planningData, savePosition, saveTemplate, assignPositions, saveWorkload, templateBody } from '../src/server/schedule/planning.ts'
 import { decodeNotificationCursor, isUrgentShiftEmail, listNotificationHistory, readHistoryNotification, reserveShiftEmail } from '../src/server/organizations/notification-service.ts'
 import { invitationTimeRemaining } from '../src/app/organizations/invitation-time.ts'
 import assert from 'node:assert/strict'
@@ -10,13 +15,13 @@ import { confirmOrganizationDeletion, confirmOwnershipTransfer, requestOrganizat
 import { updateProfileBody } from '../src/server/profile/schemas.ts'
 import { updateOrganizationBody } from '../src/server/organizations/schemas.ts'
 import { passwordValidationError } from '../src/app/auth/password-policy.ts'
-import { cancelShift, correctActualTime, createShift, getShift, listMyUpcomingShifts, listSchedule, listShiftNotifications, readShiftNotification, updateShift } from '../src/server/schedule/service.ts'
+import { createShiftBatch, cancelShift, correctActualTime, createShift, getShift, listMyUpcomingShifts, listSchedule, listShiftNotifications, readShiftNotification, updateShift } from '../src/server/schedule/service.ts'
 import { memberStatistics, myStatistics, organizationStatistics } from '../src/server/schedule/statistics.ts'
 import { zonedDateTimeToUtc } from '../src/server/schedule/timezone.ts'
-import { calendarRange, moveMonth } from '../src/app/schedule/date-utils.ts'
+import { calendarRange, moveMonth, shiftState, shiftTimeRange } from '../src/app/schedule/date-utils.ts'
 import sharp from 'sharp'
-import { cleanupPendingFiles, removeOrganizationLogo, removeUserAvatar, replaceOrganizationLogo, replaceUserAvatar } from '../src/server/storage/image-service.ts'
-import { writeObject } from '../src/server/storage/local-file-storage.ts'
+import { stageStoredFile, cleanupPendingFiles, removeOrganizationLogo, removeUserAvatar, replaceOrganizationLogo, replaceUserAvatar } from '../src/server/storage/image-service.ts'
+import { deleteObject, readObject, storageRoot, writeObject } from '../src/server/storage/local-file-storage.ts'
 import { formatRussianPhone, normalizeRussianPhone } from '../src/app/profile/phone.ts'
 import { cancelRequest, createRequest, createRequestType, getRequest, listRequests, listRequestTypes, resolveRequest, updateRequest, updateRequestType } from '../src/server/requests/service.ts'
 import { addRequestAttachment, deleteRequestAttachment, downloadRequestAttachment } from '../src/server/requests/attachment-service.ts'
@@ -133,7 +138,6 @@ describe('requests workflow, privacy and schedule integration', { concurrency: f
     assert.equal(await prisma.requestRead.count({ where: { requestId: request.id } }), 2)
     const employeeMembership = await prisma.organizationMember.findUniqueOrThrow({ where: { organizationId_userId: { organizationId: organization.id, userId: member.id } } })
     const conflict = await createShift(owner.id, organization.id, { memberId: employeeMembership.id, startDate: '2028-02-11', startTime: '09:00', endDate: '2028-02-11', endTime: '18:00', breakMinutes: 0, description: null })
-    await expectCode(() => resolveRequest(owner.id, organization.id, request.id, 'APPROVED', null, false), 'REQUEST_SHIFT_CONFLICTS')
     await resolveRequest(owner.id, organization.id, request.id, 'APPROVED', 'Согласовано', true)
     assert.equal((await prisma.workShift.findUniqueOrThrow({ where: { id: conflict.id } })).status, 'CANCELLED')
     assert.ok(await prisma.employeeAbsence.findUnique({ where: { sourceRequestId: request.id } }))
@@ -153,8 +157,15 @@ describe('requests workflow, privacy and schedule integration', { concurrency: f
     const other = types.find((type) => type.systemCode === 'OTHER')!
     const request = await createRequest(member.id, organization.id, { requestTypeId: other.id, comment: 'Документы' })
     const jpeg = await sharp({ create: { width: 8, height: 8, channels: 3, background: '#fff' } }).jpeg().toBuffer()
-    const image = await addRequestAttachment(member.id, organization.id, request.id, jpeg, 'image/jpeg', 'spravka.jpg')
-    const pdf = Buffer.from('%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF')
+    const image = await addRequestAttachment(member.id, organization.id, request.id, jpeg, 'image/jpeg', encodeURIComponent('../spravka.exe'))
+    // A complete one-page PDF fixture (the old header-only stub did not open).
+    const objects = ['<< /Type /Catalog /Pages 2 0 R >>', '<< /Type /Pages /Kids [3 0 R] /Count 1 >>', '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] >>']
+    let documentText = '%PDF-1.4\n'
+    const offsets = objects.map((object, index) => { const offset = Buffer.byteLength(documentText); documentText += `${index + 1} 0 obj\n${object}\nendobj\n`; return offset })
+    const xref = Buffer.byteLength(documentText)
+    documentText += 'xref\n0 4\n0000000000 65535 f \n' + offsets.map(offset => String(offset).padStart(10, '0') + ' 00000 n \n').join('') + `trailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`
+    const pdf = Buffer.from(documentText)
+    assert.equal(image.fileName, '_spravka.jpg')
     const document = await addRequestAttachment(member.id, organization.id, request.id, pdf, 'application/pdf', 'spravka.pdf')
     assert.equal((await downloadRequestAttachment(owner.id, organization.id, request.id, image.id)).contents.length, jpeg.length)
     assert.equal((await downloadRequestAttachment(member.id, organization.id, request.id, document.id)).attachment.fileName, 'spravka.pdf')
@@ -388,6 +399,29 @@ describe('profiles and public organization details', { concurrency: false }, () 
     assert.equal(await prisma.storedFile.findUnique({ where: { id: fileId } }), null)
   })
 
+  it('preserves an existing disk object when a new upload key collides', async () => {
+    const key = `users/${owner.id}/avatars/${randomUUID()}.webp`
+    await writeObject(key, Buffer.from('existing object'))
+    await assert.rejects(() => stageStoredFile({ objectKey: key, mimeType: 'image/webp', size: 3, checksumSha256: '0'.repeat(64), purpose: 'USER_AVATAR', uploadedByUserId: owner.id }, Buffer.from('new')), /already exists/)
+    assert.equal((await readObject(key)).toString(), 'existing object')
+    assert.equal(await prisma.storedFile.findUnique({ where: { objectKey: key } }), null)
+    await deleteObject(key)
+  })
+  it('tracks interrupted uploads durably, protects live intents and cleans only their owned temp files', async () => {
+    const bytes = Buffer.from('interrupted upload fixture')
+    const file = await stageStoredFile({ objectKey: `users/${owner.id}/avatars/${randomUUID()}.webp`, mimeType: 'image/webp', size: bytes.length, checksumSha256: '0'.repeat(64), purpose: 'USER_AVATAR', uploadedByUserId: owner.id }, bytes)
+    await cleanupPendingFiles()
+    assert.equal((await readObject(file.objectKey)).toString(), bytes.toString())
+    const temporary = path.join(storageRoot, `${file.objectKey}.${randomUUID()}.tmp`)
+    const unrelated = path.join(storageRoot, `${file.objectKey}.unknown.tmp`)
+    await writeFile(temporary, bytes); await writeFile(unrelated, bytes)
+    await prisma.storedFile.update({ where: { id: file.id }, data: { pendingDeletionAt: new Date(Date.now() - 1000) } })
+    await cleanupPendingFiles()
+    assert.equal(await prisma.storedFile.findUnique({ where: { id: file.id } }), null)
+    await assert.rejects(() => access(temporary))
+    await assert.rejects(() => readObject(file.objectKey))
+    await access(unrelated) // Unknown names are preserved, never guessed to be ours.
+  })
   it('normalizes and validates personal profile fields and Russian phone numbers', () => {
     const profile = updateProfileBody.parse({ firstName: ' Анна ', lastName: 'Иванова', middleName: '', phone: '8 (999) 123-45-67', bio: ' Руководитель команды ' })
     assert.equal(profile.firstName, 'Анна')
@@ -485,7 +519,7 @@ describe('work schedule and time statistics', { concurrency: false }, () => {
     assert.equal(zonedDateTimeToUtc('2026-09-23', '10:00', 'Europe/Moscow').toISOString(), '2026-09-23T07:00:00.000Z')
     assert.equal(zonedDateTimeToUtc('2026-07-01', '10:00', 'America/New_York').toISOString(), '2026-07-01T14:00:00.000Z')
     assert.throws(() => zonedDateTimeToUtc('2026-03-08', '02:30', 'America/New_York'), (error: unknown) => Boolean(error && typeof error === 'object' && 'code' in error && error.code === 'INVALID_LOCAL_TIME'))
-    assert.equal(calendarRange('2028-02').days.length, 42)
+    assert.equal(calendarRange('2028-02').days.length, 35)
     assert.ok(calendarRange('2028-02').days.includes('2028-02-29'))
     assert.equal(calendarRange('2027-02').days.includes('2027-02-29'), false)
     assert.ok(calendarRange('2036-02').days.includes('2036-02-29'))
@@ -993,5 +1027,297 @@ describe('notification history, invitation presentation and email policy', { con
     assert.equal(isUrgentShiftEmail(new Date(now.getTime() + 23 * 3_600_000), new Date(now.getTime() + 25 * 3_600_000), now), true)
     assert.equal(isUrgentShiftEmail(new Date(now.getTime() + 25 * 3_600_000), new Date(now.getTime() + 26 * 3_600_000), now), false)
     assert.equal(isUrgentShiftEmail(new Date(now.getTime() - 10_000), new Date(now.getTime() - 1), now), false)
+  })
+})
+
+describe('schedule presentation and personal period regressions', { concurrency: false }, () => {
+  it('fits each month to complete Monday-based weeks without losing dates, including leap years over ten years', () => {
+    assert.equal(calendarRange('2027-02').days.length, 28)
+    assert.equal(calendarRange('2028-02').days.length, 35)
+    assert.equal(calendarRange('2026-03').days.length, 42)
+    for (let year = 2026; year <= 2036; year++) for (let month = 1; month <= 12; month++) {
+      const key = `${year}-${String(month).padStart(2, '0')}`
+      const range = calendarRange(key)
+      const count = new Date(Date.UTC(year, month, 0)).getUTCDate()
+      assert.ok([28, 35, 42].includes(range.days.length))
+      assert.equal(range.days.filter(day => day.startsWith(key)).length, count)
+      assert.equal(new Set(range.days).size, range.days.length)
+      assert.equal(new Date(`${range.from}T00:00:00Z`).getUTCDay(), 1)
+      assert.equal(new Date(`${range.to}T00:00:00Z`).getUTCDay(), 1)
+      assert.ok(range.days.includes(`${key}-01`))
+      assert.ok(range.days.includes(`${key}-${String(count).padStart(2, '0')}`))
+    }
+    assert.ok(!calendarRange('2100-02').days.includes('2100-02-29'))
+    assert.ok(calendarRange('2000-02').days.includes('2000-02-29'))
+  })
+
+  it('uses actual time for status and labels overnight/changed dates in the organization timezone', () => {
+    const shift = { status: 'SCHEDULED' as const, scheduledStartAt: '2026-01-01T18:00:00Z', scheduledEndAt: '2026-01-02T03:00:00Z', actualStartAt: null, actualEndAt: null }
+    assert.equal(shiftState(shift, Date.parse('2026-01-01T17:00:00Z')).label, 'Запланирована')
+    assert.equal(shiftState(shift, Date.parse('2026-01-01T19:00:00Z')).label, 'Идёт сейчас')
+    assert.equal(shiftState(shift, Date.parse('2026-01-02T03:00:00Z')).label, 'Завершена')
+    assert.equal(shiftState({ ...shift, status: 'CANCELLED' }, Date.parse('2026-01-01T19:00:00Z')).label, 'Отменена')
+    assert.equal(shiftTimeRange(shift.scheduledStartAt, shift.scheduledEndAt, 'Europe/Moscow'), '01.01, 21:00 → 02.01, 06:00')
+    assert.equal(shiftTimeRange('2026-01-02T06:00:00Z', '2026-01-02T12:00:00Z', 'Europe/Moscow', '2026-01-01'), '02.01, 09:00 → 02.01, 15:00')
+    assert.equal(shiftTimeRange('2026-01-02T06:00:00Z', '2026-01-02T12:00:00Z', 'Europe/Moscow'), '09:00–15:00')
+  })
+
+  it('hides cancelled shifts from the working calendar but preserves direct details and the personal paginated history with paid breaks and plan/fact totals', async () => {
+    const organization = await createOrganization(owner.id, { name: 'Schedule presentation regression', description: null, timezone: 'Asia/Vladivostok' })
+    const employee = await prisma.organizationMember.create({ data: { organizationId: organization.id, userId: member.id } })
+    const other = await prisma.organizationMember.create({ data: { organizationId: organization.id, userId: admin.id } })
+    const input = { memberId: employee.id, startDate: '2025-03-01', startTime: '10:00', endDate: '2025-03-01', endTime: '18:00', breakMinutes: 60, description: null }
+    const completed = await createShift(owner.id, organization.id, input)
+    await correctActualTime(owner.id, organization.id, completed.id, { startDate: '2025-03-01', startTime: '11:00', endDate: '2025-03-01', endTime: '17:00', breakMinutes: 30, reason: 'Фактическое время' })
+    const cancelled = await createShift(owner.id, organization.id, { ...input, startDate: '2025-03-02', endDate: '2025-03-02' })
+    await cancelShift(owner.id, organization.id, cancelled.id, 'График отменён')
+    await createShift(owner.id, organization.id, { ...input, memberId: other.id })
+    await createShift(owner.id, organization.id, { ...input, startDate: '2025-04-01', endDate: '2025-04-01' })
+    const calendar = await listSchedule(member.id, organization.id, '2025-03-01', '2025-04-01')
+    assert.ok(!calendar.shifts.some(shift => shift.id === cancelled.id))
+    assert.ok(calendar.shifts.some(shift => shift.id === completed.id))
+    assert.equal((await getShift(member.id, organization.id, cancelled.id)).status, 'CANCELLED')
+    assert.equal((await prisma.workShift.findUniqueOrThrow({ where: { id: cancelled.id } })).status, 'CANCELLED')
+    const options = { from: '2025-03-01', to: '2025-04-01', memberState: 'all' as const, sort: 'name' as const, direction: 'asc' as const, page: 1, limit: 1, historyOrder: 'asc' as const }
+    const first = await myStatistics(member.id, organization.id, options)
+    assert.equal(first.history.length, 1)
+    assert.equal(first.pagination.total, 2)
+    assert.equal(first.history[0].id, completed.id)
+    assert.equal(first.history[0].breakMinutes, 60)
+    assert.equal(first.history[0].actualBreakMinutes, 30)
+    assert.equal(first.history[0].plannedMinutes, 480)
+    assert.equal(first.history[0].actualMinutes, 360)
+    assert.equal(first.history[0].minutes, 360)
+    assert.equal(first.period?.workedMinutes, 360) // The whole period, never just this page or another employee.
+    assert.equal(first.period?.workedShifts, 1)
+    const second = await myStatistics(member.id, organization.id, { ...options, page: 2 })
+    assert.equal(second.history[0].id, cancelled.id)
+    assert.equal(second.period?.workedMinutes, 360)
+    await expectCode(() => memberStatistics(member.id, organization.id, other.id, options), 'INSUFFICIENT_PERMISSIONS')
+  })
+})
+
+describe('positions, templates, atomic batches and employee proposals', () => {
+  let organizationId: string
+  let employeeId: string
+  let positionId: string
+  const input = (day: string, start = '09:00', end = '18:00') => ({ memberId: employeeId, positionId, startDate: day, startTime: start, endDate: day, endTime: end, breakMinutes: 0, description: null })
+  it('keeps multiple positions separate from authorization and validates organization boundaries', async () => {
+    const organization = await createOrganization(owner.id, { name: 'Planning regressions', description: null, timezone: 'Asia/Vladivostok' })
+    organizationId = organization.id
+    const employee = await prisma.organizationMember.create({ data: { organizationId, userId: member.id, role: 'MEMBER' } }); employeeId = employee.id
+    await prisma.organizationMember.create({ data: { organizationId, userId: admin.id, role: 'ADMIN' } })
+    const first = await savePosition(owner.id, organizationId, null, { name: 'Бариста', isActive: true }); positionId = first.id
+    const second = await savePosition(admin.id, organizationId, null, { name: 'Кассир', isActive: true })
+    await assignPositions(admin.id, organizationId, employeeId, [first.id, second.id])
+    assert.equal((await planningData(member.id, organizationId)).assignments.filter(item => item.memberId === employeeId).length, 2)
+    assert.equal((await prisma.organizationMember.findUniqueOrThrow({ where: { id: employeeId } })).role, 'MEMBER')
+    const positioned = await listMembersPage(owner.id, organizationId, { positionId: first.id })
+    assert.deepEqual(positioned.members.map(item => item.id), [employeeId])
+    assert.deepEqual(positioned.members[0].positions.map(item => item.name).sort(), ['Бариста', 'Кассир'])
+    const unassigned = await listMembersPage(owner.id, organizationId, { positionId: 'unassigned' })
+    assert.equal(unassigned.members.some(item => item.id === employeeId), false)
+    assert.equal((await listMembers(member.id, organizationId)).find(item => item.id === employeeId)?.positions.length, 2)
+    await expectCode(() => savePosition(member.id, organizationId, null, { name: 'Админ', isActive: true }), 'INSUFFICIENT_PERMISSIONS')
+    await expectCode(() => assignPositions(owner.id, organizationId, employeeId, [randomUUID()]), 'POSITION_INACTIVE')
+    await expectCode(() => savePosition(outsider.id, organizationId, null, { name: 'Чужая', isActive: true }), 'ORGANIZATION_NOT_FOUND')
+  })
+  it('validates reusable overnight templates without changing saved shifts', async () => {
+    assert.equal(templateBody.safeParse({ name: 'Ночная', positionId, startTime: '21:00', endTime: '09:00', endDayOffset: 1 }).success, true)
+    assert.equal(templateBody.safeParse({ name: 'Ночная', positionId, startTime: '21:00', endTime: '09:00', endDayOffset: 0 }).success, false)
+    assert.equal(templateBody.safeParse({ name: 'Ошибка', positionId, startTime: '25:00', endTime: '26:00', endDayOffset: 0 }).success, false)
+    const template = await saveTemplate(owner.id, organizationId, null, { name: 'Дневная', positionId, startTime: '09:00', endTime: '18:00', endDayOffset: 0, isActive: true })
+    const shift = await createShift(owner.id, organizationId, input('2050-09-10'))
+    await saveTemplate(admin.id, organizationId, template.id, { ...template, startTime: '10:00', endTime: '19:00' })
+    assert.equal((await getShift(member.id, organizationId, shift.id)).scheduledStartAt.toISOString(), '2050-09-09T23:00:00.000Z')
+    assert.equal(shift.positionName, 'Бариста')
+    await savePosition(owner.id, organizationId, positionId, { name: 'Старший бариста', isActive: true })
+    assert.equal((await getShift(member.id, organizationId, shift.id)).positionName, 'Бариста')
+  })
+  it('rolls back an entire batch on existing, intra-batch and absence conflicts, including notifications', async () => {
+    const count = await prisma.workShift.count({ where: { organizationId } })
+    const notifications = await prisma.accountNotification.count({ where: { organizationId } })
+    await expectCode(() => createShiftBatch(owner.id, organizationId, [input('2050-09-12'), input('2050-09-10')]), 'SHIFT_OVERLAP')
+    assert.equal(await prisma.workShift.count({ where: { organizationId } }), count)
+    assert.equal(await prisma.accountNotification.count({ where: { organizationId } }), notifications)
+    await expectCode(() => createShiftBatch(owner.id, organizationId, [input('2050-09-14'), input('2050-09-14', '17:00', '20:00')]), 'SHIFT_OVERLAP')
+    const types = await listRequestTypes(owner.id, organizationId)
+    const dayOff = types.find(item => item.systemCode === 'DAY_OFF')!
+    const request = await createRequest(member.id, organizationId, { requestTypeId: dayOff.id, startDate: '2050-09-16' })
+    await resolveRequest(owner.id, organizationId, request.id, 'APPROVED', null)
+    await expectCode(() => createShiftBatch(owner.id, organizationId, [input('2050-09-15'), input('2050-09-16')]), 'EMPLOYEE_ABSENT')
+    assert.equal(await prisma.workShift.count({ where: { organizationId } }), count)
+    const saved = await createShiftBatch(admin.id, organizationId, [input('2050-09-12'), input('2050-09-14', '09:00', '19:00')])
+    assert.equal(saved.shifts.length, 2)
+    await expectCode(() => createShiftBatch(member.id, organizationId, [input('2050-09-18')]), 'INSUFFICIENT_PERMISSIONS')
+    await savePosition(owner.id, organizationId, positionId, { name: 'Старший бариста', isActive: false })
+    await expectCode(() => createShiftBatch(owner.id, organizationId, [input('2050-09-18')]), 'POSITION_NOT_ASSIGNED')
+    await savePosition(owner.id, organizationId, positionId, { name: 'Старший бариста', isActive: true })
+  })
+  it('warns on monthly employee workload, excludes cancellations, respects timezone and permits explicit acknowledgment', async () => {
+    await saveWorkload(owner.id, organizationId, 30 * 60)
+    await expectCode(() => createShiftBatch(owner.id, organizationId, [input('2050-09-18')]), 'WORKLOAD_WARNING')
+    const before = await prisma.workShift.count({ where: { organizationId } })
+    await createShiftBatch(owner.id, organizationId, [input('2050-09-18')], true)
+    assert.equal(await prisma.workShift.count({ where: { organizationId } }), before + 1)
+    await createShiftBatch(owner.id, organizationId, [input('2050-10-01')])
+    const shift = await createShift(owner.id, organizationId, { ...input('2050-10-02'), acknowledgeWorkload: true })
+    await cancelShift(owner.id, organizationId, shift.id, 'Отмена для нормы')
+    await createShiftBatch(owner.id, organizationId, [input('2050-10-03')])
+    await expectCode(() => saveWorkload(member.id, organizationId, null), 'INSUFFICIENT_PERMISSIONS')
+  })
+  it('keeps simultaneous batches atomic and does not silently exceed a norm during concurrent planning', async () => {
+    await saveWorkload(owner.id, organizationId, 18 * 60)
+    const result = await Promise.allSettled([
+      createShiftBatch(owner.id, organizationId, [input('2052-01-10'), input('2052-01-12')]),
+      createShiftBatch(admin.id, organizationId, [input('2052-01-14'), input('2052-01-16')]),
+    ])
+    assert.equal(result.filter(item => item.status === 'fulfilled').length, 1)
+    assert.equal(await prisma.workShift.count({ where: { organizationId, scheduledStartAt: { gte: new Date('2051-12-31T14:00:00Z'), lt: new Date('2052-01-31T14:00:00Z') } } }), 2)
+    await saveWorkload(owner.id, organizationId, 30 * 60)
+  })
+  it('rechecks changed shift requests against the monthly norm and requires reviewer acknowledgment', async () => {
+    await saveWorkload(owner.id, organizationId, 10 * 60)
+    const shift = await createShift(owner.id, organizationId, input('2050-12-10'))
+    const type = (await listRequestTypes(member.id, organizationId)).find(item => item.systemCode === 'SHIFT_CHANGE')!
+    const request = await createRequest(member.id, organizationId, { requestTypeId: type.id, relatedShiftId: shift.id, proposedStartDate: '2050-12-10', proposedStartTime: '09:00', proposedEndDate: '2050-12-10', proposedEndTime: '21:00', comment: 'Продлить смену' })
+    await expectCode(() => resolveRequest(owner.id, organizationId, request.id, 'APPROVED', null), 'WORKLOAD_WARNING')
+    assert.equal((await prisma.organizationRequest.findUniqueOrThrow({ where: { id: request.id } })).status, 'PENDING')
+    await resolveRequest(admin.id, organizationId, request.id, 'APPROVED', null, false, true)
+    assert.equal((await getShift(member.id, organizationId, shift.id)).effectiveMinutes, 720)
+    await saveWorkload(owner.id, organizationId, 30 * 60)
+  })
+  it('creates employee proposals without changing the official calendar and revalidates on approval', async () => {
+    const type = (await listRequestTypes(owner.id, organizationId)).find(item => item.systemCode === 'SHIFT_PROPOSAL')!
+    const proposed = { requestTypeId: type.id, proposedStartDate: '2050-11-10', proposedStartTime: '09:00', proposedEndDate: '2050-11-10', proposedEndTime: '18:00', comment: 'Хочу выйти на смену' }
+    const before = await prisma.workShift.count({ where: { organizationId } })
+    const request = await createRequest(member.id, organizationId, proposed)
+    assert.equal(await prisma.workShift.count({ where: { organizationId } }), before)
+    await expectCode(() => resolveRequest(member.id, organizationId, request.id, 'APPROVED', null), 'INSUFFICIENT_PERMISSIONS')
+    await resolveRequest(owner.id, organizationId, request.id, 'APPROVED', null)
+    const approved = await prisma.organizationRequest.findUniqueOrThrow({ where: { id: request.id } })
+    assert.ok(approved.relatedShiftId)
+    assert.equal((await getShift(member.id, organizationId, approved.relatedShiftId)).memberId, employeeId)
+    const conflict = await createRequest(member.id, organizationId, proposed)
+    await expectCode(() => resolveRequest(owner.id, organizationId, conflict.id, 'APPROVED', null), 'SHIFT_OVERLAP')
+    assert.equal((await prisma.organizationRequest.findUniqueOrThrow({ where: { id: conflict.id } })).status, 'PENDING')
+    await expectCode(() => createRequest(member.id, organizationId, { ...proposed, proposedStartDate: '2020-01-01', proposedEndDate: '2020-01-01' }), 'INVALID_SHIFT_PROPOSAL')
+  })
+})
+
+
+describe('employee absences: lifecycle, privacy and schedule consistency', { concurrency: false }, () => {
+  let org: string, employee: string, adminMember: string
+  const input = (date: string, start = '09:00', end = '18:00', endDate = date) => ({ memberId: employee, startDate: date, startTime: start, endDate, endTime: end, breakMinutes: 0, description: null })
+  before(async () => {
+    const organization = await createOrganization(owner.id, { name: 'Absence tests', timezone: 'Asia/Vladivostok', description: null })
+    org = organization.id
+    employee = (await prisma.organizationMember.create({ data: { organizationId: org, userId: member.id } })).id
+    adminMember = (await prisma.organizationMember.create({ data: { organizationId: org, userId: admin.id, role: 'ADMIN' } })).id
+  })
+  it('validates inclusive calendar dates and leap days', () => {
+    assert.equal(absencePeriodBody.safeParse({ startDate: '2028-02-29', endDate: '2028-03-01' }).success, true)
+    assert.equal(absencePeriodBody.safeParse({ startDate: '2027-02-29', endDate: '2027-03-01' }).success, false)
+    assert.equal(absencePeriodBody.safeParse({ startDate: '2028-03-02', endDate: '2028-03-01' }).success, false)
+    assert.equal(absenceDays('2028-02-28', '2028-03-01'), 3)
+  })
+  it('reports sickness without request or approval and notifies only managers', async () => {
+    const before = await prisma.organizationRequest.count({ where: { organizationId: org } })
+    const sick = await reportSickness(member.id, org, { startDate: '2052-02-28', endDate: '2052-03-01' })
+    assert.equal(sick.type, 'SICK'); assert.equal(sick.sourceRequestId, null)
+    assert.equal(await prisma.organizationRequest.count({ where: { organizationId: org } }), before)
+    const notifications = await prisma.accountNotification.findMany({ where: { absenceId: sick.id } })
+    assert.deepEqual(notifications.map(n => n.userId).sort(), [owner.id, admin.id].sort())
+    assert.ok(notifications.every(n => n.emailAttemptedAt === null))
+    const history = await listNotificationHistory(owner.id, owner.email, { limit: 50 })
+    assert.ok(history.notifications.some(n => n.href === `/app/organizations/${org}/schedule?absences=1&absence=${sick.id}`))
+    await expectCode(() => reportSickness(member.id, org, { startDate: '2052-03-01', endDate: '2052-03-03' }), 'ABSENCE_OVERLAP')
+    await expectCode(() => reportSickness(outsider.id, org, { startDate: '2052-03-01', endDate: '2052-03-03' }), 'ORGANIZATION_NOT_FOUND')
+  })
+  it('restricts viewing and editing, preserves cancellation history and detects stale edits', async () => {
+    const sick = await reportSickness(admin.id, org, { startDate: '2052-04-01', endDate: '2052-04-04' })
+    await expectCode(() => changeAbsence(member.id, org, sick.id, { startDate: '2052-04-01', endDate: '2052-04-02', updatedAt: sick.updatedAt.toISOString() }), 'ABSENCE_NOT_FOUND')
+    const own = await listAbsences(member.id, org, absenceListQuery.parse({ history: 'true', memberId: adminMember }))
+    assert.ok(own.absences.every(a => a.memberId === employee))
+    const changed = await changeAbsence(owner.id, org, sick.id, { startDate: '2052-04-01', endDate: '2052-04-02', updatedAt: sick.updatedAt.toISOString() })
+    await expectCode(() => changeAbsence(admin.id, org, sick.id, { startDate: '2052-04-01', endDate: '2052-04-03', updatedAt: sick.updatedAt.toISOString() }), 'ABSENCE_CHANGED')
+    await changeAbsence(admin.id, org, sick.id, { updatedAt: changed.updatedAt.toISOString(), reason: 'Сообщение ошибочно' })
+    const archived = await prisma.employeeAbsence.findUniqueOrThrow({ where: { id: sick.id } })
+    assert.ok(archived.cancelledAt); assert.equal(archived.cancelledByMemberId, adminMember)
+    assert.equal(archived.cancellationReason, 'Сообщение ошибочно')
+    assert.ok(!(await listAbsences(owner.id, org, absenceListQuery.parse({}))).absences.some(a => a.id === sick.id))
+    await reportSickness(admin.id, org, { startDate: '2052-04-01', endDate: '2052-04-02' })
+    const privateCalendar = await listSchedule(member.id, org, '2052-04-01', '2052-05-01')
+    assert.equal(privateCalendar.absences.find(a => a.memberId === adminMember)?.type, 'ABSENCE')
+  })
+  it('keeps existing overnight shifts, uses organization date boundaries and requires explicit override', async () => {
+    const shift = await createShift(owner.id, org, input('2052-05-09', '22:00', '06:00', '2052-05-10'))
+    const sick = await reportSickness(member.id, org, { startDate: '2052-05-10', endDate: '2052-05-10' })
+    const view = await listAbsences(owner.id, org, absenceListQuery.parse({ id: sick.id }))
+    assert.equal(view.absences[0].conflicts[0].id, shift.id)
+    assert.equal((await prisma.workShift.findUniqueOrThrow({ where: { id: shift.id } })).status, 'SCHEDULED')
+    await expectCode(() => createShift(owner.id, org, input('2052-05-10')), 'EMPLOYEE_ABSENT')
+    await createShift(owner.id, org, { ...input('2052-05-10'), acknowledgeAbsence: true })
+    await expectCode(() => createShift(member.id, org, { ...input('2052-05-10'), acknowledgeAbsence: true }), 'INSUFFICIENT_PERMISSIONS')
+    const boundary = await createShift(owner.id, org, input('2052-05-09', '18:00', '22:00'))
+    assert.equal(boundary.scheduledStartAt.toISOString(), '2052-05-09T08:00:00.000Z')
+    const batchCount = await prisma.workShift.count({ where: { organizationId: org } })
+    await expectCode(() => createShiftBatch(owner.id, org, [input('2052-05-11'), input('2052-05-10', '19:00', '21:00')]), 'EMPLOYEE_ABSENT')
+    assert.equal(await prisma.workShift.count({ where: { organizationId: org } }), batchCount)
+    await createShiftBatch(owner.id, org, [{ ...input('2052-05-11'), acknowledgeAbsence: true }, { ...input('2052-05-10', '19:00', '21:00'), acknowledgeAbsence: true }])
+  })
+  it('approves leave exactly once without silently cancelling shifts; rejection creates no absence', async () => {
+    const types = await listRequestTypes(member.id, org)
+    const vacation = types.find(t => t.systemCode === 'VACATION')!, dayOff = types.find(t => t.systemCode === 'DAY_OFF')!
+    const shift = await createShift(owner.id, org, input('2052-06-02'))
+    const request = await createRequest(member.id, org, { requestTypeId: vacation.id, startDate: '2052-06-01', endDate: '2052-06-03' })
+    const concurrent = await Promise.allSettled([resolveRequest(owner.id, org, request.id, 'APPROVED', null), resolveRequest(admin.id, org, request.id, 'APPROVED', null)])
+    assert.equal(concurrent.filter(r => r.status === 'fulfilled').length, 1)
+    assert.equal(await prisma.employeeAbsence.count({ where: { sourceRequestId: request.id } }), 1)
+    assert.deepEqual((await getRequest(owner.id, org, request.id)).absenceConflicts, [])
+    assert.equal((await prisma.workShift.findUniqueOrThrow({ where: { id: shift.id } })).status, 'SCHEDULED')
+    const rejected = await createRequest(member.id, org, { requestTypeId: dayOff.id, startDate: '2052-06-05' })
+    await resolveRequest(owner.id, org, rejected.id, 'REJECTED', 'Нужен другой день')
+    assert.equal(await prisma.employeeAbsence.count({ where: { sourceRequestId: rejected.id } }), 0)
+    const cancelled = await createRequest(member.id, org, { requestTypeId: dayOff.id, startDate: '2052-06-06' })
+    await cancelRequest(member.id, org, cancelled.id)
+    await expectCode(() => resolveRequest(owner.id, org, cancelled.id, 'APPROVED', null), 'REQUEST_ALREADY_RESOLVED')
+    const overlap = await createRequest(member.id, org, { requestTypeId: dayOff.id, startDate: '2052-06-02' })
+    assert.equal((await getRequest(owner.id, org, overlap.id)).absenceConflicts.length, 1)
+    await expectCode(() => resolveRequest(owner.id, org, overlap.id, 'APPROVED', null), 'ABSENCE_OVERLAP')
+    assert.equal((await prisma.organizationRequest.findUniqueOrThrow({ where: { id: overlap.id } })).status, 'PENDING')
+    const absence = await prisma.employeeAbsence.findUniqueOrThrow({ where: { sourceRequestId: request.id } })
+    await expectCode(() => changeAbsence(member.id, org, absence.id, { startDate: '2052-06-01', endDate: '2052-06-02', updatedAt: absence.updatedAt.toISOString() }), 'INSUFFICIENT_PERMISSIONS')
+  })
+  it('supports self correction, manager cancellation and absence acknowledgment during request approval', async () => {
+    const sick = await reportSickness(member.id, org, { startDate: '2052-09-01', endDate: '2052-09-05' })
+    const changed = await changeAbsence(member.id, org, sick.id, { startDate: '2052-09-01', endDate: '2052-09-03', updatedAt: sick.updatedAt.toISOString() })
+    assert.equal(changed.endDate.toISOString().slice(0, 10), '2052-09-03')
+    const otherOrg = (await listOrganizations(owner.id)).find(o => o.id !== org)!
+    await expectCode(() => changeAbsence(owner.id, otherOrg.id, sick.id, { startDate: '2052-09-01', endDate: '2052-09-02', updatedAt: changed.updatedAt.toISOString() }), 'ABSENCE_NOT_FOUND')
+    const shift = await createShift(owner.id, org, input('2052-08-31'))
+    await expectCode(() => updateShift(owner.id, org, shift.id, input('2052-09-01')), 'EMPLOYEE_ABSENT')
+    const moved = await updateShift(owner.id, org, shift.id, { ...input('2052-09-01'), acknowledgeAbsence: true })
+    assert.equal(moved.scheduledStartAt.toISOString(), '2052-08-31T23:00:00.000Z')
+    const type = (await listRequestTypes(member.id, org)).find(t => t.systemCode === 'SHIFT_PROPOSAL')!
+    const request = await createRequest(member.id, org, { requestTypeId: type.id, proposedStartDate: '2052-09-02', proposedStartTime: '09:00', proposedEndDate: '2052-09-02', proposedEndTime: '18:00', comment: 'Прошу назначить смену' })
+    await expectCode(() => resolveRequest(owner.id, org, request.id, 'APPROVED', null), 'EMPLOYEE_ABSENT')
+    assert.equal((await prisma.organizationRequest.findUniqueOrThrow({ where: { id: request.id } })).status, 'PENDING')
+    await resolveRequest(admin.id, org, request.id, 'APPROVED', null, false, false, true)
+    assert.ok((await prisma.organizationRequest.findUniqueOrThrow({ where: { id: request.id } })).relatedShiftId)
+    await changeAbsence(owner.id, org, changed.id, { updatedAt: changed.updatedAt.toISOString(), reason: 'Вернулся к работе' })
+    assert.equal((await prisma.workShift.findUniqueOrThrow({ where: { id: shift.id } })).status, 'SCHEDULED')
+  })
+  it('serializes overlapping reports and preserves history for former employees', async () => {
+    const results = await Promise.allSettled([reportSickness(member.id, org, { startDate: '2052-07-01', endDate: '2052-07-03' }), reportSickness(member.id, org, { startDate: '2052-07-02', endDate: '2052-07-04' })])
+    assert.equal(results.filter(r => r.status === 'fulfilled').length, 1)
+    const types = await listRequestTypes(member.id, org)
+    const pending = await createRequest(member.id, org, { requestTypeId: types.find(t => t.systemCode === 'DAY_OFF')!.id, startDate: '2052-08-01' })
+    await removeMember(owner.id, org, employee)
+    await expectCode(() => resolveRequest(owner.id, org, pending.id, 'APPROVED', null), 'REQUEST_ALREADY_RESOLVED')
+    assert.equal((await prisma.organizationRequest.findUniqueOrThrow({ where: { id: pending.id } })).status, 'CANCELLED')
+    const history = await listAbsences(owner.id, org, absenceListQuery.parse({ history: 'true', memberId: employee }))
+    assert.ok(history.absences.length); assert.ok(history.absences.every(a => a.formerMember))
+    await expectCode(() => listAbsences(member.id, org, absenceListQuery.parse({ history: 'true' })), 'ORGANIZATION_NOT_FOUND')
   })
 })

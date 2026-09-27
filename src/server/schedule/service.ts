@@ -1,3 +1,5 @@
+import { absenceLabels } from './absence-service.ts'
+import { checkMonthlyWorkload } from './workload.ts'
 import { cancelShiftRequests, lockShift } from '../requests/shift-conflicts.ts'
 import type { Prisma, WorkShift } from '../../generated/prisma/client.ts'
 import { prisma } from '../db.ts'
@@ -8,7 +10,7 @@ import { recordShiftNotification, sendImportantShiftEmail } from '../organizatio
 
 const dateText = (value: Date) => value.toISOString().slice(0, 10)
 
-export type ShiftInput = { memberId: string; startDate: string; startTime: string; endDate: string; endTime: string; breakMinutes: number; description: string | null }
+export type ShiftInput = { memberId: string; startDate: string; startTime: string; endDate: string; endTime: string; breakMinutes: number; description: string | null; positionId?: string | null; acknowledgeWorkload?: boolean; acknowledgeAbsence?: boolean }
 export type ActualInput = Omit<ShiftInput, 'memberId' | 'description'> & { reason: string }
 
 function isOverlapError(error: unknown) {
@@ -19,7 +21,7 @@ function displayName(user: { firstName: string | null; lastName: string | null; 
   return [user.lastName, user.firstName, user.middleName].filter(Boolean).join(' ') || user.email.split('@')[0]
 }
 
-function countedMinutes(start: Date, end: Date) {
+export function countedMinutes(start: Date, end: Date) {
   return Math.max(0, Math.floor((end.getTime() - start.getTime()) / 60_000))
 }
 
@@ -41,14 +43,14 @@ async function shiftInOrganization(tx: Prisma.TransactionClient | typeof prisma,
   return shift
 }
 
-export async function assertNoApprovedAbsence(organizationId: string, memberId: string, startAt: Date, endAt: Date, timezone: string, client: Prisma.TransactionClient | typeof prisma = prisma) {
+export async function assertNoApprovedAbsence(organizationId: string, memberId: string, startAt: Date, endAt: Date, timezone: string, client: Prisma.TransactionClient | typeof prisma = prisma, acknowledge = false) {
   const absences = await client.employeeAbsence.findMany({ where: { organizationId, memberId, cancelledAt: null }, orderBy: { startDate: 'asc' } })
   const absence = absences.find((item) => {
     const absenceStart = startOfZonedDate(dateText(item.startDate), timezone)
     const absenceEnd = startOfZonedDate(addCalendarDays(dateText(item.endDate), 1), timezone)
     return startAt < absenceEnd && endAt > absenceStart
   })
-  if (absence) throw new ApiError(409, 'EMPLOYEE_ABSENT', `Сотрудник отсутствует с ${dateText(absence.startDate)} по ${dateText(absence.endDate)}.`)
+  if (absence && !acknowledge) throw new ApiError(409, 'EMPLOYEE_ABSENT', `Сотрудник отсутствует ${dateText(absence.startDate)}–${dateText(absence.endDate)}: ${absenceLabels[absence.type] ?? 'Отсутствие'}. Подтвердите назначение смены несмотря на отсутствие.`, { absenceId: absence.id })
 }
 
 function publicShift(shift: WorkShift & { member: { user: { email: string; firstName: string | null; lastName: string | null; middleName: string | null } }; _count?: { adjustments: number } }) {
@@ -56,6 +58,8 @@ function publicShift(shift: WorkShift & { member: { user: { email: string; first
   const effectiveEndAt = shift.actualEndAt ?? shift.scheduledEndAt
   return {
     id: shift.id,
+    positionId: shift.positionId,
+    positionName: shift.positionNameSnapshot,
     memberId: shift.memberId,
     memberName: displayName(shift.member.user),
     scheduledStartAt: shift.scheduledStartAt,
@@ -80,12 +84,12 @@ export async function listSchedule(userId: string, organizationId: string, fromD
   const from = startOfZonedDate(fromDate, actor.organization.timezone)
   const to = startOfZonedDate(toDate, actor.organization.timezone)
   const shifts = await prisma.workShift.findMany({
-    where: { organizationId, scheduledStartAt: { lt: to }, scheduledEndAt: { gt: from } },
+    where: { organizationId, status: 'SCHEDULED', scheduledStartAt: { lt: to }, scheduledEndAt: { gt: from } },
     include: shiftInclude,
     orderBy: [{ scheduledStartAt: 'asc' }, { member: { user: { lastName: 'asc' } } }],
   })
   const absences = await prisma.employeeAbsence.findMany({ where: { organizationId, cancelledAt: null, startDate: { lt: new Date(`${toDate}T00:00:00.000Z`) }, endDate: { gte: new Date(`${fromDate}T00:00:00.000Z`) } }, include: { member: { include: { user: { select: { email: true, firstName: true, lastName: true, middleName: true } } } } }, orderBy: { startDate: 'asc' } })
-  return { timezone: actor.organization.timezone, shifts: shifts.map(publicShift), absences: absences.map((item) => ({ id: item.id, memberId: item.memberId, memberName: displayName(item.member.user), type: item.type, startDate: dateText(item.startDate), endDate: dateText(item.endDate) })) }
+  return { timezone: actor.organization.timezone, shifts: shifts.map(publicShift), absences: absences.map((item) => ({ id: item.id, memberId: item.memberId, memberName: displayName(item.member.user), type: actor.role === 'MEMBER' && item.memberId !== actor.id ? 'ABSENCE' as const : item.type, startDate: dateText(item.startDate), endDate: dateText(item.endDate) })) }
 }
 
 export async function listMyUpcomingShifts(userId: string, organizationId: string) {
@@ -99,27 +103,48 @@ export async function listMyUpcomingShifts(userId: string, organizationId: strin
 }
 
 export async function createShift(userId: string, organizationId: string, input: ShiftInput) {
+  return (await createShiftBatch(userId, organizationId, [input], input.acknowledgeWorkload)).shifts[0]
+}
+
+export async function createShiftBatch(userId: string, organizationId: string, inputs: ShiftInput[], acknowledgeWorkload = false) {
   const actor = await getMembership(userId, organizationId)
   requireOrganizationRole(actor.role, ['OWNER', 'ADMIN'])
-  const startAt = zonedDateTimeToUtc(input.startDate, input.startTime, actor.organization.timezone)
-  const endAt = zonedDateTimeToUtc(input.endDate, input.endTime, actor.organization.timezone)
-  validateDuration(startAt, endAt, input.breakMinutes)
-  const target = await activeTarget(prisma, organizationId, input.memberId)
-  await assertNoApprovedAbsence(organizationId, input.memberId, startAt, endAt, actor.organization.timezone)
-  const conflict = await prisma.workShift.findFirst({ where: { memberId: input.memberId, status: 'SCHEDULED', scheduledStartAt: { lt: endAt }, scheduledEndAt: { gt: startAt } } })
-  if (conflict) throw new ApiError(409, 'SHIFT_OVERLAP', 'У сотрудника уже есть пересекающаяся смена.')
+  if (!inputs.length || inputs.length > 62) throw new ApiError(400, 'BATCH_SIZE', 'Выберите от 1 до 62 смен.')
+  const prepared = inputs.map(input => {
+    const start = zonedDateTimeToUtc(input.startDate, input.startTime, actor.organization.timezone)
+    const end = zonedDateTimeToUtc(input.endDate, input.endTime, actor.organization.timezone)
+    validateDuration(start, end, input.breakMinutes)
+    return { input, start, end }
+  })
   try {
-    const shift = await prisma.$transaction(async tx => {
-      await activeTarget(tx, organizationId, input.memberId)
-      await assertNoApprovedAbsence(organizationId, input.memberId, startAt, endAt, actor.organization.timezone, tx)
-      const created = await tx.workShift.create({ data: { organizationId, memberId: input.memberId, createdByMemberId: actor.id, scheduledStartAt: startAt, scheduledEndAt: endAt, breakMinutes: input.breakMinutes, description: input.description }, include: shiftInclude })
-      const notification = await recordShiftNotification(tx, created, 'SHIFT_ASSIGNED', actor.organization.timezone)
-      return { created, notification }
+    const result = await prisma.$transaction(async tx => {
+      const records = []
+      for (const memberId of [...new Set(inputs.map(input => input.memberId))].sort()) {
+        await activeTarget(tx, organizationId, memberId)
+        await checkMonthlyWorkload(tx, organizationId, memberId, actor.organization.timezone, actor.organization.monthlyWorkMinutes, prepared.filter(item => item.input.memberId === memberId), [], acknowledgeWorkload)
+      }
+      for (const { input, start, end } of prepared) {
+        try {
+          await assertNoApprovedAbsence(organizationId, input.memberId, start, end, actor.organization.timezone, tx, input.acknowledgeAbsence)
+          if (await tx.workShift.findFirst({ where: { organizationId, memberId: input.memberId, status: 'SCHEDULED', scheduledStartAt: { lt: end }, scheduledEndAt: { gt: start } } })) throw new ApiError(409, 'SHIFT_OVERLAP', 'У сотрудника уже есть пересекающаяся смена.')
+          const position = input.positionId ? await tx.organizationPosition.findFirst({ where: { id: input.positionId, organizationId, isActive: true, members: { some: { memberId: input.memberId } } } }) : null
+          if (input.positionId && !position) throw new ApiError(400, 'POSITION_NOT_ASSIGNED', 'Должность не назначена сотруднику или неактивна.')
+          const created = await tx.workShift.create({ data: { organizationId, memberId: input.memberId, createdByMemberId: actor.id, scheduledStartAt: start, scheduledEndAt: end, breakMinutes: input.breakMinutes, description: input.description, positionId: position?.id, positionNameSnapshot: position?.name }, include: shiftInclude })
+          const notification = await recordShiftNotification(tx, created, 'SHIFT_ASSIGNED', actor.organization.timezone)
+          records.push({ created, notification })
+        } catch (error) {
+          if (error instanceof ApiError) throw new ApiError(error.status, error.code, input.startDate + ': ' + error.message + ' Пакет не сохранён.', { date: input.startDate })
+          throw error
+        }
+      }
+      return records
     }, { isolationLevel: 'Serializable' })
-    void sendImportantShiftEmail(shift.notification.id, shift.created, target.user.email, actor.organization.name, actor.organization.timezone, 'SHIFT_ASSIGNED').catch(error => console.error('Shift email failed:', error))
-    return publicShift(shift.created)
+    for (const item of result) {
+      void sendImportantShiftEmail(item.notification.id, item.created, item.created.member.user.email, actor.organization.name, actor.organization.timezone, 'SHIFT_ASSIGNED').catch(error => console.error('Shift email failed:', error))
+    }
+    return { shifts: result.map(item => publicShift(item.created)) }
   } catch (error) {
-    if (isOverlapError(error)) throw new ApiError(409, 'SHIFT_OVERLAP', 'У сотрудника уже есть пересекающаяся смена.')
+    if (isOverlapError(error) || (error as { code?: string }).code === 'P2034') throw new ApiError(409, 'SHIFT_CONFLICT', 'Расписание изменилось или смены пересекаются. Пакет не сохранён. Проверьте даты и повторите.')
     throw error
   }
 }
@@ -134,7 +159,7 @@ export async function updateShift(userId: string, organizationId: string, shiftI
   const startAt = zonedDateTimeToUtc(input.startDate, input.startTime, actor.organization.timezone)
   const endAt = zonedDateTimeToUtc(input.endDate, input.endTime, actor.organization.timezone)
   validateDuration(startAt, endAt, input.breakMinutes)
-  await assertNoApprovedAbsence(organizationId, input.memberId, startAt, endAt, actor.organization.timezone)
+  await assertNoApprovedAbsence(organizationId, input.memberId, startAt, endAt, actor.organization.timezone, prisma, input.acknowledgeAbsence)
   const conflict = await prisma.workShift.findFirst({ where: { id: { not: shiftId }, memberId: input.memberId, status: 'SCHEDULED', scheduledStartAt: { lt: endAt }, scheduledEndAt: { gt: startAt } } })
   if (conflict) throw new ApiError(409, 'SHIFT_OVERLAP', 'У сотрудника уже есть пересекающаяся смена.')
   try {
@@ -144,8 +169,11 @@ export async function updateShift(userId: string, organizationId: string, shiftI
       const fresh = await shiftInOrganization(tx, organizationId, shiftId)
       if (fresh.updatedAt.getTime() !== current.updatedAt.getTime() || fresh.status !== 'SCHEDULED') throw new ApiError(409, 'SHIFT_CHANGED', 'Смена уже изменилась. Откройте её заново.')
       await activeTarget(tx, organizationId, input.memberId)
-      await assertNoApprovedAbsence(organizationId, input.memberId, startAt, endAt, actor.organization.timezone, tx)
-      const changed = await tx.workShift.update({ where: { id: shiftId }, data: { memberId: input.memberId, scheduledStartAt: startAt, scheduledEndAt: endAt, breakMinutes: input.breakMinutes, description: input.description, ...(assignmentChanged ? { assignmentReadAt: null } : {}) }, include: shiftInclude })
+      await assertNoApprovedAbsence(organizationId, input.memberId, startAt, endAt, actor.organization.timezone, tx, input.acknowledgeAbsence)
+      await checkMonthlyWorkload(tx, organizationId, input.memberId, actor.organization.timezone, actor.organization.monthlyWorkMinutes, [{ start: startAt, end: endAt }], [shiftId], input.acknowledgeWorkload)
+      const position = input.positionId ? await tx.organizationPosition.findFirst({ where: { id: input.positionId, organizationId, isActive: true, members: { some: { memberId: input.memberId } } } }) : null
+      if (input.positionId && !position) throw new ApiError(400, 'POSITION_NOT_ASSIGNED', 'Выберите назначенную сотруднику должность.')
+      const changed = await tx.workShift.update({ where: { id: shiftId }, data: { positionId: position?.id ?? null, positionNameSnapshot: position?.name ?? null, memberId: input.memberId, scheduledStartAt: startAt, scheduledEndAt: endAt, breakMinutes: input.breakMinutes, description: input.description, ...(assignmentChanged ? { assignmentReadAt: null } : {}) }, include: shiftInclude })
       let notification = null
       let previousAssignment = null
       if (assignmentChanged) {

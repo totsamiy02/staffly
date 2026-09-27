@@ -34,7 +34,7 @@ export async function sendImportantShiftEmail(notificationId: string, shift: Shi
   await deliverShiftAssignment(email, shift.organizationId, organizationName, shift.scheduledStartAt, shift.scheduledEndAt, timezone, shift.id, type)
 }
 
-type HistoryRow = { id: string; source: 'event' | 'invite'; type: string; title: string; message: string; createdAt: Date; readAt: Date | null; organizationId: string; organizationName: string; logoFileId: string | null; timezone: string; role: string | null; requestId: string | null; shiftId: string | null; shiftStartAt: Date | null; state: string | null; expiresAt: Date | null; inviter: string | null }
+type HistoryRow = { absenceId: string | null; id: string; source: 'event' | 'invite'; type: string; title: string; message: string; createdAt: Date; readAt: Date | null; organizationId: string; organizationName: string; logoFileId: string | null; timezone: string; role: string | null; requestId: string | null; shiftId: string | null; shiftStartAt: Date | null; state: string | null; expiresAt: Date | null; inviter: string | null }
 
 export function decodeNotificationCursor(cursor: string | undefined) {
   if (!cursor) return null
@@ -52,7 +52,7 @@ export async function listNotificationHistory(userId: string, email: string, opt
     WITH history AS (
       SELECT 'event:' || n.id AS id, 'event'::text AS source, n.type::text AS type, n.title, n.message,
         n.created_at AS "createdAt", n.read_at AS "readAt", o.id AS "organizationId", o.name AS "organizationName", o.logo_file_id AS "logoFileId", o.timezone,
-        m.role::text AS role, n.request_id AS "requestId", n.shift_id AS "shiftId", s.scheduled_start_at AS "shiftStartAt", r.status::text AS state,
+        m.role::text AS role, n.request_id AS "requestId", n.shift_id AS "shiftId", n.absence_id AS "absenceId", s.scheduled_start_at AS "shiftStartAt", r.status::text AS state,
         NULL::timestamptz AS "expiresAt", NULL::text AS inviter
       FROM account_notifications n JOIN organizations o ON o.id = n.organization_id AND o.deleted_at IS NULL
       LEFT JOIN organization_members m ON m.organization_id = o.id AND m.user_id = ${userId}::uuid AND m.left_at IS NULL
@@ -60,7 +60,7 @@ export async function listNotificationHistory(userId: string, email: string, opt
       WHERE n.user_id = ${userId}::uuid ${options.unread ? Prisma.sql`AND n.read_at IS NULL` : Prisma.empty}
       UNION ALL
       SELECT 'invite:' || i.id, 'invite', 'ORGANIZATION_INVITATION', 'Приглашение в организацию', o.name,
-        i.created_at, i.read_at, o.id, o.name, o.logo_file_id, o.timezone, m.role::text, NULL::uuid, NULL::uuid, NULL::timestamptz,
+        i.created_at, i.read_at, o.id, o.name, o.logo_file_id, o.timezone, m.role::text, NULL::uuid, NULL::uuid, NULL::uuid, NULL::timestamptz,
         CASE WHEN i.accepted_at IS NOT NULL THEN 'ACCEPTED' WHEN i.rejected_at IS NOT NULL THEN 'REJECTED' WHEN i.expires_at <= NOW() AND (i.revoked_at IS NULL OR i.revoked_at >= i.expires_at) THEN 'EXPIRED' WHEN i.revoked_at IS NOT NULL THEN 'REVOKED' ELSE 'ACTIVE' END,
         i.expires_at, COALESCE(NULLIF(trim(concat_ws(' ', u.last_name, u.first_name, u.middle_name)), ''), u.email)
       FROM organization_invites i JOIN organizations o ON o.id = i.organization_id AND o.deleted_at IS NULL JOIN users u ON u.id = i.invited_by_user_id
@@ -77,7 +77,7 @@ export async function listNotificationHistory(userId: string, email: string, opt
     const month = row.shiftStartAt ? new Intl.DateTimeFormat('en-CA', { timeZone: row.timezone, year: 'numeric', month: '2-digit' }).formatToParts(row.shiftStartAt) : []
     const monthText = `${month.find(part => part.type === 'year')?.value}-${month.find(part => part.type === 'month')?.value}`
     return { id: row.id, source: row.source, type: row.type, title: row.title, message: row.message, createdAt: row.createdAt, readAt: row.readAt, state: row.state, expiresAt: row.expiresAt, inviter: row.inviter, organization: { id: row.organizationId, name: row.organizationName, logoUrl: mediaUrl(row.logoFileId) },
-      href: row.role ? row.shiftId ? `${organizationPath}/schedule?view=mine&month=${monthText}&shift=${row.shiftId}` : row.requestId ? `${organizationPath}/requests?tab=${row.type === 'REQUEST_CREATED' && row.role !== 'MEMBER' ? 'incoming' : 'mine'}&request=${row.requestId}` : organizationPath : row.source === 'invite' && row.state === 'ACTIVE' ? `/app#invitation-${row.id.split(':')[1]}` : null }
+      href: row.role ? row.absenceId ? `${organizationPath}/schedule?absences=1&absence=${row.absenceId}` : row.shiftId ? `${organizationPath}/schedule?view=mine&month=${monthText}&shift=${row.shiftId}` : row.requestId ? `${organizationPath}/requests?tab=${row.type === 'REQUEST_CREATED' && row.role !== 'MEMBER' ? 'incoming' : 'mine'}&request=${row.requestId}` : organizationPath : row.source === 'invite' && row.state === 'ACTIVE' ? `/app#invitation-${row.id.split(':')[1]}` : null }
   })
   const last = page.at(-1)
   const [eventUnread, invitationUnread] = await Promise.all([

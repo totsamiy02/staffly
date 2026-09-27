@@ -1,6 +1,6 @@
 import type { OrganizationRole } from '../organizations/types.ts'
 
-export type WorkShift = {
+export type WorkShift = { positionId?: string | null; positionName?: string | null;
   id: string
   memberId: string
   memberName: string
@@ -19,7 +19,7 @@ export type WorkShift = {
 }
 
 export type ShiftNotification = { id: string; organization: { id: string; name: string; timezone: string }; scheduledStartAt: string; scheduledEndAt: string; createdAt: string }
-export type EmployeeAbsence = { id: string; memberId: string; memberName: string; type: 'VACATION' | 'DAY_OFF' | 'SICK_LEAVE' | 'ABSENCE'; startDate: string; endDate: string }
+export type EmployeeAbsence = { id: string; memberId: string; memberName: string; type: 'VACATION' | 'DAY_OFF' | 'SICK' | 'SICK_LEAVE' | 'ABSENCE'; startDate: string; endDate: string }
 
 export type ShiftDetails = WorkShift & {
   adjustments: Array<{
@@ -62,7 +62,7 @@ export type MemberWorkTime = {
   member: { id: string; name: string; role: OrganizationRole; active: boolean }
   period: WorkTimeMember | null
   allTime: WorkTimeMember | null
-  history: Array<{ id: string; scheduledStartAt: string; scheduledEndAt: string; actualStartAt: string | null; actualEndAt: string | null; status: 'SCHEDULED' | 'CANCELLED'; minutes: number; adjusted: boolean; description: string | null }>
+  history: Array<{ id: string; scheduledStartAt: string; scheduledEndAt: string; actualStartAt: string | null; actualEndAt: string | null; status: 'SCHEDULED' | 'CANCELLED'; minutes: number; plannedMinutes: number; actualMinutes: number | null; breakMinutes: number; actualBreakMinutes: number | null; cancellationReason: string | null; adjusted: boolean; description: string | null }>
   pagination: { page: number; limit: number; total: number; pages: number }
   timezone: string
 }

@@ -63,6 +63,9 @@ enum WorkShiftStatus {
 }
 
 enum AccountNotificationType {
+  ABSENCE_REPORTED
+  ABSENCE_CHANGED
+  ABSENCE_CANCELLED
   SHIFT_ASSIGNED
   SHIFT_CHANGED
   SHIFT_CANCELLED
@@ -74,11 +77,13 @@ enum AccountNotificationType {
 }
 
 enum RequestSystemCode {
+  SICK
   VACATION
   DAY_OFF
   SICK_LEAVE
   ABSENCE
   SHIFT_CHANGE
+  SHIFT_PROPOSAL
   OTHER
 }
 
@@ -104,19 +109,22 @@ enum RequestEventType {
 }
 
 model Organization {
-  id              String    @id @default(uuid()) @db.Uuid
-  name            String    @db.VarChar(120)
-  description     String?   @db.VarChar(1000)
-  timezone        String    @db.VarChar(64)
-  createdByUserId String    @map("created_by_user_id") @db.Uuid
-  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
-  deletedAt       DateTime? @map("deleted_at") @db.Timestamptz(3)
-  contactEmail    String?   @map("contact_email") @db.VarChar(254)
-  phone           String?   @db.VarChar(12)
-  website         String?   @db.VarChar(2048)
-  address         String?   @db.VarChar(300)
-  logoFileId      String?   @unique @map("logo_file_id") @db.Uuid
+  id                 String                 @id @default(uuid()) @db.Uuid
+  name               String                 @db.VarChar(120)
+  description        String?                @db.VarChar(1000)
+  timezone           String                 @db.VarChar(64)
+  createdByUserId    String                 @map("created_by_user_id") @db.Uuid
+  createdAt          DateTime               @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime               @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt          DateTime?              @map("deleted_at") @db.Timestamptz(3)
+  contactEmail       String?                @map("contact_email") @db.VarChar(254)
+  phone              String?                @db.VarChar(12)
+  website            String?                @db.VarChar(2048)
+  address            String?                @db.VarChar(300)
+  monthlyWorkMinutes Int?                   @map("monthly_work_minutes")
+  positions          OrganizationPosition[]
+  shiftTemplates     ShiftTemplate[]
+  logoFileId         String?                @unique @map("logo_file_id") @db.Uuid
 
   createdBy            User                   @relation("OrganizationCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
   logo                 StoredFile?            @relation("OrganizationLogo", fields: [logoFileId], references: [id], onDelete: SetNull)
@@ -168,23 +176,26 @@ model StoredFile {
 }
 
 model AccountNotification {
-  id             String                  @id @default(uuid()) @db.Uuid
-  userId         String                  @map("user_id") @db.Uuid
-  organizationId String                  @map("organization_id") @db.Uuid
-  requestId      String?                 @map("request_id") @db.Uuid
-  shiftId        String?                 @map("shift_id") @db.Uuid
-  emailAttemptedAt DateTime?              @map("email_attempted_at") @db.Timestamptz(3)
-  type           AccountNotificationType
-  title          String                  @db.VarChar(160)
-  message        String                  @db.VarChar(500)
-  readAt         DateTime?               @map("read_at") @db.Timestamptz(3)
-  createdAt      DateTime                @default(now()) @map("created_at") @db.Timestamptz(3)
+  absenceId String? @map("absence_id") @db.Uuid
+  absence EmployeeAbsence? @relation(fields: [absenceId], references: [id], onDelete: SetNull)
+  id               String                  @id @default(uuid()) @db.Uuid
+  userId           String                  @map("user_id") @db.Uuid
+  organizationId   String                  @map("organization_id") @db.Uuid
+  requestId        String?                 @map("request_id") @db.Uuid
+  shiftId          String?                 @map("shift_id") @db.Uuid
+  emailAttemptedAt DateTime?               @map("email_attempted_at") @db.Timestamptz(3)
+  type             AccountNotificationType
+  title            String                  @db.VarChar(160)
+  message          String                  @db.VarChar(500)
+  readAt           DateTime?               @map("read_at") @db.Timestamptz(3)
+  createdAt        DateTime                @default(now()) @map("created_at") @db.Timestamptz(3)
 
   user         User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
   organization Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   request      OrganizationRequest? @relation(fields: [requestId], references: [id], onDelete: Cascade)
-  shift        WorkShift? @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+  shift        WorkShift?           @relation(fields: [shiftId], references: [id], onDelete: SetNull)
 
+  @@index([absenceId])
   @@index([userId, readAt, createdAt])
   @@index([userId, createdAt, id])
   @@index([shiftId])
@@ -206,6 +217,7 @@ model OrganizationMember {
 
   organization        Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   user                User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  positions           MemberPosition[]
   workShifts          WorkShift[]           @relation("ShiftEmployee")
   createdWorkShifts   WorkShift[]           @relation("ShiftCreator")
   cancelledWorkShifts WorkShift[]           @relation("ShiftCanceller")
@@ -225,24 +237,27 @@ model OrganizationMember {
 }
 
 model WorkShift {
-  id                  String          @id @default(uuid()) @db.Uuid
-  organizationId      String          @map("organization_id") @db.Uuid
-  memberId            String          @map("member_id") @db.Uuid
-  createdByMemberId   String          @map("created_by_member_id") @db.Uuid
-  scheduledStartAt    DateTime        @map("scheduled_start_at") @db.Timestamptz(3)
-  scheduledEndAt      DateTime        @map("scheduled_end_at") @db.Timestamptz(3)
-  breakMinutes        Int             @default(0) @map("break_minutes")
-  actualStartAt       DateTime?       @map("actual_start_at") @db.Timestamptz(3)
-  actualEndAt         DateTime?       @map("actual_end_at") @db.Timestamptz(3)
-  actualBreakMinutes  Int?            @map("actual_break_minutes")
-  description         String?         @db.VarChar(500)
-  status              WorkShiftStatus @default(SCHEDULED)
-  cancelledAt         DateTime?       @map("cancelled_at") @db.Timestamptz(3)
-  cancelledByMemberId String?         @map("cancelled_by_member_id") @db.Uuid
-  cancellationReason  String?         @map("cancellation_reason") @db.VarChar(500)
-  assignmentReadAt    DateTime?       @map("assignment_read_at") @db.Timestamptz(3)
-  createdAt           DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt           DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  id                   String                @id @default(uuid()) @db.Uuid
+  organizationId       String                @map("organization_id") @db.Uuid
+  memberId             String                @map("member_id") @db.Uuid
+  createdByMemberId    String                @map("created_by_member_id") @db.Uuid
+  scheduledStartAt     DateTime              @map("scheduled_start_at") @db.Timestamptz(3)
+  scheduledEndAt       DateTime              @map("scheduled_end_at") @db.Timestamptz(3)
+  breakMinutes         Int                   @default(0) @map("break_minutes")
+  actualStartAt        DateTime?             @map("actual_start_at") @db.Timestamptz(3)
+  actualEndAt          DateTime?             @map("actual_end_at") @db.Timestamptz(3)
+  actualBreakMinutes   Int?                  @map("actual_break_minutes")
+  positionId           String?               @map("position_id") @db.Uuid
+  positionNameSnapshot String?               @map("position_name_snapshot") @db.VarChar(120)
+  position             OrganizationPosition? @relation(fields: [positionId], references: [id], onDelete: SetNull)
+  description          String?               @db.VarChar(500)
+  status               WorkShiftStatus       @default(SCHEDULED)
+  cancelledAt          DateTime?             @map("cancelled_at") @db.Timestamptz(3)
+  cancelledByMemberId  String?               @map("cancelled_by_member_id") @db.Uuid
+  cancellationReason   String?               @map("cancellation_reason") @db.VarChar(500)
+  assignmentReadAt     DateTime?             @map("assignment_read_at") @db.Timestamptz(3)
+  createdAt            DateTime              @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt            DateTime              @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   organization      Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   member            OrganizationMember    @relation("ShiftEmployee", fields: [memberId], references: [id], onDelete: Restrict)
@@ -367,16 +382,22 @@ model EmployeeAbsence {
   id              String            @id @default(uuid()) @db.Uuid
   organizationId  String            @map("organization_id") @db.Uuid
   memberId        String            @map("member_id") @db.Uuid
-  sourceRequestId String            @unique @map("source_request_id") @db.Uuid
+  sourceRequestId String?           @unique @map("source_request_id") @db.Uuid
   type            RequestSystemCode
   startDate       DateTime          @map("start_date") @db.Date
   endDate         DateTime          @map("end_date") @db.Date
   createdAt       DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
   cancelledAt     DateTime?         @map("cancelled_at") @db.Timestamptz(3)
 
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  updatedByMemberId String? @map("updated_by_member_id") @db.Uuid
+  cancelledByMemberId String? @map("cancelled_by_member_id") @db.Uuid
+  cancellationReason String? @map("cancellation_reason") @db.VarChar(500)
+  notifications AccountNotification[]
+
   organization  Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   member        OrganizationMember  @relation(fields: [memberId], references: [id], onDelete: Restrict)
-  sourceRequest OrganizationRequest @relation(fields: [sourceRequestId], references: [id], onDelete: Restrict)
+  sourceRequest OrganizationRequest? @relation(fields: [sourceRequestId], references: [id], onDelete: Restrict)
 
   @@index([organizationId, startDate, endDate])
   @@index([memberId, startDate, endDate])
@@ -505,4 +526,44 @@ model PasswordResetToken {
   @@index([userId, usedAt])
   @@index([expiresAt])
   @@map("password_reset_tokens")
+}
+
+model OrganizationPosition {
+  id             String           @id @default(uuid()) @db.Uuid
+  organizationId String           @map("organization_id") @db.Uuid
+  name           String           @db.VarChar(120)
+  isActive       Boolean          @default(true) @map("is_active")
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  members        MemberPosition[]
+  templates      ShiftTemplate[]
+  shifts         WorkShift[]
+
+  @@unique([organizationId, name])
+  @@map("organization_positions")
+}
+
+model MemberPosition {
+  memberId   String               @map("member_id") @db.Uuid
+  positionId String               @map("position_id") @db.Uuid
+  member     OrganizationMember   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  position   OrganizationPosition @relation(fields: [positionId], references: [id], onDelete: Cascade)
+
+  @@id([memberId, positionId])
+  @@map("member_positions")
+}
+
+model ShiftTemplate {
+  id             String                @id @default(uuid()) @db.Uuid
+  organizationId String                @map("organization_id") @db.Uuid
+  positionId     String?               @map("position_id") @db.Uuid
+  name           String                @db.VarChar(120)
+  startTime      String                @map("start_time") @db.VarChar(5)
+  endTime        String                @map("end_time") @db.VarChar(5)
+  endDayOffset   Int                   @default(0) @map("end_day_offset")
+  isActive       Boolean               @default(true) @map("is_active")
+  organization   Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  position       OrganizationPosition? @relation(fields: [positionId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, isActive])
+  @@map("shift_templates")
 }

@@ -8,14 +8,15 @@
     "dev": "vite",
     "dev:server": "NODE_ENV=development tsx watch --env-file=src/server/.env src/server/index.ts",
     "dev:all": "concurrently -k \"npm run dev:server\" \"npm run dev\"",
-    "start:server": "tsx --env-file=src/server/.env src/server/index.ts",
+    "start:server": "NODE_ENV=production tsx --env-file=src/server/.env src/server/index.ts",
     "prestart:server": "prisma generate",
     "prebuild": "prisma generate",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
     "test:setup": "node --env-file=src/server/.env scripts/setup-test-db.mjs && PRISMA_ENV_FILE=src/server/.env.test prisma migrate deploy",
-    "test": "NODE_ENV=test node --env-file=src/server/.env.test --import tsx --test tests/**/*.test.ts"
+    "test": "NODE_ENV=test node --env-file=src/server/.env.test scripts/run-tests.mjs",
+    "storage:audit": "node --env-file=src/server/.env --import tsx scripts/storage-audit.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.10.0",

@@ -15,6 +15,7 @@ import { startStorageCleanup } from './storage/image-service.ts'
 const app = express()
 app.disable('x-powered-by')
 app.use(helmet({ contentSecurityPolicy: { directives: { imgSrc: ["'self'", 'data:', 'blob:'], frameSrc: ["'self'", 'blob:'] } } }))
+app.use('/api/organizations/:organizationId/shifts/batch', express.json({ limit: '64kb' }))
 app.use(express.json({ limit: '16kb' }))
 app.use(cookieParser())
 app.use('/api', (request, response, next) => {

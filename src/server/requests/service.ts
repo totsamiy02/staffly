@@ -1,3 +1,5 @@
+import { assertAbsencePeriod } from '../schedule/absence-service.ts'
+import { checkMonthlyWorkload } from '../schedule/workload.ts'
 import { cancelShiftRequests, lockShift, reconcileShiftRequests } from './shift-conflicts.ts'
 import type { OrganizationRole, Prisma, RequestDateMode, RequestSystemCode, RequestStatus } from '../../generated/prisma/client.ts'
 import { prisma } from '../db.ts'
@@ -12,8 +14,8 @@ import { mediaUrl } from '../storage/image-service.ts'
 export const SYSTEM_REQUEST_TYPES = [
   { systemCode: 'VACATION', name: 'Отпуск', description: 'Плановый период отсутствия', dateMode: 'RANGE', requiresComment: false, allowsAttachments: true },
   { systemCode: 'DAY_OFF', name: 'Отгул', description: 'Отсутствие в течение одного дня', dateMode: 'SINGLE', requiresComment: false, allowsAttachments: true },
-  { systemCode: 'SICK_LEAVE', name: 'Больничный', description: 'Отсутствие по болезни', dateMode: 'RANGE', requiresComment: false, allowsAttachments: true },
   { systemCode: 'ABSENCE', name: 'Отсутствие', description: 'Другое запланированное отсутствие', dateMode: 'RANGE', requiresComment: true, allowsAttachments: true },
+  { systemCode: 'SHIFT_PROPOSAL', name: 'Предложить смену', description: 'Предложение новой смены для себя. Добавляется в расписание после одобрения.', dateMode: 'NONE', requiresComment: true, allowsAttachments: false },
   { systemCode: 'SHIFT_CHANGE', name: 'Изменение смены', description: 'Запрос на изменение назначенной смены', dateMode: 'NONE', requiresComment: true, allowsAttachments: false },
   { systemCode: 'OTHER', name: 'Другое', description: 'Организационный запрос в свободной форме', dateMode: 'NONE', requiresComment: true, allowsAttachments: true },
 ] as const
@@ -34,7 +36,7 @@ async function ensureSystemTypes(organizationId: string) {
 export async function listRequestTypes(userId: string, organizationId: string, includeInactive = false) {
   const actor = await getMembership(userId, organizationId)
   await ensureSystemTypes(organizationId)
-  return prisma.requestType.findMany({ where: { organizationId, ...(!includeInactive || actor.role !== 'OWNER' ? { isActive: true } : {}) }, orderBy: [{ systemCode: 'asc' }, { name: 'asc' }] })
+  return prisma.requestType.findMany({ where: { organizationId, OR: [{ systemCode: null }, { systemCode: { not: 'SICK_LEAVE' } }], ...(!includeInactive || actor.role !== 'OWNER' ? { isActive: true } : {}) }, orderBy: [{ systemCode: 'asc' }, { name: 'asc' }] })
 }
 
 export async function createRequestType(userId: string, organizationId: string, input: { name: string; description?: string | null; dateMode: RequestDateMode; requiresComment: boolean; allowsAttachments: boolean }) {
@@ -65,8 +67,8 @@ function validateTypeFields(type: { dateMode: RequestDateMode; requiresComment: 
   if (type.systemCode === 'SHIFT_CHANGE' && !input.relatedShiftId) throw new ApiError(400, 'SHIFT_REQUIRED', 'Выберите смену, которую нужно изменить.')
   if (type.systemCode !== 'SHIFT_CHANGE' && input.relatedShiftId) throw new ApiError(400, 'SHIFT_NOT_ALLOWED', 'Смена доступна только для заявки на изменение смены.')
   const proposal = [input.proposedStartDate, input.proposedStartTime, input.proposedEndDate, input.proposedEndTime]
-  if (type.systemCode === 'SHIFT_CHANGE' && proposal.some((value) => !value)) throw new ApiError(400, 'SHIFT_PROPOSAL_REQUIRED', 'Укажите желаемые даты и время смены.')
-  if (type.systemCode !== 'SHIFT_CHANGE' && proposal.some(Boolean)) throw new ApiError(400, 'SHIFT_PROPOSAL_NOT_ALLOWED', 'Новое время доступно только для изменения смены.')
+  if (['SHIFT_CHANGE', 'SHIFT_PROPOSAL'].includes(type.systemCode ?? '') && proposal.some((value) => !value)) throw new ApiError(400, 'SHIFT_PROPOSAL_REQUIRED', 'Укажите желаемые даты и время смены.')
+  if (!['SHIFT_CHANGE', 'SHIFT_PROPOSAL'].includes(type.systemCode ?? '') && proposal.some(Boolean)) throw new ApiError(400, 'SHIFT_PROPOSAL_NOT_ALLOWED', 'Новое время доступно только для изменения смены.')
 }
 
 export async function createRequest(userId: string, organizationId: string, input: CreateInput) {
@@ -75,12 +77,13 @@ export async function createRequest(userId: string, organizationId: string, inpu
   await ensureSystemTypes(organizationId)
   const type = await prisma.requestType.findFirst({ where: { id: input.requestTypeId, organizationId, isActive: true } })
   if (!type) throw new ApiError(404, 'REQUEST_TYPE_NOT_FOUND', 'Активный тип заявки не найден.')
+  if (type.systemCode === 'SICK_LEAVE' || type.systemCode === 'SICK') throw new ApiError(400, 'SICK_REPORT_ONLY', 'Используйте действие «Сообщить о болезни» без согласования.')
   validateTypeFields(type, input)
   const shift = input.relatedShiftId ? await prisma.workShift.findFirst({ where: { id: input.relatedShiftId, organizationId, memberId: actor.id } }) : null
   if (input.relatedShiftId && (!shift || shift.status !== 'SCHEDULED' || shift.scheduledStartAt <= new Date())) throw new ApiError(404, 'SHIFT_NOT_FOUND', 'Выберите свою будущую смену этой организации.')
-  const proposedStartAt = shift ? zonedDateTimeToUtc(input.proposedStartDate!, input.proposedStartTime!, actor.organization.timezone) : null
-  const proposedEndAt = shift ? zonedDateTimeToUtc(input.proposedEndDate!, input.proposedEndTime!, actor.organization.timezone) : null
-  if (shift && (proposedEndAt! <= proposedStartAt! || proposedStartAt! < new Date())) throw new ApiError(400, 'INVALID_SHIFT_PROPOSAL', 'Новое время должно быть в будущем, а окончание — позже начала.')
+  const proposedStartAt = (shift || type.systemCode === 'SHIFT_PROPOSAL') ? zonedDateTimeToUtc(input.proposedStartDate!, input.proposedStartTime!, actor.organization.timezone) : null
+  const proposedEndAt = (shift || type.systemCode === 'SHIFT_PROPOSAL') ? zonedDateTimeToUtc(input.proposedEndDate!, input.proposedEndTime!, actor.organization.timezone) : null
+  if (proposedStartAt && (proposedEndAt! <= proposedStartAt! || proposedStartAt! < new Date())) throw new ApiError(400, 'INVALID_SHIFT_PROPOSAL', 'Новое время должно быть в будущем, а окончание — позже начала.')
   if (shift && proposedStartAt!.getTime() === shift.scheduledStartAt.getTime() && proposedEndAt!.getTime() === shift.scheduledEndAt.getTime()) throw new ApiError(400, 'UNCHANGED_SHIFT_PROPOSAL', 'Укажите время, отличающееся от текущей смены.')
   const startDate = dateValue(input.startDate)
   const endDate = type.dateMode === 'SINGLE' ? startDate : dateValue(input.endDate)
@@ -105,12 +108,13 @@ export async function updateRequest(userId: string, organizationId: string, requ
   if (current.status !== 'PENDING') throw new ApiError(409, 'REQUEST_ALREADY_RESOLVED', 'Изменить можно только заявку, ожидающую решения.')
   const type = await prisma.requestType.findFirst({ where: { id: input.requestTypeId, organizationId, isActive: true } })
   if (!type) throw new ApiError(404, 'REQUEST_TYPE_NOT_FOUND', 'Выберите доступный тип заявки.')
+  if (type.systemCode === 'SICK_LEAVE' || type.systemCode === 'SICK') throw new ApiError(400, 'SICK_REPORT_ONLY', 'Используйте действие «Сообщить о болезни».')
   validateTypeFields(type, input)
   const shift = input.relatedShiftId ? await prisma.workShift.findFirst({ where: { id: input.relatedShiftId, organizationId, memberId: actor.id } }) : null
   if (input.relatedShiftId && (!shift || shift.status !== 'SCHEDULED' || shift.scheduledStartAt <= new Date())) throw new ApiError(404, 'SHIFT_NOT_FOUND', 'Выберите свою будущую смену этой организации.')
-  const proposedStartAt = shift ? zonedDateTimeToUtc(input.proposedStartDate!, input.proposedStartTime!, actor.organization.timezone) : null
-  const proposedEndAt = shift ? zonedDateTimeToUtc(input.proposedEndDate!, input.proposedEndTime!, actor.organization.timezone) : null
-  if (shift && (proposedEndAt! <= proposedStartAt! || proposedStartAt! < new Date())) throw new ApiError(400, 'INVALID_SHIFT_PROPOSAL', 'Новое время должно быть в будущем, а окончание — позже начала.')
+  const proposedStartAt = (shift || type.systemCode === 'SHIFT_PROPOSAL') ? zonedDateTimeToUtc(input.proposedStartDate!, input.proposedStartTime!, actor.organization.timezone) : null
+  const proposedEndAt = (shift || type.systemCode === 'SHIFT_PROPOSAL') ? zonedDateTimeToUtc(input.proposedEndDate!, input.proposedEndTime!, actor.organization.timezone) : null
+  if (proposedStartAt && (proposedEndAt! <= proposedStartAt! || proposedStartAt! < new Date())) throw new ApiError(400, 'INVALID_SHIFT_PROPOSAL', 'Новое время должно быть в будущем, а окончание — позже начала.')
   if (shift && proposedStartAt!.getTime() === shift.scheduledStartAt.getTime() && proposedEndAt!.getTime() === shift.scheduledEndAt.getTime()) throw new ApiError(400, 'UNCHANGED_SHIFT_PROPOSAL', 'Укажите время, отличающееся от текущей смены.')
   if (!type.allowsAttachments && current.requestTypeId !== type.id && await prisma.requestAttachment.count({ where: { requestId } })) throw new ApiError(409, 'REQUEST_HAS_ATTACHMENTS', 'Сначала удалите вложения, чтобы выбрать тип без файлов.')
   const author = await prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { email: true, firstName: true, lastName: true, middleName: true } })
@@ -176,7 +180,7 @@ async function conflictsFor(item: { organizationId: string; createdByMemberId: s
   if (!item.systemCodeSnapshot || !absenceCodes.includes(item.systemCodeSnapshot) || !item.startDate || !item.endDate) return []
   const from = startOfZonedDate(dateText(item.startDate)!, timezone)
   const to = startOfZonedDate(addCalendarDays(dateText(item.endDate)!, 1), timezone)
-  return client.workShift.findMany({ where: { organizationId: item.organizationId, memberId: item.createdByMemberId, status: 'SCHEDULED', scheduledStartAt: { lt: to }, scheduledEndAt: { gt: from } }, orderBy: { scheduledStartAt: 'asc' }, select: { id: true, scheduledStartAt: true, scheduledEndAt: true } })
+  return client.workShift.findMany({ where: { organizationId: item.organizationId, memberId: item.createdByMemberId, status: 'SCHEDULED', scheduledStartAt: { lt: to }, scheduledEndAt: { gt: from }, AND: [{ scheduledEndAt: { gt: new Date() } }] }, orderBy: { scheduledStartAt: 'asc' }, select: { id: true, scheduledStartAt: true, scheduledEndAt: true } })
 }
 
 export async function getRequest(userId: string, organizationId: string, requestId: string) {
@@ -185,31 +189,41 @@ export async function getRequest(userId: string, organizationId: string, request
     const read = await prisma.requestRead.upsert({ where: { requestId_memberId: { requestId, memberId: actor.id } }, create: { requestId, memberId: actor.id }, update: {} })
     if (!item.reads.some((entry) => entry.memberId === actor.id)) item.reads.push(read)
   }
-  return { request: publicRequest(item, actor.id), conflicts: await conflictsFor(item, actor.organization.timezone) }
+  return { request: publicRequest(item, actor.id), conflicts: await conflictsFor(item, actor.organization.timezone), absenceConflicts: item.status === 'PENDING' && item.systemCodeSnapshot && absenceCodes.includes(item.systemCodeSnapshot) && item.startDate && item.endDate ? (await prisma.employeeAbsence.findMany({ where: { organizationId, memberId: item.createdByMemberId, cancelledAt: null, startDate: { lte: item.endDate }, endDate: { gte: item.startDate } }, select: { id: true, type: true, startDate: true, endDate: true } })).map(a => ({ ...a, startDate: dateText(a.startDate), endDate: dateText(a.endDate) })) : [], otherAbsentEmployees: actor.role !== 'MEMBER' && item.startDate && item.endDate ? (await prisma.employeeAbsence.findMany({ where: { organizationId, memberId: { not: item.createdByMemberId }, cancelledAt: null, startDate: { lte: item.endDate }, endDate: { gte: item.startDate } }, distinct: ['memberId'], select: { memberId: true } })).length : 0 }
 }
 
-export async function resolveRequest(userId: string, organizationId: string, requestId: string, decision: 'APPROVED' | 'REJECTED', comment: string | null | undefined, cancelConflictingShifts = false) {
+export async function resolveRequest(userId: string, organizationId: string, requestId: string, decision: 'APPROVED' | 'REJECTED', comment: string | null | undefined, cancelConflictingShifts = false, acknowledgeWorkload = false, acknowledgeAbsence = false) {
   const actor = await getMembership(userId, organizationId)
   requireOrganizationRole(actor.role, ['OWNER', 'ADMIN'])
   await reconcileShiftRequests(organizationId)
   const current = await prisma.organizationRequest.findFirst({ where: { id: requestId, organizationId }, include: { creator: true } })
   if (!current) throw new ApiError(404, 'REQUEST_NOT_FOUND', 'Заявка не найдена.')
   if (decision === 'REJECTED' && !comment?.trim()) throw new ApiError(400, 'RESOLUTION_COMMENT_REQUIRED', 'Укажите причину отклонения.')
-  const conflicts = decision === 'APPROVED' ? await conflictsFor(current, actor.organization.timezone) : []
-  if (conflicts.length && !cancelConflictingShifts) throw new ApiError(409, 'REQUEST_SHIFT_CONFLICTS', `На период заявки назначено смен: ${conflicts.length}. Подтвердите их отмену.`, { conflicts })
+  if (decision === 'APPROVED' && current.systemCodeSnapshot === 'SICK_LEAVE') throw new ApiError(409, 'SICK_REPORT_ONLY', 'Болезнь больше не требует одобрения. Сотруднику нужно сообщить о болезни через новое действие; старая заявка остаётся в истории.')
   const result = await prisma.$transaction(async (tx) => {
     const liveConflicts = decision === 'APPROVED' ? await conflictsFor(current, actor.organization.timezone, tx) : []
-    if (liveConflicts.length && !cancelConflictingShifts) throw new ApiError(409, 'REQUEST_SHIFT_CONFLICTS', 'На период заявки назначены смены. Подтвердите их отмену.')
     for (const id of liveConflicts.map(shift => shift.id).sort()) await lockShift(tx, id)
     if (current.relatedShiftId) await lockShift(tx, current.relatedShiftId)
     const changed = await tx.organizationRequest.updateMany({ where: { id: requestId, organizationId, updatedAt: current.updatedAt, status: 'PENDING' }, data: { status: decision, resolvedAt: new Date(), resolvedByMemberId: actor.id, resolutionComment: comment?.trim() || null } })
     if (!changed.count) throw new ApiError(409, 'REQUEST_ALREADY_RESOLVED', 'Заявка уже была обработана.')
+    if (decision === 'APPROVED' && ['SHIFT_CHANGE', 'SHIFT_PROPOSAL'].includes(current.systemCodeSnapshot ?? '')) {
+      if (!current.proposedStartAt || !current.proposedEndAt || current.proposedStartAt <= new Date()) throw new ApiError(409, 'SHIFT_PROPOSAL_PAST', 'Предложенная смена уже началась или не указана.')
+      if (current.creator.leftAt || !await tx.organizationMember.findFirst({ where: { id: current.createdByMemberId, organizationId, leftAt: null, user: { deletedAt: null } } })) throw new ApiError(409, 'MEMBER_LEFT', 'Сотрудник больше не состоит в организации.')
+      await checkMonthlyWorkload(tx, organizationId, current.createdByMemberId, actor.organization.timezone, actor.organization.monthlyWorkMinutes, [{ start: current.proposedStartAt, end: current.proposedEndAt }], current.relatedShiftId ? [current.relatedShiftId] : [], acknowledgeWorkload)
+    }
+    if (decision === 'APPROVED' && current.systemCodeSnapshot === 'SHIFT_PROPOSAL') {
+      await assertNoApprovedAbsence(organizationId, current.createdByMemberId, current.proposedStartAt!, current.proposedEndAt!, actor.organization.timezone, tx, acknowledgeAbsence)
+      if (await tx.workShift.findFirst({ where: { organizationId, memberId: current.createdByMemberId, status: 'SCHEDULED', scheduledStartAt: { lt: current.proposedEndAt! }, scheduledEndAt: { gt: current.proposedStartAt! } } })) throw new ApiError(409, 'SHIFT_OVERLAP', 'В предложенное время уже есть смена.')
+      const createdShift = await tx.workShift.create({ data: { organizationId, memberId: current.createdByMemberId, createdByMemberId: actor.id, scheduledStartAt: current.proposedStartAt!, scheduledEndAt: current.proposedEndAt!, description: current.comment?.slice(0, 500) }, include: { member: true } })
+      await tx.organizationRequest.update({ where: { id: requestId }, data: { relatedShiftId: createdShift.id } })
+      await recordShiftNotification(tx, createdShift, 'SHIFT_ASSIGNED', actor.organization.timezone)
+    }
     if (decision === 'APPROVED' && current.systemCodeSnapshot === 'SHIFT_CHANGE') {
       if (!current.relatedShiftId || !current.originalStartAt || !current.originalEndAt || !current.proposedStartAt || !current.proposedEndAt) throw new ApiError(409, 'SHIFT_PROPOSAL_MISSING', 'В этой заявке нет нового времени смены. Попросите подать её заново.')
       if (current.proposedStartAt <= new Date()) throw new ApiError(409, 'SHIFT_PROPOSAL_PAST', 'Предложенное время уже прошло. Попросите подать новую заявку.')
       const shift = await tx.workShift.findFirst({ where: { id: current.relatedShiftId, organizationId, memberId: current.createdByMemberId } })
       if (!shift || shift.status !== 'SCHEDULED' || shift.scheduledStartAt <= new Date() || shift.scheduledStartAt.getTime() !== current.originalStartAt.getTime() || shift.scheduledEndAt.getTime() !== current.originalEndAt.getTime()) throw new ApiError(409, 'SHIFT_CHANGED_SINCE_REQUEST', 'Исходная смена уже началась или изменилась. Попросите подать новую заявку.')
-      await assertNoApprovedAbsence(organizationId, shift.memberId, current.proposedStartAt, current.proposedEndAt, actor.organization.timezone, tx)
+      await assertNoApprovedAbsence(organizationId, shift.memberId, current.proposedStartAt, current.proposedEndAt, actor.organization.timezone, tx, acknowledgeAbsence)
       const overlap = await tx.workShift.findFirst({ where: { id: { not: shift.id }, organizationId, memberId: shift.memberId, status: 'SCHEDULED', scheduledStartAt: { lt: current.proposedEndAt }, scheduledEndAt: { gt: current.proposedStartAt } }, select: { id: true } })
       if (overlap) throw new ApiError(409, 'SHIFT_OVERLAP', 'В предложенное время у сотрудника уже есть смена.')
       const changedShift = await tx.workShift.update({ where: { id: shift.id }, data: { scheduledStartAt: current.proposedStartAt, scheduledEndAt: current.proposedEndAt, assignmentReadAt: null }, include: { member: true } })
@@ -217,13 +231,14 @@ export async function resolveRequest(userId: string, organizationId: string, req
       await cancelShiftRequests(tx, organizationId, [shift.id], actor.id, 'Исходная смена перенесена по другой заявке.', requestId)
     }
     if (decision === 'APPROVED' && current.systemCodeSnapshot && absenceCodes.includes(current.systemCodeSnapshot) && current.startDate && current.endDate) {
-      await tx.employeeAbsence.create({ data: { organizationId, memberId: current.createdByMemberId, sourceRequestId: current.id, type: current.systemCodeSnapshot, startDate: current.startDate, endDate: current.endDate } })
-      if (liveConflicts.length) await tx.workShift.updateMany({ where: { id: { in: liveConflicts.map((shift) => shift.id) }, status: 'SCHEDULED', scheduledEndAt: { gt: new Date() } }, data: { status: 'CANCELLED', cancelledAt: new Date(), cancelledByMemberId: actor.id, cancellationReason: `Одобрено отсутствие по заявке ${requestId}` } })
-      for (const conflict of liveConflicts) {
+      await assertAbsencePeriod(tx, organizationId, current.createdByMemberId, current.startDate, current.endDate)
+      await tx.employeeAbsence.create({ data: { organizationId, memberId: current.createdByMemberId, sourceRequestId: current.id, updatedByMemberId: actor.id, type: current.systemCodeSnapshot, startDate: current.startDate, endDate: current.endDate } })
+      if (cancelConflictingShifts && liveConflicts.length) await tx.workShift.updateMany({ where: { id: { in: liveConflicts.map((shift) => shift.id) }, status: 'SCHEDULED', scheduledEndAt: { gt: new Date() } }, data: { status: 'CANCELLED', cancelledAt: new Date(), cancelledByMemberId: actor.id, cancellationReason: `Одобрено отсутствие по заявке ${requestId}` } })
+      for (const conflict of cancelConflictingShifts ? liveConflicts : []) {
         const cancelled = await tx.workShift.findUniqueOrThrow({ where: { id: conflict.id }, include: { member: true } })
         await recordShiftNotification(tx, cancelled, 'SHIFT_CANCELLED', actor.organization.timezone)
       }
-      await cancelShiftRequests(tx, organizationId, liveConflicts.map(shift => shift.id), actor.id, 'Исходная смена отменена из-за одобренного отсутствия.', requestId)
+      if (cancelConflictingShifts) await cancelShiftRequests(tx, organizationId, liveConflicts.map(shift => shift.id), actor.id, 'Исходная смена отменена из-за одобренного отсутствия.', requestId)
     }
     await tx.requestEvent.create({ data: { requestId, actorMemberId: actor.id, type: decision, comment: comment?.trim() || null } })
     await tx.accountNotification.updateMany({ where: { requestId, type: 'REQUEST_CREATED', readAt: null }, data: { readAt: new Date() } })

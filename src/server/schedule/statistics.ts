@@ -2,6 +2,7 @@ import { Prisma } from '../../generated/prisma/client.ts'
 import { prisma } from '../db.ts'
 import { ApiError } from '../api-error.ts'
 import { getMembership, requireOrganizationRole } from '../organizations/permissions.ts'
+import { countedMinutes } from './service.ts'
 import { startOfZonedDate } from './timezone.ts'
 
 export type StatisticsOptions = {
@@ -12,6 +13,7 @@ export type StatisticsOptions = {
   direction: 'asc' | 'desc'
   page: number
   limit: number
+  historyOrder?: 'asc' | 'desc'
 }
 
 type Row = {
@@ -115,7 +117,7 @@ async function memberRows(userId: string, organizationId: string, memberId: stri
   const history = await prisma.workShift.findMany({
     where: { organizationId, memberId, ...(from && to ? { scheduledStartAt: { gte: from, lt: to } } : {}) },
     include: { _count: { select: { adjustments: true } } },
-    orderBy: { scheduledStartAt: 'desc' },
+    orderBy: { scheduledStartAt: options.historyOrder ?? 'desc' },
     skip: (options.page - 1) * options.limit,
     take: options.limit,
   })
@@ -123,7 +125,7 @@ async function memberRows(userId: string, organizationId: string, memberId: stri
   const mapShift = (shift: typeof history[number]) => {
     const start = shift.actualStartAt ?? shift.scheduledStartAt
     const end = shift.actualEndAt ?? shift.scheduledEndAt
-    return { id: shift.id, scheduledStartAt: shift.scheduledStartAt, scheduledEndAt: shift.scheduledEndAt, actualStartAt: shift.actualStartAt, actualEndAt: shift.actualEndAt, status: shift.status, minutes: Math.max(0, Math.floor((end.getTime() - start.getTime()) / 60_000)), adjusted: shift._count.adjustments > 0, description: shift.description }
+    return { id: shift.id, scheduledStartAt: shift.scheduledStartAt, scheduledEndAt: shift.scheduledEndAt, actualStartAt: shift.actualStartAt, actualEndAt: shift.actualEndAt, status: shift.status, minutes: countedMinutes(start, end), plannedMinutes: countedMinutes(shift.scheduledStartAt, shift.scheduledEndAt), actualMinutes: shift.actualStartAt && shift.actualEndAt ? countedMinutes(shift.actualStartAt, shift.actualEndAt) : null, breakMinutes: shift.breakMinutes, actualBreakMinutes: shift.actualBreakMinutes, cancellationReason: shift.cancellationReason, adjusted: shift._count.adjustments > 0, description: shift.description }
   }
   return {
     member: { id: target.id, name: [target.user.lastName, target.user.firstName, target.user.middleName].filter(Boolean).join(' ') || target.user.email.split('@')[0], role: target.role, active: !target.leftAt },

@@ -1,7 +1,7 @@
 import { z } from 'zod'
 
 export const uuid = z.string().uuid()
-const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
+export const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
   const [year, month, day] = value.split('-').map(Number)
   const parsed = new Date(Date.UTC(year, month - 1, day))
   return parsed.getUTCFullYear() === year && parsed.getUTCMonth() === month - 1 && parsed.getUTCDate() === day
@@ -21,6 +21,9 @@ export const scheduleRangeQuery = z.object({ from: date, to: date }).superRefine
 
 export const shiftBody = z.object({
   memberId: uuid,
+  positionId: uuid.nullish(),
+  acknowledgeAbsence: z.boolean().optional().default(false),
+  acknowledgeWorkload: z.boolean().default(false),
   startDate: date,
   startTime: time,
   endDate: date,
@@ -45,6 +48,7 @@ export const historyPaginationQuery = z.object({
 })
 
 export const statisticsQuery = z.object({
+  historyOrder: z.enum(['asc', 'desc']).default('desc'),
   from: date.optional(),
   to: date.optional(),
   memberState: z.enum(['active', 'all', 'former']).default('active'),
@@ -56,3 +60,5 @@ export const statisticsQuery = z.object({
   if (Boolean(value.from) !== Boolean(value.to)) context.addIssue({ code: 'custom', message: 'Укажите обе границы периода.' })
   if (value.from && value.to && value.from >= value.to) context.addIssue({ code: 'custom', message: 'Конец периода должен быть позже начала.' })
 })
+
+export const batchShiftBody = z.object({ shifts: z.array(shiftBody).min(1).max(62), acknowledgeWorkload: z.boolean().default(false), acknowledgeAbsence: z.boolean().default(false) })

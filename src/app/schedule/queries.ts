@@ -18,7 +18,7 @@ export function useShiftNotifications() {
   return useQuery({ ...liveQueryOptions, queryKey: ['shift-notifications'], queryFn: () => apiRequest<{ notifications: ShiftNotification[] }>('/shift-notifications'), enabled: Boolean(user) })
 }
 
-type StatisticsParams = { from?: string; to?: string; memberState?: 'active' | 'all' | 'former'; sort?: string; direction?: 'asc' | 'desc'; page?: number }
+type StatisticsParams = { from?: string; to?: string; memberState?: 'active' | 'all' | 'former'; sort?: string; direction?: 'asc' | 'desc'; page?: number; limit?: number; historyOrder?: 'asc' | 'desc' }
 function queryString(params: StatisticsParams) {
   const query = new URLSearchParams()
   if (params.from) query.set('from', params.from)
@@ -27,7 +27,8 @@ function queryString(params: StatisticsParams) {
   query.set('sort', params.sort ?? 'name')
   query.set('direction', params.direction ?? 'asc')
   query.set('page', String(params.page ?? 1))
-  query.set('limit', '50')
+  query.set('limit', String(params.limit ?? 50))
+  if (params.historyOrder) query.set('historyOrder', params.historyOrder)
   return query.toString()
 }
 

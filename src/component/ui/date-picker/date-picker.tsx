@@ -1,3 +1,4 @@
+import { formatTimeEntry } from './time-format'
 import { useEffect, useId, useRef, useState, type InputHTMLAttributes, type ChangeEvent, type KeyboardEvent } from 'react'
 
 type Props = InputHTMLAttributes<HTMLInputElement>
@@ -95,6 +96,18 @@ export default function DatePicker({ value, onChange, min, max, disabled, readOn
   </div>
 }
 
-export function TimeInput(props: Props) {
-  return <input {...props} type="text" inputMode="numeric" placeholder="ЧЧ:ММ" maxLength={5} pattern="([01][0-9]|2[0-3]):[0-5][0-9]" title="Время в формате ЧЧ:ММ, например 09:30" />
+export function TimeInput({ onChange, onBlur, value, ...props }: Props) {
+  const [touched, setTouched] = useState(false)
+  const hintId = useId()
+  const input = useRef<HTMLInputElement>(null)
+  const text = String(value ?? '')
+  const invalid = !!text && !/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(text)
+  useEffect(() => { input.current?.setCustomValidity(invalid ? 'Введите время от 00:00 до 23:59.' : '') }, [text, invalid])
+  function change(event: ChangeEvent<HTMLInputElement>, complete = false) {
+    const next = formatTimeEntry(event.target.value, complete)
+    event.target.value = next
+    event.target.setCustomValidity(next && !/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(next) ? 'Введите время от 00:00 до 23:59.' : '')
+    onChange?.(event)
+  }
+  return <span className="staffly-time"><input {...props} ref={input} type="text" value={value} onChange={onChange} onBlur={event => { change(event, true); setTouched(true); onBlur?.(event) }} onInvalid={() => setTouched(true)} aria-invalid={props['aria-invalid'] ?? (touched && invalid)} aria-describedby={[props['aria-describedby'], touched && invalid ? hintId : ''].filter(Boolean).join(' ') || undefined} inputMode="numeric" placeholder="ЧЧ:ММ" maxLength={5} pattern="([01][0-9]|2[0-3]):[0-5][0-9]" title="Время от 00:00 до 23:59" />{touched && invalid && <small id={hintId} className="staffly-time__error">Введите время от 00:00 до 23:59</small>}</span>
 }

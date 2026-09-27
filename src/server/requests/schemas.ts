@@ -22,7 +22,7 @@ export const listRequestsQuery = z.object({
   search: z.string().trim().max(100).optional(),
 })
 export const createRequestBody = z.object({ requestTypeId: z.string().uuid(), startDate: dateOnly.nullish(), endDate: dateOnly.nullish(), comment: z.string().trim().max(2000).nullish(), relatedShiftId: z.string().uuid().nullish(), proposedStartDate: dateOnly.nullish(), proposedStartTime: timeOnly.nullish(), proposedEndDate: dateOnly.nullish(), proposedEndTime: timeOnly.nullish() })
-export const resolveRequestBody = z.object({ comment: z.string().trim().max(1000).nullish(), cancelConflictingShifts: z.boolean().default(false) })
+export const resolveRequestBody = z.object({ comment: z.string().trim().max(1000).nullish(), cancelConflictingShifts: z.boolean().default(false), acknowledgeWorkload: z.boolean().default(false), acknowledgeAbsence: z.boolean().default(false) })
 export const rejectRequestBody = z.object({ comment: z.string().trim().min(3, 'Укажите причину отклонения.').max(1000) })
 export const createRequestTypeBody = z.object({ name: z.string().trim().min(2).max(100), description: z.string().trim().max(500).nullish(), dateMode: z.enum(['NONE', 'SINGLE', 'RANGE']), requiresComment: z.boolean(), allowsAttachments: z.boolean() })
 export const updateRequestTypeBody = createRequestTypeBody.extend({ isActive: z.boolean() })

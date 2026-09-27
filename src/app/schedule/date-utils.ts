@@ -1,3 +1,5 @@
+import type { WorkShift } from './types.ts'
+
 export function dateKey(date: Date) {
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`
 }
@@ -19,9 +21,11 @@ export function calendarRange(month: string) {
   const first = new Date(Date.UTC(year, number - 1, 1))
   const mondayOffset = (first.getUTCDay() + 6) % 7
   first.setUTCDate(first.getUTCDate() - mondayOffset)
+  const daysInMonth = new Date(Date.UTC(year, number, 0)).getUTCDate()
+  const dayCount = Math.ceil((mondayOffset + daysInMonth) / 7) * 7
   const last = new Date(first)
-  last.setUTCDate(last.getUTCDate() + 42)
-  return { from: dateKey(first), to: dateKey(last), days: Array.from({ length: 42 }, (_, index) => addDays(dateKey(first), index)) }
+  last.setUTCDate(last.getUTCDate() + dayCount)
+  return { from: dateKey(first), to: dateKey(last), days: Array.from({ length: dayCount }, (_, index) => addDays(dateKey(first), index)) }
 }
 
 export function moveMonth(month: string, amount: number) {
@@ -54,4 +58,21 @@ export function formatDuration(minutes: number) {
 
 export function displayDate(value: string) {
   return new Intl.DateTimeFormat('ru-RU', { dateStyle: 'long', timeZone: 'UTC' }).format(new Date(`${value}T00:00:00Z`))
+}
+
+export function shiftState(shift: Pick<WorkShift, 'status' | 'scheduledStartAt' | 'scheduledEndAt' | 'actualStartAt' | 'actualEndAt'>, now = Date.now()) {
+  if (shift.status === 'CANCELLED') return { key: 'cancelled', label: 'Отменена' }
+  const start = new Date(shift.actualStartAt ?? shift.scheduledStartAt).getTime()
+  const end = new Date(shift.actualEndAt ?? shift.scheduledEndAt).getTime()
+  if (now < start) return { key: 'future', label: 'Запланирована' }
+  if (now >= end) return { key: 'completed', label: 'Завершена' }
+  return { key: 'active', label: 'Идёт сейчас' }
+}
+
+export function shiftTimeRange(startAt: string, endAt: string, timezone: string, referenceDate?: string) {
+  const start = zonedDateAndTime(startAt, timezone)
+  const end = zonedDateAndTime(endAt, timezone)
+  const shortDate = (date: string) => `${date.slice(8, 10)}.${date.slice(5, 7)}`
+  if (start.date !== end.date || (referenceDate && start.date !== referenceDate)) return `${shortDate(start.date)}, ${start.time} → ${shortDate(end.date)}, ${end.time}`
+  return `${start.time}–${end.time}`
 }
