@@ -8,6 +8,8 @@ import profileRouter from './profile/routes.ts'
 import scheduleRouter from './schedule/routes.ts'
 import storageRouter from './storage/routes.ts'
 import requestsRouter from './requests/routes.ts'
+import documentsRouter from './documents/routes.ts'
+import { MAX_DOCUMENT_BYTES, documentMimeTypes } from './documents/file-validation.ts'
 import { appUrl } from './mail.ts'
 import { ApiError } from './api-error.ts'
 import { startStorageCleanup } from './storage/image-service.ts'
@@ -16,6 +18,7 @@ const app = express()
 app.disable('x-powered-by')
 app.use(helmet({ contentSecurityPolicy: { directives: { imgSrc: ["'self'", 'data:', 'blob:'], frameSrc: ["'self'", 'blob:'] } } }))
 app.use('/api/organizations/:organizationId/shifts/batch', express.json({ limit: '64kb' }))
+app.use('/api/organizations/:organizationId/documents/:documentId/assign', express.json({ limit: '64kb' }))
 app.use(express.json({ limit: '16kb' }))
 app.use(cookieParser())
 app.use('/api', (request, response, next) => {
@@ -29,9 +32,11 @@ app.use('/api', (request, response, next) => {
     const hasBody = contentLength > 0 || Boolean(request.get('transfer-encoding'))
     const imageUpload = request.method === 'PUT' && (/^\/profile\/avatar$/.test(request.path) || /^\/organizations\/[0-9a-f-]+\/logo$/.test(request.path))
     const requestAttachment = request.method === 'PUT' && /^\/organizations\/[0-9a-f-]+\/requests\/[0-9a-f-]+\/attachments$/.test(request.path)
+    const documentUpload = request.method === 'PUT' && /^\/organizations\/[0-9a-f-]+\/documents$/.test(request.path)
+    const acceptedDocument = documentUpload && Boolean(request.is(Object.values(documentMimeTypes)))
     const acceptedImage = imageUpload && Boolean(request.is(['image/jpeg', 'image/png', 'image/webp']))
     const acceptedAttachment = requestAttachment && Boolean(request.is(['application/pdf', 'image/jpeg', 'image/png', 'image/webp']))
-    if (hasBody && !request.is('application/json') && !acceptedImage && !acceptedAttachment) {
+    if (hasBody && !request.is('application/json') && !acceptedImage && !acceptedAttachment && !acceptedDocument) {
       response.status(415).json({ message: imageUpload ? 'Поддерживаются только JPEG, PNG и WebP.' : 'Требуется application/json.' })
       return
     }
@@ -55,9 +60,11 @@ app.use('/api', (_request, response, next) => { response.set('Cache-Control', 'n
 app.use('/api', (_request, response, next) => { response.set('Cache-Control', 'no-store'); next() }, organizationRouter)
 app.use('/api', (_request, response, next) => { response.set('Cache-Control', 'no-store'); next() }, scheduleRouter)
 app.use('/api', (_request, response, next) => { response.set('Cache-Control', 'no-store'); next() }, requestsRouter)
+app.use('/api', documentsRouter)
 app.use('/api', (_request, response) => response.status(404).json({ code: 'API_NOT_FOUND', message: 'Запрошенный адрес не найден.' }))
 app.use((error: unknown, request: express.Request, response: express.Response, _next: express.NextFunction) => {
   if (error && typeof error === 'object' && 'type' in error && error.type === 'entity.too.large') {
+    if (/\/organizations\/[0-9a-f-]+\/documents$/.test(request.path)) { response.status(413).json({ code: 'DOCUMENT_TOO_LARGE', message: `Файл должен весить не больше ${Math.ceil(MAX_DOCUMENT_BYTES / 1024 / 1024)} МБ.` }); return }
     const attachment = /\/requests\/[0-9a-f-]+\/attachments$/.test(request.path)
     response.status(413).json({ code: attachment ? 'ATTACHMENT_TOO_LARGE' : 'IMAGE_TOO_LARGE', message: attachment ? 'Файл должен весить не больше 10 МБ.' : 'Изображение должно весить не больше 8 МБ.' })
     return

@@ -1,3 +1,5 @@
+import * as documentsService from '../src/server/documents/service.ts'
+import { listSchema as documentListSchema, assignSchema as assignmentSchema } from '../src/server/documents/schemas.ts'
 import { reportSickness, changeAbsence, listAbsences, absenceListQuery, absencePeriodBody } from '../src/server/schedule/absence-service.ts'
 import { absenceDays } from '../src/app/schedule/absence-format.ts'
 import { writeFile, access } from 'node:fs/promises'
@@ -40,6 +42,10 @@ async function expectCode(action: () => Promise<unknown>, code: string) {
 
 before(async () => {
   await prisma.accountNotification.deleteMany()
+  await prisma.documentAcknowledgement.deleteMany()
+  await prisma.document.deleteMany()
+  await prisma.documentFolder.updateMany({ data: { parentId: null } })
+  await prisma.documentFolder.deleteMany()
   await prisma.employeeAbsence.deleteMany()
   await prisma.requestRead.deleteMany()
   await prisma.requestEvent.deleteMany()
@@ -1448,5 +1454,215 @@ describe('employee absences: lifecycle, privacy and schedule consistency', { con
     const history = await listAbsences(owner.id, org, absenceListQuery.parse({ history: 'true', memberId: employee }))
     assert.ok(history.absences.length); assert.ok(history.absences.every(a => a.formerMember))
     await expectCode(() => listAbsences(member.id, org, absenceListQuery.parse({ history: 'true' })), 'ORGANIZATION_NOT_FOUND')
+  })
+})
+
+describe('documents: privacy, immutable storage and acknowledgement lifecycle', { concurrency: false }, () => {
+  let org: string, otherOrg: string, employee: string, administrator: string, otherEmployee: string, root: string, nested: string
+  const pdf = Buffer.from('%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF')
+  const metadata = (visibility: 'ORGANIZATION' | 'ADMINS' | 'PRIVATE_MEMBER' = 'ORGANIZATION', targetMemberId: string | null = null) => ({ displayName: 'Правила работы', visibility, targetMemberId, folderId: root })
+  before(async () => {
+    org = (await createOrganization(owner.id, { name: 'Documents', description: null, timezone: 'Europe/Moscow' })).id
+    otherOrg = (await createOrganization(owner.id, { name: 'Other documents', description: null, timezone: 'Europe/Moscow' })).id
+    employee = (await prisma.organizationMember.create({ data: { organizationId: org, userId: member.id } })).id
+    administrator = (await prisma.organizationMember.create({ data: { organizationId: org, userId: admin.id, role: 'ADMIN' } })).id
+    otherEmployee = (await prisma.organizationMember.create({ data: { organizationId: otherOrg, userId: member.id } })).id
+    root = (await documentsService.saveFolder(owner.id, org, undefined, { name: 'Правила', parentId: null })).id
+    nested = (await documentsService.saveFolder(owner.id, org, undefined, { name: 'Вложенная', parentId: root })).id
+  })
+  it('creates removable starter folders and files private uploads under the employee in the right organization', async () => {
+    const folderOrg = (await createOrganization(owner.id, { name: 'Folder defaults', description: null, timezone: 'Europe/Moscow' })).id
+    const target = (await prisma.organizationMember.create({ data: { organizationId: folderOrg, userId: member.id } })).id
+    const before = await documentsService.listDocuments(owner.id, folderOrg, documentListSchema.parse({}))
+    assert.ok(before.folders.some(folder => folder.name === 'Главная' && !folder.parentId))
+    assert.ok(before.folders.some(folder => folder.name === 'Документы сотрудников' && !folder.parentId))
+    const uploaded = await documentsService.uploadDocument(owner.id, folderOrg, pdf, 'application/pdf', 'contract.pdf', { ...metadata('PRIVATE_MEMBER', target), folderId: null })
+    const saved = await prisma.document.findUniqueOrThrow({ where: { id: uploaded.id }, include: { folder: { include: { parent: true } } } })
+    assert.equal(saved.folder?.parent?.name, 'Документы сотрудников')
+    assert.equal(saved.folder?.organizationId, folderOrg)
+    assert.ok(saved.folder?.name)
+    const scoped = await documentsService.personalDocuments(member.id, 1, '', folderOrg)
+    assert.deepEqual(scoped.documents.map(document => document.id), [uploaded.id])
+    assert.ok(!(await documentsService.personalDocuments(member.id, 1, '', org)).documents.some(document => document.id === uploaded.id))
+    const emptyStarter = before.folders.find(folder => folder.name === 'Главная')!
+    await documentsService.deleteFolder(owner.id, folderOrg, emptyStarter.id)
+    assert.ok(!(await documentsService.listDocuments(owner.id, folderOrg, documentListSchema.parse({}))).folders.some(folder => folder.id === emptyStarter.id))
+  })
+  it('allows changing visibility of an existing document inside a folder', async () => {
+    const accessOrg = (await createOrganization(owner.id, { name: 'Folder access', description: null, timezone: 'Europe/Moscow' })).id
+    await prisma.organizationMember.create({ data: { organizationId: accessOrg, userId: member.id } })
+    const folder = (await documentsService.saveFolder(owner.id, accessOrg, undefined, { name: 'Archive', parentId: null })).id
+    const data = { displayName: 'Правила доступа', folderId: folder, visibility: 'ORGANIZATION' as const, targetMemberId: null }
+    const document = await documentsService.uploadDocument(owner.id, accessOrg, pdf, 'application/pdf', 'access.pdf', data)
+    assert.equal((await documentsService.listDocuments(member.id, accessOrg, documentListSchema.parse({ folderId: folder }))).pagination.total, 1)
+    await documentsService.updateDocument(owner.id, accessOrg, document.id, { ...data, visibility: 'ADMINS' })
+    assert.equal((await documentsService.listDocuments(member.id, accessOrg, documentListSchema.parse({ folderId: folder }))).pagination.total, 0)
+    await documentsService.updateDocument(owner.id, accessOrg, document.id, data)
+    assert.equal((await documentsService.listDocuments(member.id, accessOrg, documentListSchema.parse({ folderId: folder }))).pagination.total, 1)
+  })
+  it('checks organization and visibility on lists, details, byte delivery and progress without leaking storage keys', async () => {
+    const publicDoc = await documentsService.uploadDocument(owner.id, org, pdf, 'application/pdf', 'policy.pdf', metadata())
+    const adminDoc = await documentsService.uploadDocument(admin.id, org, pdf, 'application/pdf', 'admin.pdf', metadata('ADMINS'))
+    const privateDoc = await documentsService.uploadDocument(owner.id, org, pdf, 'application/pdf', encodeURIComponent('Договор.pdf'), metadata('PRIVATE_MEMBER', employee))
+    const otherPrivate = await documentsService.uploadDocument(owner.id, org, pdf, 'application/pdf', 'other.pdf', metadata('PRIVATE_MEMBER', administrator))
+    await expectCode(() => documentsService.getDocument(member.id, org, adminDoc.id), 'DOCUMENT_NOT_FOUND')
+    await expectCode(() => documentsService.getDocument(member.id, org, otherPrivate.id), 'DOCUMENT_NOT_FOUND')
+    await expectCode(() => documentsService.getDocument(owner.id, otherOrg, publicDoc.id), 'DOCUMENT_NOT_FOUND')
+    await expectCode(() => documentsService.deliverDocument(member.id, otherOrg, publicDoc.id, 'download'), 'DOCUMENT_NOT_FOUND')
+    await expectCode(() => documentsService.deliverDocument(outsider.id, org, publicDoc.id, 'download'), 'DOCUMENT_NOT_FOUND')
+    await expectCode(() => documentsService.documentProgress(member.id, org, publicDoc.id), 'INSUFFICIENT_PERMISSIONS')
+    await expectCode(() => documentsService.uploadDocument(member.id, org, pdf, 'application/pdf', 'policy.pdf', metadata()), 'INSUFFICIENT_PERMISSIONS')
+    const workspace = await documentsService.listDocuments(member.id, org, documentListSchema.parse({ folderId: root }))
+    assert.deepEqual(workspace.documents.map(item => item.id), [publicDoc.id])
+    assert.equal(workspace.folders.find(folder => folder.id === root)?.documentCount, 1)
+    assert.ok(workspace.uploadMaxBytes > 0)
+    const filtered = await documentsService.listDocuments(member.id, org, documentListSchema.parse({ folderId: root, fileType: 'image' }))
+    assert.equal(filtered.pagination.total, 0)
+    const search = await documentsService.listDocuments(member.id, org, documentListSchema.parse({ search: 'Правила', sort: 'name' }))
+    assert.deepEqual(search.documents.map(item => item.id), [publicDoc.id])
+    assert.equal(search.folders.find(folder => folder.id === root)?.documentCount, 1)
+    const personal = await documentsService.personalDocuments(member.id)
+    assert.ok(personal.documents.some(item => item.id === privateDoc.id)); assert.ok(!personal.documents.some(item => item.id === otherPrivate.id))
+    const detail = await documentsService.getDocument(member.id, org, privateDoc.id)
+    assert.equal(JSON.stringify(detail).includes('objectKey'), false)
+    assert.equal(JSON.stringify(detail).includes('storedFileId'), false)
+    assert.equal('progress' in detail, false)
+    const stream = await documentsService.deliverDocument(member.id, org, privateDoc.id, 'download'); const parts: Buffer[] = []
+    for await (const part of stream.stream) parts.push(Buffer.from(part)); assert.deepEqual(Buffer.concat(parts), pdf)
+    const confidential = (await documentsService.saveFolder(owner.id, org, undefined, { name: 'Confidential', parentId: null })).id
+    await documentsService.uploadDocument(owner.id, org, pdf, 'application/pdf', 'secret.pdf', { ...metadata('ADMINS'), folderId: confidential })
+    const nestedDoc = await documentsService.uploadDocument(owner.id, org, pdf, 'application/pdf', 'nested.pdf', { ...metadata(), folderId: nested })
+    const counted = await documentsService.listDocuments(member.id, org, documentListSchema.parse({ folderId: root }))
+    assert.equal(counted.folders.find(folder => folder.id === root)?.documentCount, 2)
+    assert.equal(counted.folders.find(folder => folder.id === nested)?.documentCount, 1)
+    await documentsService.deleteDocument(owner.id, org, nestedDoc.id)
+    assert.equal((await documentsService.listDocuments(member.id, org, documentListSchema.parse({}))).folders.find(folder => folder.id === root)?.documentCount, 1)
+    assert.ok(!workspace.folders.some(folder => folder.id === nested))
+    assert.ok(!(await documentsService.listDocuments(member.id, org, documentListSchema.parse({}))).folders.some(folder => folder.id === confidential))
+  })
+  it('snapshots recipients, separates notification read/open/ack, and rejects duplicate or inaccessible assignments', async () => {
+    const doc = await documentsService.uploadDocument(owner.id, org, pdf, 'application/pdf', 'ack.pdf', metadata())
+    await documentsService.assignAcknowledgements(owner.id, org, doc.id, assignmentSchema.parse({ recipients: 'roles', roles: ['MEMBER'], deadline: '2026-09-27', comment: 'Прочитайте правила' }))
+    const newUser = await prisma.user.create({ data: { email: email('new-document-member'), passwordHash: 'test-only', emailVerifiedAt: new Date() } })
+    await prisma.organizationMember.create({ data: { organizationId: org, userId: newUser.id } })
+    assert.equal(await prisma.documentAcknowledgement.count({ where: { documentId: doc.id } }), 1)
+    const notification = await prisma.accountNotification.findFirstOrThrow({ where: { documentId: doc.id } })
+    await readHistoryNotification(member.id, member.email, `event:${notification.id}`, false, org)
+    const unread = await listNotificationHistory(member.id, member.email, { limit: 30, unread: true, organizationId: org })
+    assert.ok(!unread.notifications.find(item => item.documentId === doc.id))
+    assert.equal(unread.unreadCount, 0); assert.equal(unread.actionableCount, 0)
+    assert.equal((await listNotificationHistory(member.id, member.email, { limit: 30, organizationId: org })).actionableCount, 1)
+    assert.equal((await documentsService.listDocuments(member.id, org, documentListSchema.parse({ scope: 'required' }))).pagination.total, 1)
+    await readHistoryNotification(member.id, member.email, `event:${notification.id}`, true, org)
+    await updateAllNotifications(member.id, member.email, { organizationId: org })
+    assert.equal((await listNotificationHistory(member.id, member.email, { limit: 30, unread: true, organizationId: org })).unreadCount, 0)
+    assert.equal((await documentsService.listDocuments(member.id, org, documentListSchema.parse({ scope: 'required' }))).pagination.total, 1)
+    await expectCode(() => updateAllNotifications(member.id, member.email, { organizationId: org }, `event:${notification.id}`), 'ACTION_REQUIRED')
+    await documentsService.getDocument(member.id, org, doc.id)
+    // Opening the document detail is enough; acknowledgement remains an explicit action.
+    await documentsService.acknowledgeDocument(member.id, org, doc.id)
+    await expectCode(() => documentsService.acknowledgeDocument(member.id, org, doc.id), 'ALREADY_ACKNOWLEDGED')
+    await expectCode(() => documentsService.assignAcknowledgements(owner.id, org, doc.id, assignmentSchema.parse({ recipients: 'members', memberIds: [employee] })), 'ALREADY_ASSIGNED')
+    assert.equal((await listNotificationHistory(member.id, member.email, { limit: 30, unread: true, organizationId: org })).actionableCount, 0)
+    const adminDoc = await documentsService.uploadDocument(owner.id, org, pdf, 'application/pdf', 'admins.pdf', metadata('ADMINS'))
+    await expectCode(() => documentsService.assignAcknowledgements(owner.id, org, adminDoc.id, assignmentSchema.parse({ recipients: 'members', memberIds: [employee] })), 'RECIPIENT_ACCESS_DENIED')
+    await expectCode(() => documentsService.assignAcknowledgements(owner.id, org, doc.id, assignmentSchema.parse({ recipients: 'members', memberIds: [otherEmployee] })), 'INVALID_RECIPIENTS')
+  })
+  it('retains cancellation and deletion history, checks access-change conflicts and preserves bytes', async () => {
+    const doc = await documentsService.uploadDocument(owner.id, org, pdf, 'application/pdf', 'retained.pdf', metadata())
+    await documentsService.assignAcknowledgements(owner.id, org, doc.id, assignmentSchema.parse({ recipients: 'members', memberIds: [employee, administrator] }))
+    await expectCode(() => documentsService.updateDocument(owner.id, org, doc.id, metadata('ADMINS')), 'ACKNOWLEDGEMENT_ACCESS_CONFLICT')
+    const requirement = await prisma.documentAcknowledgement.findUniqueOrThrow({ where: { documentId_memberId: { documentId: doc.id, memberId: employee } } })
+    await documentsService.cancelAcknowledgement(owner.id, org, doc.id, requirement.id)
+    await expectCode(() => documentsService.acknowledgeDocument(member.id, org, doc.id), 'ACKNOWLEDGEMENT_NOT_ACTIVE')
+    await documentsService.updateDocument(owner.id, org, doc.id, metadata('ADMINS'))
+    await documentsService.recordDocumentOpened(admin.id, org, doc.id); await documentsService.acknowledgeDocument(admin.id, org, doc.id)
+    await documentsService.deleteDocument(owner.id, org, doc.id)
+    await expectCode(() => documentsService.getDocument(member.id, org, doc.id), 'DOCUMENT_NOT_FOUND')
+    await expectCode(() => documentsService.deliverDocument(member.id, org, doc.id, 'download'), 'DOCUMENT_NOT_FOUND')
+    assert.equal((await documentsService.documentProgress(owner.id, org, doc.id)).recipients.length, 2)
+    assert.ok((await documentsService.getDocument(owner.id, org, doc.id)).deletedAt)
+    const stream = await documentsService.deliverDocument(owner.id, org, doc.id, 'download'); for await (const _ of stream.stream) { /* drain */ }
+    const record = await prisma.document.findUniqueOrThrow({ where: { id: doc.id }, include: { storedFile: true } }); assert.equal(record.storedFile.pendingDeletionAt, null)
+    assert.ok((await prisma.documentAcknowledgement.findUniqueOrThrow({ where: { documentId_memberId: { documentId: doc.id, memberId: administrator } } })).acknowledgedAt)
+    const pending = await documentsService.uploadDocument(owner.id, org, pdf, 'application/pdf', 'pending.pdf', metadata())
+    await documentsService.assignAcknowledgements(owner.id, org, pending.id, assignmentSchema.parse({ recipients: 'members', memberIds: [employee] }))
+    await documentsService.deleteDocument(owner.id, org, pending.id)
+    assert.ok((await prisma.documentAcknowledgement.findFirstOrThrow({ where: { documentId: pending.id } })).cancelledAt)
+  })
+  it('serves protected bytes only on explicit POST, marks successful delivery and refuses anonymous, foreign and static access', async () => {
+    const { default: express } = await import('express')
+    const { default: router } = await import('../src/server/documents/routes.ts')
+    const { default: media } = await import('../src/server/storage/routes.ts')
+    const { SignJWT } = await import('jose')
+    const user = await prisma.user.create({ data: { email: email('http-document'), passwordHash: 'test-only', emailVerifiedAt: new Date() } })
+    const recipient = await prisma.organizationMember.create({ data: { organizationId: org, userId: user.id } })
+    const doc = await documentsService.uploadDocument(owner.id, org, pdf, 'application/pdf', encodeURIComponent('Приказ №1.pdf'), metadata('PRIVATE_MEMBER', recipient.id))
+    await documentsService.assignAcknowledgements(owner.id, org, doc.id, assignmentSchema.parse({ recipients: 'members', memberIds: [recipient.id] }))
+    const session = await prisma.authSession.create({ data: { userId: user.id, refreshTokenHash: randomUUID(), idleExpiresAt: new Date(Date.now() + 60000), absoluteExpiresAt: new Date(Date.now() + 60000) } })
+    const token = await new SignJWT({ sid: session.id }).setProtectedHeader({ alg: 'HS256' }).setSubject(user.id).setIssuedAt().setExpirationTime('5m').sign(new TextEncoder().encode(process.env.JWT_SECRET!))
+    const app = express(); app.use(express.json()); app.use('/api', router, media)
+    app.use((_req, res) => res.status(404).end())
+    app.use((error: any, _req: any, res: any, _next: any) => res.status(error.status ?? 500).json({ code: error.code }))
+    const server = app.listen(0, '127.0.0.1'); await new Promise<void>(resolve => server.once('listening', resolve))
+    const base = `http://127.0.0.1:${(server.address() as import('node:net').AddressInfo).port}`
+    const path = `/api/organizations/${org}/documents/${doc.id}`
+    const headers = { Authorization: `Bearer ${token}` }
+    try {
+      assert.equal((await fetch(`${base}${path}/content?action=download`, { method: 'POST' })).status, 401)
+      assert.equal((await fetch(`${base}${path}`, { headers })).status, 200)
+      assert.equal((await fetch(`${base}${path}/content?action=preview`, { headers })).status, 404)
+      assert.equal((await fetch(`${base}${path}/content?action=preview`, { method: 'HEAD', headers })).status, 404)
+      assert.equal((await prisma.documentAcknowledgement.findFirstOrThrow({ where: { documentId: doc.id } })).openedAt, null)
+      assert.equal((await fetch(`${base}/api/organizations/${otherOrg}/documents/${doc.id}/content?action=download`, { method: 'POST', headers })).status, 404)
+      const binding = await prisma.document.findUniqueOrThrow({ where: { id: doc.id } })
+      assert.equal((await fetch(`${base}/api/media/${binding.storedFileId}`, { headers })).status, 404)
+      const result = await fetch(`${base}${path}/content?action=preview`, { method: 'POST', headers })
+      assert.equal(result.status, 200); assert.equal(result.headers.get('x-content-type-options'), 'nosniff')
+      assert.ok(result.headers.get('content-disposition')?.startsWith('inline;'))
+      assert.ok(result.headers.get('content-disposition')?.includes("filename*=UTF-8''"))
+      assert.ok(result.headers.get('cache-control')?.includes('no-store'))
+      assert.deepEqual(Buffer.from(await result.arrayBuffer()), pdf)
+      let opened = false
+      for (let attempt = 0; attempt < 20; attempt++) {
+        const detail = await fetch(`${base}${path}`, { headers }).then(result => result.json())
+        if (detail.document.acknowledgement.openedAt) { opened = true; break }
+        await new Promise(resolve => setTimeout(resolve, 20))
+      }
+      assert.ok(opened, 'Successful streaming must eventually commit openedAt')
+      assert.equal((await fetch(`${base}${path}/acknowledge`, { method: 'POST', headers })).status, 204)
+    } finally { await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())) }
+  })
+  it('cancels unfinished requirements when a role change removes document access', async () => {
+    const doc = await documentsService.uploadDocument(owner.id, org, pdf, 'application/pdf', 'admin-role.pdf', metadata('ADMINS'))
+    await documentsService.assignAcknowledgements(owner.id, org, doc.id, assignmentSchema.parse({ recipients: 'members', memberIds: [administrator] }))
+    await changeMemberRole(owner.id, org, administrator, 'MEMBER')
+    await expectCode(() => documentsService.getDocument(admin.id, org, doc.id), 'DOCUMENT_NOT_FOUND')
+    assert.ok((await prisma.documentAcknowledgement.findUniqueOrThrow({ where: { documentId_memberId: { documentId: doc.id, memberId: administrator } } })).cancelledAt)
+    assert.ok(!(await listNotificationHistory(admin.id, admin.email, { limit: 30, organizationId: org })).notifications.some(item => item.documentId === doc.id))
+    await expectCode(() => documentsService.uploadDocument(admin.id, org, pdf, 'application/pdf', 'admin-upload.pdf', metadata()), 'INSUFFICIENT_PERMISSIONS')
+  })
+  it('guards folder cycles, cross-organization moves, nonempty deletion and former-member history', async () => {
+    await expectCode(() => documentsService.saveFolder(owner.id, org, root, { name: 'Cycle', parentId: nested }), 'FOLDER_CYCLE')
+    await expectCode(() => documentsService.saveFolder(owner.id, org, root, { name: 'Self', parentId: root }), 'FOLDER_CYCLE')
+    const foreign = await documentsService.saveFolder(owner.id, otherOrg, undefined, { name: 'Foreign', parentId: null })
+    await expectCode(() => documentsService.saveFolder(owner.id, org, root, { name: 'Cross', parentId: foreign.id }), 'FOLDER_NOT_FOUND')
+    await expectCode(() => documentsService.deleteFolder(owner.id, org, root), 'FOLDER_NOT_EMPTY')
+    const privateDoc = await documentsService.uploadDocument(owner.id, org, pdf, 'application/pdf', 'former.pdf', metadata('PRIVATE_MEMBER', employee))
+    await expectCode(() => documentsService.updateDocument(owner.id, org, privateDoc.id, { ...metadata('PRIVATE_MEMBER', employee), folderId: foreign.id }), 'FOLDER_NOT_FOUND')
+    await removeMember(owner.id, org, employee)
+    assert.equal((await documentsService.getDocument(owner.id, org, privateDoc.id)).targetMember?.former, true)
+    assert.ok(!(await documentsService.personalDocuments(member.id)).documents.some(doc => doc.id === privateDoc.id))
+    await expectCode(() => documentsService.getDocument(member.id, org, privateDoc.id), 'DOCUMENT_NOT_FOUND')
+    const empty = await documentsService.saveFolder(owner.id, org, undefined, { name: 'Empty', parentId: null })
+    await documentsService.deleteFolder(owner.id, org, empty.id)
+  })
+  it('treats date-only deadlines as the end of the organization day including DST', () => {
+    const ack = { cancelledAt: null, acknowledgedAt: null, openedAt: null, deadline: new Date('2026-09-27') }
+    assert.equal(documentsService.acknowledgementState(ack, 'Europe/Moscow', new Date('2026-09-27T20:59:59.999Z')).overdue, false)
+    assert.equal(documentsService.acknowledgementState(ack, 'Europe/Moscow', new Date('2026-09-27T21:00:00Z')).overdue, true)
+    const autumn = { ...ack, deadline: new Date('2026-11-01') }
+    assert.equal(documentsService.acknowledgementState(autumn, 'America/New_York', new Date('2026-11-02T04:59:59Z')).overdue, false)
+    assert.equal(documentsService.acknowledgementState(autumn, 'America/New_York', new Date('2026-11-02T05:00:00Z')).overdue, true)
   })
 })

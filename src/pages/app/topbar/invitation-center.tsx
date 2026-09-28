@@ -27,7 +27,7 @@ export default function InvitationCenter({ organizationId, onHistoryChange, open
   const total = history.data?.unreadCount ?? 0
   const items = history.data?.notifications ?? []
   return <div className="topbar-popover-host">
-    <button ref={trigger} className={`topbar-icon-button${open ? ' topbar-icon-button--active' : ''}`} type="button" aria-label={`Уведомления${total ? `, непрочитанных: ${total}` : ''}`} aria-expanded={open} onClick={() => { if (!open) void history.refetch(); onToggle() }}><EnvelopeIcon />{total > 0 && <span className="topbar-notification-badge">{total > 9 ? '9+' : total}</span>}</button>
+    <button ref={trigger} className={`topbar-icon-button${open ? ' topbar-icon-button--active' : ''}`} type="button" aria-label={`Уведомления${total ? `, требуют внимания: ${total}` : ''}`} aria-expanded={open} onClick={() => { if (!open) void history.refetch(); onToggle() }}><EnvelopeIcon />{total > 0 && <span className="topbar-notification-badge">{total > 9 ? '9+' : total}</span>}</button>
     {present && <section className={`topbar-popover topbar-popover--notifications${!open ? ' is-closing' : ''}`} aria-label="Уведомления">
       <header><div><h2>Уведомления</h2></div>{total > 0 && <button type="button" className="notification-read-all" disabled={actions.readAll.isPending} onClick={() => actions.readAll.mutate()}>Прочитать все</button>}<button type="button" aria-label="Закрыть уведомления" onClick={onClose}>×</button></header>
       {actions.error && <p className="topbar-popover__error" role="alert">{actions.error instanceof Error ? actions.error.message : 'Не удалось обработать уведомление.'}</p>}

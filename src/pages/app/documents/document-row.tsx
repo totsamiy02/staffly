@@ -1,0 +1,15 @@
+import DocumentActionsMenu from './document-actions-menu.tsx'
+import Avatar from '../../../component/ui/avatar/avatar.tsx'
+import type { DocumentItem } from '../../../app/documents/types.ts'
+import { sizeLabel, stateLabels, visibilityLabels } from '../../../app/documents/types.ts'
+export default function DocumentRow({ item, onOpen, onMenu, onEdit, onAssign, onDelete, columns = false, highlighted = false, path }: { item: DocumentItem; onOpen: () => void; onMenu?: () => void; onEdit?: () => void; onAssign?: () => void; onDelete?: () => void; columns?: boolean; highlighted?: boolean; path?: string }) {
+  const ack = item.acknowledgement
+  const progress = item.progress
+  return <article className={`document-row${columns ? ' document-row--columns' : ''}${highlighted ? ' document-row--highlighted' : ''}`}>
+    <div className="document-row__identity"><span className="document-row__format" aria-hidden="true">{item.fileName.split('.').at(-1)?.toUpperCase()}</span><button className="document-row__name" onClick={onOpen}><strong>{item.displayName}</strong><small>{item.fileName} · {sizeLabel(item.size)}</small>{path && <small>{path}</small>}{item.organization && <span className="document-row__organization"><Avatar className="app-avatar document-avatar" url={item.organization.logoUrl} name={item.organization.name} />{item.organization.name}</span>}</button></div>
+    <span className="document-row__access">{item.targetMember ? <span className="staffly-select__person"><Avatar className="app-avatar document-avatar" url={item.targetMember.avatarUrl} name={item.targetMember.name} /><span>{item.targetMember.name}<small>Личный документ{item.targetMember.former ? ' · бывший сотрудник' : ''}</small></span></span> : visibilityLabels[item.visibility]}</span>
+    <div className="document-row__ack">{ack && <span className="document-status">{stateLabels[ack.state]}</span>}{progress && (progress.total > 0 || progress.cancelled > 0) ? <button className="document-row__progress" onClick={onOpen} aria-label="Контроль ознакомления"><strong>Ознакомились {progress.acknowledged} из {progress.total}</strong><small>{`Осталось: ${progress.total - progress.acknowledged}`}</small></button> : !ack && <span className="document-status">Не назначено</span>}</div>
+    <time dateTime={item.updatedAt}>{new Date(item.updatedAt).toLocaleDateString('ru-RU')}</time>
+    {onEdit || onAssign || onDelete ? <DocumentActionsMenu label={`Действия: ${item.displayName}`}><button onClick={onOpen}>Открыть документ</button>{onEdit && <><button onClick={onEdit}>Название и папка</button><button onClick={onEdit}>Изменить доступ</button></>}{onAssign && <button onClick={onAssign}>Назначить ознакомление</button>}{onDelete && <button onClick={onDelete}>Удалить документ</button>}</DocumentActionsMenu> : onMenu ? <button className="document-row__menu" aria-label={`Действия: ${item.displayName}`} onClick={onMenu}>···</button> : columns && <span />}
+  </article>
+}

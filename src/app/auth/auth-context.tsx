@@ -16,8 +16,8 @@ type AuthContextValue = {
   apiRequest: <T>(path: string, options?: ApiOptions) => Promise<T>
   uploadImage: <T>(path: string, file: File) => Promise<T>
   uploadFile: <T>(path: string, file: File) => Promise<T>
-  downloadFile: (path: string, fileName: string) => Promise<void>
-  previewFile: (path: string) => Promise<Blob>
+  downloadFile: (path: string, fileName: string, method?: 'GET' | 'POST') => Promise<void>
+  previewFile: (path: string, method?: 'GET' | 'POST') => Promise<Blob>
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -138,14 +138,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refresh])
 
   const uploadFile = useCallback(async <T,>(path: string, file: File): Promise<T> => {
-    const execute = (token: string | null) => fetch(`/api${path}`, { method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': file.type, 'X-File-Name': encodeURIComponent(file.name), ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: file })
+    const execute = (token: string | null) => fetch(`/api${path}`, { method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': file.type || ({ pdf: 'application/pdf', doc: 'application/msword', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', xls: 'application/vnd.ms-excel', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', ppt: 'application/vnd.ms-powerpoint', pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', csv: 'text/csv', txt: 'text/plain', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp' } as Record<string, string>)[file.name.split('.').at(-1)?.toLowerCase() ?? ''] || 'application/octet-stream', 'X-File-Name': encodeURIComponent(file.name), ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: file })
     let response = await execute(tokenRef.current)
     if (response.status === 401) { const refreshed = await refresh(); if (refreshed) response = await execute(refreshed.accessToken) }
     return readJson<T>(response)
   }, [refresh])
 
-  const downloadFile = useCallback(async (path: string, fileName: string) => {
-    const execute = (token: string | null) => fetch(`/api${path}`, { credentials: 'same-origin', headers: token ? { Authorization: `Bearer ${token}` } : {} })
+  const downloadFile = useCallback(async (path: string, fileName: string, method: 'GET' | 'POST' = 'GET') => {
+    const execute = (token: string | null) => fetch(`/api${path}`, { method, credentials: 'same-origin', headers: token ? { Authorization: `Bearer ${token}` } : {} })
     let response = await execute(tokenRef.current)
     if (response.status === 401) { const refreshed = await refresh(); if (refreshed) response = await execute(refreshed.accessToken) }
     if (!response.ok) { await readJson(response); return }
@@ -153,8 +153,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const anchor = document.createElement('a'); anchor.href = url; anchor.download = fileName; anchor.click(); URL.revokeObjectURL(url)
   }, [refresh])
 
-  const previewFile = useCallback(async (path: string) => {
-    const execute = (token: string | null) => fetch(`/api${path}`, { credentials: 'same-origin', headers: token ? { Authorization: `Bearer ${token}` } : {} })
+  const previewFile = useCallback(async (path: string, method: 'GET' | 'POST' = 'GET') => {
+    const execute = (token: string | null) => fetch(`/api${path}`, { method, credentials: 'same-origin', headers: token ? { Authorization: `Bearer ${token}` } : {} })
     let response = await execute(tokenRef.current)
     if (response.status === 401) { const refreshed = await refresh(); if (refreshed) response = await execute(refreshed.accessToken) }
     if (!response.ok) { await readJson(response); throw new Error('Не удалось открыть файл.') }

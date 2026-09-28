@@ -74,6 +74,7 @@ enum AccountNotificationType {
   REQUEST_APPROVED
   REQUEST_REJECTED
   REQUEST_CANCELLED
+  DOCUMENT_ASSIGNED
 }
 
 enum RequestSystemCode {
@@ -137,6 +138,8 @@ model Organization {
   requestTypes         RequestType[]
   requests             OrganizationRequest[]
   absences             EmployeeAbsence[]
+  documents            Document[]
+  documentFolders      DocumentFolder[]
 
   @@index([createdByUserId])
   @@index([deletedAt])
@@ -147,6 +150,7 @@ enum StoredFilePurpose {
   USER_AVATAR
   ORGANIZATION_LOGO
   REQUEST_ATTACHMENT
+  DOCUMENT
 }
 
 model StoredFile {
@@ -167,6 +171,7 @@ model StoredFile {
   organization      Organization?      @relation("OrganizationFiles", fields: [organizationId], references: [id], onDelete: Cascade)
   userAvatar        User?              @relation("UserAvatar")
   organizationLogo  Organization?      @relation("OrganizationLogo")
+  document          Document?
   requestAttachment RequestAttachment?
 
   @@index([uploadedByUserId])
@@ -177,6 +182,8 @@ model StoredFile {
 
 model AccountNotification {
   hiddenAt DateTime? @map("hidden_at") @db.Timestamptz(3)
+  documentId String? @map("document_id") @db.Uuid
+  document Document? @relation(fields: [documentId], references: [id], onDelete: Restrict)
   absenceId String? @map("absence_id") @db.Uuid
   absence EmployeeAbsence? @relation(fields: [absenceId], references: [id], onDelete: SetNull)
   id               String                  @id @default(uuid()) @db.Uuid
@@ -196,6 +203,7 @@ model AccountNotification {
   request      OrganizationRequest? @relation(fields: [requestId], references: [id], onDelete: Cascade)
   shift        WorkShift?           @relation(fields: [shiftId], references: [id], onDelete: SetNull)
 
+  @@index([documentId])
   @@index([absenceId])
   @@index([userId, readAt, createdAt])
   @@index([userId, createdAt, id])
@@ -228,6 +236,10 @@ model OrganizationMember {
   requestReads        RequestRead[]
   requestEvents       RequestEvent[]
   absences            EmployeeAbsence[]
+  uploadedDocuments   Document[] @relation("DocumentUploader")
+  personalDocuments   Document[] @relation("DocumentTarget")
+  documentAcknowledgements DocumentAcknowledgement[] @relation("AcknowledgementRecipient")
+  assignedAcknowledgements DocumentAcknowledgement[] @relation("AcknowledgementAssigner")
 
   @@unique([organizationId, userId])
   @@index([organizationId])
@@ -571,4 +583,71 @@ model ShiftTemplate {
 
   @@index([organizationId, isActive])
   @@map("shift_templates")
+}
+
+
+enum DocumentVisibility {
+  ORGANIZATION
+  ADMINS
+  PRIVATE_MEMBER
+}
+
+model DocumentFolder {
+  id String @id @default(uuid()) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  parentId String? @map("parent_id") @db.Uuid
+  name String @db.VarChar(160)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  parent DocumentFolder? @relation("FolderTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children DocumentFolder[] @relation("FolderTree")
+  documents Document[]
+  @@index([organizationId, parentId])
+  @@map("document_folders")
+}
+
+model Document {
+  id String @id @default(uuid()) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  storedFileId String @unique @map("stored_file_id") @db.Uuid
+  folderId String? @map("folder_id") @db.Uuid
+  displayName String @map("display_name") @db.VarChar(255)
+  fileName String @map("file_name") @db.VarChar(255)
+  visibility DocumentVisibility
+  uploadedByMemberId String @map("uploaded_by_member_id") @db.Uuid
+  targetMemberId String? @map("target_member_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  storedFile StoredFile @relation(fields: [storedFileId], references: [id], onDelete: Restrict)
+  folder DocumentFolder? @relation(fields: [folderId], references: [id], onDelete: Restrict)
+  uploadedBy OrganizationMember @relation("DocumentUploader", fields: [uploadedByMemberId], references: [id], onDelete: Restrict)
+  targetMember OrganizationMember? @relation("DocumentTarget", fields: [targetMemberId], references: [id], onDelete: Restrict)
+  acknowledgements DocumentAcknowledgement[]
+  notifications AccountNotification[]
+  @@index([organizationId, deletedAt, folderId, createdAt])
+  @@index([organizationId, targetMemberId, deletedAt])
+  @@map("documents")
+}
+
+model DocumentAcknowledgement {
+  id String @id @default(uuid()) @db.Uuid
+  documentId String @map("document_id") @db.Uuid
+  memberId String @map("member_id") @db.Uuid
+  assignedByMemberId String @map("assigned_by_member_id") @db.Uuid
+  assignedAt DateTime @default(now()) @map("assigned_at") @db.Timestamptz(3)
+  openedAt DateTime? @map("opened_at") @db.Timestamptz(3)
+  acknowledgedAt DateTime? @map("acknowledged_at") @db.Timestamptz(3)
+  cancelledAt DateTime? @map("cancelled_at") @db.Timestamptz(3)
+  deadline DateTime? @db.Date
+  comment String? @db.VarChar(1000)
+  document Document @relation(fields: [documentId], references: [id], onDelete: Restrict)
+  member OrganizationMember @relation("AcknowledgementRecipient", fields: [memberId], references: [id], onDelete: Restrict)
+  assignedBy OrganizationMember @relation("AcknowledgementAssigner", fields: [assignedByMemberId], references: [id], onDelete: Restrict)
+  @@unique([documentId, memberId])
+  @@index([memberId, acknowledgedAt, cancelledAt])
+  @@index([documentId, cancelledAt, acknowledgedAt])
+  @@map("document_acknowledgements")
 }

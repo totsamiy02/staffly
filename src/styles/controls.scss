@@ -5,7 +5,7 @@ input:not([type=checkbox]):not([type=radio]):not([type=file]), textarea {
   &::placeholder { color: var(--field-example) !important; opacity: 1; font-weight: 400; }
   &:disabled { color: #737780 !important; background-color: #f1f2f4 !important; cursor: not-allowed; opacity: 1; }
   &[readonly] { color: #454b54 !important; }
-  &:focus-visible { outline: 2px solid #79728f !important; outline-offset: 2px; }
+  &:focus-visible { outline: 2px solid #686868 !important; outline-offset: 2px; }
   &[aria-invalid=true], &:user-invalid { border-color: #a34b4b; outline-color: #a34b4b; }
 }
 .auth { --field-value: #f5f5f5; --field-example: #a4a4ab; }
@@ -16,27 +16,27 @@ input[type=time]::-webkit-calendar-picker-indicator { display: none; }
 .staffly-control { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-height: 46px; border: 1px solid #d4d4d4; border-radius: 10px; padding: 10px 13px; background: #fff; color: #202124; text-align: left; font: inherit; font-size: 13px; cursor: pointer; transition: border-color .15s, box-shadow .15s;
   > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   svg { width: 18px; height: 18px; flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 1.6; }
-  &:focus-visible { outline: 2px solid #79728f !important; outline-offset: 2px; }
-  &[aria-expanded=true] { border-color: #79728f; box-shadow: 0 0 0 3px #79728f14; }
+  &:focus-visible { outline: 2px solid #686868 !important; outline-offset: 2px; }
+  &[aria-expanded=true] { border-color: #686868; box-shadow: 0 0 0 3px #68686814; }
   &:disabled { background: #f1f2f4; color: #737780; cursor: not-allowed; }
   &[aria-invalid=true] { border-color: #a34b4b; }
   &.is-placeholder { color: #6f747c; }
 }
-.staffly-select__options, .staffly-calendar { position: absolute; z-index: 60; top: calc(100% + 6px); left: 0; width: 100%; min-width: min(280px, 100%); max-height: min(300px, 40dvh); overflow-y: auto; border: 1px solid #d8d8dd; border-radius: 12px; padding: 5px; background: #fff; box-shadow: 0 12px 32px #19152220; animation: control-open .15s ease-out; }
+.staffly-select__options, .staffly-calendar { position: absolute; z-index: 60; top: calc(100% + 6px); left: 0; width: 100%; min-width: min(280px, 100%); max-height: min(300px, 40dvh); overflow-y: auto; border: 1px solid #d8d8dd; border-radius: 12px; padding: 5px; background: #fff; box-shadow: 0 12px 32px #00000020; animation: control-open .15s ease-out; }
 .staffly-select__options [role=option] { display: flex; justify-content: space-between; gap: 10px; padding: 10px; border-radius: 7px; font-size: 13px; cursor: pointer; overflow-wrap: anywhere;
-  &.is-active { background: #f0eef5; }
-  &[aria-selected=true] { font-weight: 700; color: #514467; }
+  &.is-active { background: #f2f2f2; }
+  &[aria-selected=true] { font-weight: 700; color: #111; }
   &[aria-disabled=true] { color: #90949b; cursor: not-allowed; }
 }
 .staffly-calendar { width: 280px; max-width: calc(100vw - 48px); max-height: none; padding: 12px; }
 .staffly-calendar header { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 8px; font-size: 12px; }
 .staffly-calendar button { border-radius: 7px; padding: 6px; background: transparent; color: #202124; cursor: pointer; font: inherit; font-size: 13px; }
-.staffly-calendar button:hover { background: #f0eef5; }
-.staffly-calendar button:focus-visible { outline: 2px solid #79728f; }
+.staffly-calendar button:hover { background: #f2f2f2; }
+.staffly-calendar button:focus-visible { outline: 2px solid #686868; }
 .staffly-calendar button:disabled { color: #a1a5ac; cursor: not-allowed; }
 .staffly-calendar__days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; text-align: center; }
 .staffly-calendar__days > span { padding: 5px 0; color: #737780; font-size: 11px; }
-.staffly-calendar__days button[aria-pressed=true] { background: #514467; color: #fff; }
+.staffly-calendar__days button[aria-pressed=true] { background: #111; color: #fff; }
 .staffly-calendar__clear { width: 100%; margin-top: 8px; }
 .role-badge { display: inline-flex; align-items: center; width: fit-content; padding: 4px 8px; border: 1px solid #d9dce1; border-radius: 6px; background: #f3f4f6; color: #505764; font-size: 11px; font-weight: 600; white-space: nowrap; line-height: 1.4; }
 .role-badge--owner { border-color: #d8cdbb; background: #f6f1e8; color: #765d33; }
@@ -53,5 +53,5 @@ input[type=time]::-webkit-calendar-picker-indicator { display: none; }
 .staffly-calendar { width: min(280px, 100%); min-width: 0; }
 .staffly-control[aria-readonly=true] { background: #f5f5f6; color: #454b54; cursor: default; }
 input[aria-invalid=true]:focus-visible, textarea[aria-invalid=true]:focus-visible, input:user-invalid:focus-visible, textarea:user-invalid:focus-visible { outline-color: #a34b4b !important; }
-.auth__field:has(input:focus-visible), .account-password-field > div:has(input:focus-visible) { outline: 2px solid #79728f; outline-offset: 2px; }
+.auth__field:has(input:focus-visible), .account-password-field > div:has(input:focus-visible) { outline: 2px solid #686868; outline-offset: 2px; }
 .auth__field input:focus-visible, .account-password-field input:focus-visible { outline: none !important; }

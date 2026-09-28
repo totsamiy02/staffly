@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto'
 
 if (process.env.NODE_ENV === 'test' && (!process.env.LOCAL_STORAGE_ROOT || path.resolve(process.env.LOCAL_STORAGE_ROOT) === path.resolve('storage'))) throw new Error('Test storage must use an isolated LOCAL_STORAGE_ROOT')
 export const storageRoot = path.resolve(process.env.LOCAL_STORAGE_ROOT || path.join(process.cwd(), 'storage'))
-const objectKeyPattern = /^[a-z0-9-]+(?:\/[a-z0-9-]+)*\/[a-f0-9-]+\.(?:webp|jpg|png|pdf)$/
+const objectKeyPattern = /^[a-z0-9-]+(?:\/[a-z0-9-]+)*\/[a-f0-9-]+\.(?:webp|jpg|png|pdf|doc|docx|xls|xlsx|csv|txt|ppt|pptx)$/
 
 function objectPath(objectKey: string) {
   if (!objectKeyPattern.test(objectKey)) throw new Error('Invalid local storage object key')
@@ -71,4 +71,16 @@ export async function deleteObject(objectKey: string) {
     }
     directory = path.dirname(directory)
   }
+}
+
+
+export async function streamObject(objectKey: string) {
+  const target = objectPath(objectKey)
+  await checkDirectories(target)
+  const file = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW)
+  try {
+    const stat = await file.stat()
+    if (!stat.isFile()) throw new Error('Unsafe local storage object')
+    return { stream: file.createReadStream({ autoClose: true }), size: stat.size }
+  } catch (error) { await file.close(); throw error }
 }

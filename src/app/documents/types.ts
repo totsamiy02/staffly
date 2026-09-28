@@ -1,0 +1,10 @@
+export type Visibility = 'ORGANIZATION' | 'ADMINS' | 'PRIVATE_MEMBER'
+export type Acknowledgement = { id: string; assignedBy: string | null; assignedAt: string; openedAt: string | null; acknowledgedAt: string | null; cancelledAt: string | null; deadline: string | null; comment: string | null; state: 'UNOPENED' | 'OPENED' | 'ACKNOWLEDGED' | 'CANCELLED'; overdue: boolean }
+export type DocumentItem = { id: string; organizationId: string; folderId: string | null; displayName: string; fileName: string; visibility: Visibility; targetMemberId: string | null; createdAt: string; updatedAt: string; deletedAt: string | null; mimeType: string; size: number; previewable: boolean; uploadedBy: { name: string; avatarUrl: string | null }; targetMember: { id: string; name: string; avatarUrl: string | null; former: boolean } | null; acknowledgement: Acknowledgement | null; progress?: { total: number; unopened: number; opened: number; acknowledged: number; overdue: number; cancelled: number }; organization?: { id: string; name: string; logoUrl: string | null } }
+export type Folder = { id: string; parentId: string | null; name: string; documentCount: number }
+export type DocumentPage = { documents: DocumentItem[]; folders: Folder[]; uploadMaxBytes: number; pagination: { page: number; pageSize: number; total: number; pages: number } }
+export type Recipient = Acknowledgement & { member: { id: string; name: string; avatarUrl: string | null; former: boolean } }
+export const visibilityLabels = { ORGANIZATION: 'Вся организация', ADMINS: 'Владелец и администраторы', PRIVATE_MEMBER: 'Личный документ сотрудника' }
+export const stateLabels = { UNOPENED: 'Не открыт', OPENED: 'Открыт', ACKNOWLEDGED: 'Ознакомлен', CANCELLED: 'Отменено' }
+export const documentPath = (organizationId: string, id?: string) => `/organizations/${organizationId}/documents${id ? '/' + id : ''}`
+export const sizeLabel = (size: number) => size < 1024 * 1024 ? `${Math.ceil(size / 1024)} КБ` : `${(size / 1024 / 1024).toFixed(1)} МБ`

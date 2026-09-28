@@ -15,6 +15,7 @@ export async function createOrganization(userId: string, input: CreateOrganizati
     const organization = await tx.organization.create({ data: { ...input, createdByUserId: userId } })
     await tx.organizationMember.create({ data: { organizationId: organization.id, userId, role: 'OWNER' } })
     await seedSystemRequestTypes(tx, organization.id)
+    await tx.documentFolder.createMany({ data: [{ organizationId: organization.id, name: 'Главная' }, { organizationId: organization.id, name: 'Документы сотрудников' }] })
     return { ...organization, logoUrl: null, role: 'OWNER' as const, memberCount: 1 }
   })
 }
@@ -124,7 +125,9 @@ export async function changeMemberRole(actorUserId: string, organizationId: stri
   if (target.role === nextRole) return target
   const roleName = nextRole === 'ADMIN' ? 'Администратор' : 'Пользователь'
   const member = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId}, 1))::text`
     const updated = await tx.organizationMember.update({ where: { id: target.id }, data: { role: nextRole } })
+    if (nextRole === 'MEMBER') await tx.documentAcknowledgement.updateMany({ where: { memberId: target.id, acknowledgedAt: null, cancelledAt: null, document: { organizationId, OR: [{ visibility: 'ADMINS' }, { visibility: 'PRIVATE_MEMBER', targetMemberId: { not: target.id } }] } }, data: { cancelledAt: new Date() } })
     await tx.accountNotification.create({ data: { userId: target.userId, organizationId, type: 'ROLE_CHANGED', title: 'Роль изменена', message: `В организации «${actor.organization.name}» вам назначена роль «${roleName}».` } })
     return updated
   })
@@ -134,7 +137,7 @@ export async function changeMemberRole(actorUserId: string, organizationId: stri
 
 export async function listAccountNotifications(userId: string, organizationId?: string) {
   if (organizationId) await getMembership(userId, organizationId)
-  const notifications = await prisma.accountNotification.findMany({ where: { userId, organizationId, hiddenAt: null, readAt: null, type: { notIn: ['SHIFT_ASSIGNED', 'SHIFT_CHANGED', 'SHIFT_CANCELLED'] }, organization: { deletedAt: null, members: { some: { userId, leftAt: null } } } }, include: { organization: { select: { id: true, name: true, logoFileId: true } } }, orderBy: { createdAt: 'desc' }, take: 50 })
+  const notifications = await prisma.accountNotification.findMany({ where: { userId, organizationId, hiddenAt: null, readAt: null, type: { notIn: ['SHIFT_ASSIGNED', 'SHIFT_CHANGED', 'SHIFT_CANCELLED', 'DOCUMENT_ASSIGNED'] }, organization: { deletedAt: null, members: { some: { userId, leftAt: null } } } }, include: { organization: { select: { id: true, name: true, logoFileId: true } } }, orderBy: { createdAt: 'desc' }, take: 50 })
   return notifications.map(item => ({ ...item, organization: { id: item.organization.id, name: item.organization.name, logoUrl: mediaUrl(item.organization.logoFileId) } }))
 }
 
@@ -150,6 +153,8 @@ export async function removeMember(actorUserId: string, organizationId: string, 
   assertCanRemoveMember(actor.role, target.role)
   const now = new Date()
   await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId}, 1))::text`
+    await tx.documentAcknowledgement.updateMany({ where: { memberId: target.id, acknowledgedAt: null, cancelledAt: null, document: { organizationId } }, data: { cancelledAt: now } })
     await tx.workShift.updateMany({ where: { organizationId, memberId: target.id, status: 'SCHEDULED', scheduledStartAt: { gt: now } }, data: { status: 'CANCELLED', cancelledAt: now, cancelledByMemberId: actor.id, cancellationReason: 'Сотрудник покинул организацию' } })
     await tx.organizationMember.update({ where: { id: target.id }, data: { leftAt: now } })
     const pending = await tx.organizationRequest.findMany({ where: { organizationId, createdByMemberId: target.id, status: 'PENDING' }, select: { id: true } })

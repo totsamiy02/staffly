@@ -9,9 +9,11 @@ import OrganizationSettings from './organization-settings.tsx'
 import SchedulePage from './schedule/schedule-page.tsx'
 import StatisticsPage from './schedule/statistics-page.tsx'
 import MyWorkTimePage from './schedule/my-work-time-page.tsx'
+import DocumentsPage from './documents/documents-page.tsx'
 import RequestsPage from './requests/requests-page.tsx'
 import ModuleErrorBoundary from './module-error-boundary.tsx'
 import Avatar from '../../component/ui/avatar/avatar.tsx'
+import { useDocuments } from '../../app/documents/queries.ts'
 import './app.scss'
 
 const navigation = [
@@ -32,8 +34,10 @@ function CollapseIcon({ collapsed }: { collapsed: boolean }) {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d={collapsed ? 'm9 6 6 6-6 6' : 'm15 6-6 6 6 6'} /></svg>
 }
 
-function Placeholder({ title }: { title: string }) {
-  return <section className="workspace-placeholder"><p className="app-eyebrow">Раздел организации</p><h1>{title}</h1><p>Раздел подготовлен для следующего этапа разработки.</p></section>
+function DocumentNavBadge({ organizationId }: { organizationId: string }) {
+  const required = useDocuments(organizationId, { scope: 'required', pageSize: 1 })
+  const count = required.data?.pagination.total ?? 0
+  return count > 0 ? <span className="workspace-nav-badge" aria-label={`Требуют ознакомления: ${count}`}>{count > 99 ? '99+' : count}</span> : null
 }
 
 function ModuleNotFound({ organizationPath }: { organizationPath: string }) {
@@ -77,7 +81,7 @@ export default function OrganizationLayout() {
     <aside className="workspace-sidebar" aria-label="Навигация организации">
       <div className="workspace-sidebar__organization"><Avatar url={organization.logoUrl} name={organization.name} className="workspace-sidebar__organization-avatar" eager /><div><strong>{organization.name}</strong><small><RoleBadge role={organization.role} /> · {currentSection}</small></div></div>
       <button className="workspace-sidebar__collapse" type="button" aria-label={sidebarCollapsed ? 'Развернуть меню' : 'Свернуть меню'} onClick={toggleSidebar}><CollapseIcon collapsed={sidebarCollapsed} /><span>{sidebarCollapsed ? 'Развернуть' : 'Свернуть'}</span></button>
-      <nav aria-label="Разделы организации">{navigation.map(([path, label]) => <NavLink end title={sidebarCollapsed ? label : undefined} to={path ? `${organizationPath}/${path}` : organizationPath} key={label}><NavigationIcon section={path} /><span>{label}</span></NavLink>)}</nav>
+      <nav aria-label="Разделы организации">{navigation.map(([path, label]) => <NavLink end title={sidebarCollapsed ? label : undefined} to={path ? `${organizationPath}/${path}` : organizationPath} key={label}><NavigationIcon section={path} /><span>{label}</span>{path === 'documents' && <DocumentNavBadge organizationId={organization.id} />}</NavLink>)}</nav>
       <div className="workspace-sidebar__footer"><NavLink className="workspace-sidebar__back" title={sidebarCollapsed ? 'Все организации' : undefined} to="/app"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m10 6-6 6 6 6M4 12h16" /></svg><span>Все организации</span></NavLink></div>
     </aside>
     <main className="workspace-content">
@@ -90,7 +94,7 @@ export default function OrganizationLayout() {
         <Route path="schedule/work-time" element={module(<MyWorkTimePage organization={organization} />)} />
         <Route path="requests" element={module(<RequestsPage organization={organization} />)} />
         <Route path="settings" element={module(<OrganizationSettings organization={organization} />)} />
-        {navigation.filter(([path]) => path === 'documents').map(([path, label]) => <Route path={path} element={module(<Placeholder title={label} />)} key={path} />)}
+        <Route path="documents" element={module(<DocumentsPage organization={organization} />)} />
         <Route path="*" element={<ModuleNotFound organizationPath={organizationPath} />} />
       </Routes>
     </main>

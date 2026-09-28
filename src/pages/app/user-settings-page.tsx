@@ -1,3 +1,4 @@
+import PersonalDocuments from './documents/personal-documents.tsx'
 import { useToastFeedback } from '../../component/ui/toast/toast-context.ts'
 import { liveQueryOptions } from '../../app/live-query.ts'
 import { useEffect, useState, type FormEvent } from 'react'
@@ -50,7 +51,8 @@ export default function UserSettingsPage() {
   const [profileError, setProfileError] = useState('')
   const [passwordError, setPasswordError] = useState('')
   const [message, setMessage] = useState('')
-  const [section, setSection] = useState<'profile' | 'security'>('profile')
+  const [section, setSection] = useState<'profile' | 'security' | 'documents'>(() => new URLSearchParams(window.location.search).get('section') === 'documents' ? 'documents' : 'profile')
+  useEffect(() => { if (new URLSearchParams(location.search).get('section') === 'documents') setSection('documents') }, [location.key, location.search])
   const sessions = useQuery({ ...liveQueryOptions, queryKey: ['auth-sessions'], queryFn: () => apiRequest<{ sessions: ActiveSession[] }>('/auth/sessions'), enabled: section === 'security' })
   const revokeSession = useMutation({ mutationFn: (session: ActiveSession) => apiRequest(`/auth/sessions/${session.id}`, { method: 'DELETE' }), onSuccess: async (_, session) => { if (session.current) { await logout(); navigate('/', { replace: true }) } else await queryClient.invalidateQueries({ queryKey: ['auth-sessions'] }) } })
   const revokeOthers = useMutation({ mutationFn: () => apiRequest('/auth/sessions/revoke-others', { method: 'POST', body: {} }), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['auth-sessions'] }) })
@@ -96,14 +98,17 @@ export default function UserSettingsPage() {
 
   const initial = user?.displayName.slice(0, 1).toUpperCase() ?? ''
   const requestedReturn = (location.state as { returnTo?: unknown } | null)?.returnTo
-  const returnTo = typeof requestedReturn === 'string' && requestedReturn.startsWith('/app/') && requestedReturn !== '/app/settings' ? requestedReturn : '/app'
+  const requestedOrganizationId = (location.state as { organizationId?: unknown } | null)?.organizationId ?? new URLSearchParams(location.search).get('organization')
+  const organizationId = typeof requestedOrganizationId === 'string' && /^[0-9a-f-]{36}$/i.test(requestedOrganizationId) ? requestedOrganizationId : typeof requestedReturn === 'string' ? requestedReturn.match(/^\/app\/organizations\/([0-9a-f-]{36})/i)?.[1] : undefined
+  const returnTo = typeof requestedReturn === 'string' && requestedReturn.startsWith('/app/') && requestedReturn !== '/app/settings' ? requestedReturn : organizationId ? `/app/organizations/${organizationId}` : '/app'
   const returnLabel = returnTo.startsWith('/app/organizations/') ? 'Вернуться в организацию' : 'К организациям'
   return <div className="app-page"><AppTopbar /><main className="account-settings-page">
     <Link className="app-back" to={returnTo}>{returnLabel}</Link>
     <header><p className="app-eyebrow">Личный профиль</p><h1>Настройки</h1>{section === 'profile' && <p>Данные профиля видят ваши коллеги в организациях Staffly.</p>}</header>
-    <nav className="account-settings-tabs" aria-label="Разделы настроек"><button className={section === 'profile' ? 'active' : ''} onClick={() => setSection('profile')}>Профиль</button><button className={section === 'security' ? 'active' : ''} onClick={() => setSection('security')}>Безопасность</button></nav>
+    <nav className="account-settings-tabs" aria-label="Разделы настроек"><button className={section === 'profile' ? 'active' : ''} onClick={() => setSection('profile')}>Профиль</button><button className={section === 'security' ? 'active' : ''} onClick={() => setSection('security')}>Безопасность</button><button className={section === 'documents' ? 'active' : ''} onClick={() => setSection('documents')}>Документы</button></nav>
 
 
+    {section === 'documents' && <PersonalDocuments organizationId={organizationId} />}
     {section === 'profile' && <section className="profile-editor">
       <aside><ImageUpload endpoint="/profile/avatar" imageUrl={user?.avatarUrl ?? null} name={user?.displayName ?? initial} avatarClassName="account-profile-card__avatar" onChange={(avatarUrl) => { if (user) updateUser({ ...user, avatarUrl }); void queryClient.invalidateQueries({ queryKey: ['organization-members'] }) }} onMessage={setMessage} onError={setProfileError} /><div className="profile-editor__identity"><span>Ваша учетная запись</span><h2>{user?.displayName}</h2><p>{user?.email}</p></div></aside>
       <form onSubmit={saveProfile} noValidate>

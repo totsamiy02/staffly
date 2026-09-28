@@ -3,7 +3,7 @@ import sharp from 'sharp'
 import { prisma } from '../db.ts'
 import { ApiError } from '../api-error.ts'
 import type { StoredFilePurpose } from '../../generated/prisma/enums.ts'
-import { deleteObject, writeObject } from './local-file-storage.ts'
+import { storage } from './provider.ts'
 import { getMembership } from '../organizations/permissions.ts'
 
 export const MAX_IMAGE_BYTES = 8 * 1024 * 1024
@@ -40,7 +40,7 @@ async function normalizeImage(input: unknown) {
 
 type RemoveObject = (objectKey: string) => Promise<void>
 
-export async function deletePendingFile(fileId: string, removeObject: RemoveObject = deleteObject) {
+export async function deletePendingFile(fileId: string, removeObject: RemoveObject = storage.delete) {
   const file = await prisma.storedFile.findFirst({ where: { id: fileId, pendingDeletionAt: { not: null } } })
   if (!file) return true
   try {
@@ -73,7 +73,7 @@ export async function cleanupPendingFiles(options: { limit?: number; removeObjec
 // cleanup record; successful binding clears it atomically with the owning object.
 export async function stageStoredFile(data: { objectKey: string; mimeType: string; size: number; checksumSha256: string; purpose: StoredFilePurpose; uploadedByUserId: string; organizationId?: string }, contents: Buffer) {
   const file = await prisma.storedFile.create({ data: { ...data, pendingDeletionAt: new Date(Date.now() + 60 * 60 * 1000) } })
-  try { await writeObject(file.objectKey, contents); return file }
+  try { await storage.put(file.objectKey, contents); return file }
   catch (error) {
     if (error && typeof error === 'object' && 'code' in error && error.code === 'EEXIST') await prisma.storedFile.delete({ where: { id: file.id } })
     else await deletePendingFile(file.id)

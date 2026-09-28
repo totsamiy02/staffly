@@ -7,6 +7,8 @@ export type ActiveOrganizationInvitation = { code: string | null; id: string; ty
 export type AccountNotification = { id: string; type: 'ABSENCE_REPORTED' | 'ABSENCE_CHANGED' | 'ABSENCE_CANCELLED' | 'ROLE_CHANGED' | 'REQUEST_CREATED' | 'REQUEST_APPROVED' | 'REQUEST_REJECTED' | 'REQUEST_CANCELLED'; requestId: string | null; title: string; message: string; createdAt: string; organization: { id: string; name: string; logoUrl: string | null } }
 
 export type HistoryNotification = {
+  actionable?: boolean
+  documentId?: string | null
   id: string
   source: 'event' | 'invite'
   type: string
@@ -20,4 +22,4 @@ export type HistoryNotification = {
   organization: { id: string; name: string; logoUrl: string | null }
   href: string | null
 }
-export type NotificationPage = { notifications: HistoryNotification[]; nextCursor: string | null; unreadCount: number }
+export type NotificationPage = { notifications: HistoryNotification[]; nextCursor: string | null; unreadCount: number; actionableCount?: number; pendingCount?: number }

@@ -41,7 +41,7 @@ export default function Select({ children, value, onChange, disabled, required, 
     trigger.current?.focus()
   }
   function navigate(event: KeyboardEvent, fromSearch = false) {
-    if (event.key === 'Escape') { event.stopPropagation(); setOpen(false); trigger.current?.focus(); return }
+    if (event.key === 'Escape' && open) { event.stopPropagation(); setOpen(false); trigger.current?.focus(); return }
     if (event.key === 'Tab') return
     if (fromSearch && event.key === ' ') return
     if (['ArrowDown', 'ArrowUp', 'Home', 'End', 'Enter', ' '].includes(event.key)) {

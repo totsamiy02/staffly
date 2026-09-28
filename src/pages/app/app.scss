@@ -706,3 +706,13 @@
 @keyframes floating-notice-in { from { opacity: 0; transform: translateX(8px); } }
 @keyframes floating-notice-out { to { opacity: 0; transform: translateX(8px); max-height: 0; padding-top: 0; padding-bottom: 0; border-width: 0; } }
 @media (prefers-reduced-motion: reduce) { .request-alert, .request-alert.is-closing { animation-duration: 1ms; } .schedule-modal.notification-history-backdrop > * { animation-duration: 1ms; } }
+
+.workspace-sidebar nav a .workspace-nav-badge { display: inline-grid; min-width: 20px; height: 20px; padding: 0 5px; margin-left: auto; place-items: center; border-radius: 99px; background: #1c1c1c; color: #fff; font-size: 11px; font-weight: 700; line-height: 1; }
+.workspace-shell--collapsed .workspace-sidebar nav a .workspace-nav-badge { position: absolute; right: 3px; top: 3px; margin: 0; min-width: 16px; height: 16px; font-size: 9px; }
+.account-settings-page { width: min(calc(100% - 56px), 1440px); }
+.workspace-content .documents-page .documents-heading h1 { font-size: clamp(30px, 4vw, 46px); line-height: 1.05; }
+.workspace-content :is(.documents-heading, .requests-heading, .schedule-heading, .settings-page > header) h1,
+.account-settings-page > header h1 { font-size: clamp(30px, 4vw, 46px); line-height: 1.05; letter-spacing: -.045em; }
+.workspace-content :is(.documents-page, .requests-page, .schedule-page, .settings-page) { width: 100%; max-width: 1440px; margin-inline: auto; }
+.workspace-sidebar nav a { position: relative; }
+.workspace-shell--collapsed .workspace-sidebar nav a .workspace-nav-badge { display: inline-grid; }
