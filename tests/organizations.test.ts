@@ -1483,10 +1483,42 @@ describe('documents: privacy, immutable storage and acknowledgement lifecycle', 
     assert.ok(saved.folder?.name)
     const scoped = await documentsService.personalDocuments(member.id, 1, '', folderOrg)
     assert.deepEqual(scoped.documents.map(document => document.id), [uploaded.id])
+    assert.deepEqual((await documentsService.listDocuments(member.id, folderOrg, documentListSchema.parse({ scope: 'mine' }))).documents.map(document => document.id), [uploaded.id])
+    assert.equal((await documentsService.listDocuments(owner.id, folderOrg, documentListSchema.parse({ scope: 'mine' }))).pagination.total, 0)
     assert.ok(!(await documentsService.personalDocuments(member.id, 1, '', org)).documents.some(document => document.id === uploaded.id))
     const emptyStarter = before.folders.find(folder => folder.name === 'Главная')!
     await documentsService.deleteFolder(owner.id, folderOrg, emptyStarter.id)
     assert.ok(!(await documentsService.listDocuments(owner.id, folderOrg, documentListSchema.parse({}))).folders.some(folder => folder.id === emptyStarter.id))
+  })
+  it('pins folders per user without exposing private or foreign folders', async () => {
+    const pinOrg = (await createOrganization(owner.id, { name: 'Pinned folders', description: null, timezone: 'Europe/Moscow' })).id
+    await prisma.organizationMember.create({ data: { organizationId: pinOrg, userId: member.id } })
+    const publicFolder = (await documentsService.saveFolder(owner.id, pinOrg, undefined, { name: 'Public', parentId: null })).id
+    const privateFolder = (await documentsService.saveFolder(owner.id, pinOrg, undefined, { name: 'Private', parentId: null })).id
+    await documentsService.uploadDocument(owner.id, pinOrg, pdf, 'application/pdf', 'public.pdf', { ...metadata(), folderId: publicFolder })
+    await documentsService.uploadDocument(owner.id, pinOrg, pdf, 'application/pdf', 'private.pdf', { ...metadata('ADMINS'), folderId: privateFolder })
+    await documentsService.setFolderPinned(owner.id, pinOrg, publicFolder, true)
+    assert.equal((await documentsService.listDocuments(owner.id, pinOrg, documentListSchema.parse({}))).folders.find(folder => folder.id === publicFolder)?.pinned, true)
+    assert.equal((await documentsService.listDocuments(member.id, pinOrg, documentListSchema.parse({}))).folders.find(folder => folder.id === publicFolder)?.pinned, false)
+    await documentsService.setFolderPinned(member.id, pinOrg, publicFolder, true)
+    assert.equal((await documentsService.listDocuments(member.id, pinOrg, documentListSchema.parse({}))).folders.find(folder => folder.id === publicFolder)?.pinned, true)
+    await expectCode(() => documentsService.setFolderPinned(member.id, pinOrg, privateFolder, true), 'FOLDER_NOT_FOUND')
+    await expectCode(() => documentsService.setFolderPinned(member.id, pinOrg, root, true), 'FOLDER_NOT_FOUND')
+    await documentsService.setFolderPinned(member.id, pinOrg, publicFolder, false)
+    assert.equal((await documentsService.listDocuments(member.id, pinOrg, documentListSchema.parse({}))).folders.find(folder => folder.id === publicFolder)?.pinned, false)
+  })
+  it('retains acknowledged documents in the employee acknowledgement history', async () => {
+    const historyOrg = (await createOrganization(owner.id, { name: 'Acknowledgement history', description: null, timezone: 'Europe/Moscow' })).id
+    const recipient = (await prisma.organizationMember.create({ data: { organizationId: historyOrg, userId: member.id } })).id
+    const document = await documentsService.uploadDocument(owner.id, historyOrg, pdf, 'application/pdf', 'history.pdf', { ...metadata(), folderId: null })
+    await documentsService.assignAcknowledgements(owner.id, historyOrg, document.id, assignmentSchema.parse({ recipients: 'members', memberIds: [recipient] }))
+    assert.equal((await documentsService.listDocuments(member.id, historyOrg, documentListSchema.parse({ scope: 'required' }))).pagination.total, 1)
+    assert.equal((await documentsService.listDocuments(member.id, historyOrg, documentListSchema.parse({ scope: 'acknowledgements' }))).pagination.total, 1)
+    await documentsService.acknowledgeDocument(member.id, historyOrg, document.id)
+    assert.equal((await documentsService.listDocuments(member.id, historyOrg, documentListSchema.parse({ scope: 'required' }))).pagination.total, 0)
+    const history = await documentsService.listDocuments(member.id, historyOrg, documentListSchema.parse({ scope: 'acknowledgements' }))
+    assert.equal(history.pagination.total, 1)
+    assert.equal(history.documents[0].acknowledgement?.state, 'ACKNOWLEDGED')
   })
   it('allows changing visibility of an existing document inside a folder', async () => {
     const accessOrg = (await createOrganization(owner.id, { name: 'Folder access', description: null, timezone: 'Europe/Moscow' })).id

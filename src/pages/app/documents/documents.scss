@@ -140,3 +140,10 @@
 .document-required .document-row { padding-inline: 8px; }
 .personal-documents > .app-state { display: grid; min-height: 180px; place-items: center; margin-top: 20px; padding: 24px; border: 1px solid #e2e2e2; border-radius: 10px; background: #fff; color: #707070; text-align: center; }
 .personal-documents > p:first-of-type { margin: 4px 0 0; }
+
+.document-folder-pin { color: #8b651e; font-size: 13px; vertical-align: 1px; }
+.document-row--awaiting { background: #fffdfa; }
+.document-row--acknowledged { background: #f7fbf8; }
+.document-status--awaiting, .document-status--acknowledged { display: inline-flex; align-items: center; width: fit-content; padding: 6px 10px; border-radius: 999px; font-weight: 700; }
+.document-status--awaiting { background: #fff1d6; color: #785218; }
+.document-status--acknowledged { background: #e7f4ea; color: #28663b; }

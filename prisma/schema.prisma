@@ -34,6 +34,7 @@ model User {
   sensitiveActions         SensitiveActionToken[]   @relation("SensitiveActionOwner")
   targetedSensitiveActions SensitiveActionToken[]   @relation("SensitiveActionTarget")
   accountNotifications     AccountNotification[]
+  documentFolderPins       DocumentFolderPin[]
   avatar                   StoredFile?              @relation("UserAvatar", fields: [avatarFileId], references: [id], onDelete: SetNull)
   uploadedFiles            StoredFile[]             @relation("FileUploader")
 
@@ -603,8 +604,20 @@ model DocumentFolder {
   parent DocumentFolder? @relation("FolderTree", fields: [parentId], references: [id], onDelete: Restrict)
   children DocumentFolder[] @relation("FolderTree")
   documents Document[]
+  pins DocumentFolderPin[]
   @@index([organizationId, parentId])
   @@map("document_folders")
+}
+
+model DocumentFolderPin {
+  userId String @map("user_id") @db.Uuid
+  folderId String @map("folder_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  folder DocumentFolder @relation(fields: [folderId], references: [id], onDelete: Cascade)
+  @@id([userId, folderId])
+  @@index([folderId])
+  @@map("document_folder_pins")
 }
 
 model Document {

@@ -58,18 +58,21 @@ export async function listDocuments(userId: string, organizationId: string, opti
   const actor = await getMembership(userId, organizationId), manager = isManager(actor)
   if (['control', 'history'].includes(options.scope) || (options.targetMemberId && options.targetMemberId !== actor.id)) requireOrganizationRole(actor.role, ['OWNER', 'ADMIN'])
   const where: Prisma.DocumentWhereInput = { organizationId, ...visibleWhere(actor), deletedAt: options.scope === 'history' ? { not: null } : null, displayName: options.search ? { contains: options.search, mode: 'insensitive' } : undefined, visibility: options.visibility }
-  if (options.scope === 'personal') { where.visibility = 'PRIVATE_MEMBER'; where.targetMemberId = options.targetMemberId ?? (manager ? undefined : actor.id) }
+  if (options.scope === 'mine') { where.visibility = 'PRIVATE_MEMBER'; where.targetMemberId = actor.id }
+  else if (options.scope === 'personal') { where.visibility = 'PRIVATE_MEMBER'; where.targetMemberId = options.targetMemberId ?? (manager ? undefined : actor.id) }
   else if (options.targetMemberId) { where.visibility = 'PRIVATE_MEMBER'; where.targetMemberId = options.targetMemberId }
   else if (!manager && options.scope === 'workspace') where.visibility = 'ORGANIZATION'
   if (options.fileType) {
     const types = { pdf: ['application/pdf'], office: ['application/msword', 'application/vnd.ms-excel', 'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'], image: ['image/jpeg', 'image/png', 'image/webp'], text: ['text/plain', 'text/csv'] }
     where.storedFile = { mimeType: { in: types[options.fileType] } }
   }
+  if (options.scope === 'acknowledgements') where.acknowledgements = { some: { memberId: actor.id, cancelledAt: null } }
   if (options.scope === 'required') where.acknowledgements = { some: { memberId: actor.id, acknowledgedAt: null, cancelledAt: null } }
   if (options.scope === 'control') where.acknowledgements = { some: { acknowledgedAt: null, cancelledAt: null } }
   if (options.scope === 'workspace' && !options.search) where.folderId = options.folderId ?? null
   const [items, total] = await prisma.$transaction([prisma.document.findMany({ where, include: { ...include, acknowledgements: manager ? { include: acknowledgementInclude } : { where: { memberId: actor.id }, include: acknowledgementInclude } }, orderBy: [options.sort === 'name' ? { displayName: 'asc' } : options.sort === 'created' ? { createdAt: 'desc' } : { updatedAt: 'desc' }, { id: 'desc' }], skip: (options.page - 1) * options.pageSize, take: options.pageSize }), prisma.document.count({ where })])
-  const allFolders = await prisma.documentFolder.findMany({ where: { organizationId }, orderBy: { name: 'asc' }, select: { id: true, parentId: true, name: true } })
+  const [allFolders, pins] = await Promise.all([prisma.documentFolder.findMany({ where: { organizationId }, orderBy: { name: 'asc' }, select: { id: true, parentId: true, name: true } }), prisma.documentFolderPin.findMany({ where: { userId, folder: { organizationId } }, select: { folderId: true } })])
+  const pinnedIds = new Set(pins.map(pin => pin.folderId))
   // Counts use the same library permissions, never private files visible only in another scope.
   const grouped = await prisma.document.groupBy({ by: ['folderId'], where: { organizationId, deletedAt: null, ...(manager ? {} : { visibility: 'ORGANIZATION' }), folderId: { not: null } }, _count: { _all: true } })
   const counts = new Map<string, number>(), parents = new Map(allFolders.map(folder => [folder.id, folder.parentId]))
@@ -77,7 +80,7 @@ export async function listDocuments(userId: string, organizationId: string, opti
     let id = group.folderId; const seen = new Set<string>()
     while (id && !seen.has(id)) { seen.add(id); counts.set(id, (counts.get(id) ?? 0) + group._count._all); id = parents.get(id) ?? null }
   }
-  return { documents: items.map(item => documentDto(item, actor, actor.organization.timezone)), folders: allFolders.filter(folder => manager || counts.has(folder.id)).map(folder => ({ ...folder, documentCount: counts.get(folder.id) ?? 0 })), uploadMaxBytes: MAX_DOCUMENT_BYTES, pagination: { page: options.page, pageSize: options.pageSize, total, pages: Math.max(1, Math.ceil(total / options.pageSize)) } }
+  return { documents: items.map(item => documentDto(item, actor, actor.organization.timezone)), folders: allFolders.filter(folder => manager || counts.has(folder.id)).map(folder => ({ ...folder, pinned: pinnedIds.has(folder.id), documentCount: counts.get(folder.id) ?? 0 })), uploadMaxBytes: MAX_DOCUMENT_BYTES, pagination: { page: options.page, pageSize: options.pageSize, total, pages: Math.max(1, Math.ceil(total / options.pageSize)) } }
 }
 export async function getDocument(userId: string, organizationId: string, documentId: string) {
   return transaction(userId, organizationId, async (tx, actor) => {
@@ -183,6 +186,25 @@ export async function recordDocumentOpened(userId: string, organizationId: strin
   return transaction(userId, organizationId, async (tx, actor) => {
     const doc = await accessible(tx, actor, documentId); if (doc.deletedAt) return
     await tx.documentAcknowledgement.updateMany({ where: { documentId, memberId: actor.id, openedAt: null, cancelledAt: null, acknowledgedAt: null }, data: { openedAt: new Date() } })
+  })
+}
+export async function setFolderPinned(userId: string, organizationId: string, folderId: string, pinned: boolean) {
+  return transaction(userId, organizationId, async (tx, actor) => {
+    const folder = await tx.documentFolder.findFirst({ where: { id: folderId, organizationId } })
+    if (!folder) throw new ApiError(404, 'FOLDER_NOT_FOUND', 'Папка не найдена.')
+    if (!isManager(actor)) {
+      const folders = await tx.documentFolder.findMany({ where: { organizationId }, select: { id: true, parentId: true } })
+      const descendants = new Set([folderId])
+      let previous = -1
+      while (previous !== descendants.size) {
+        previous = descendants.size
+        for (const child of folders) if (child.parentId && descendants.has(child.parentId)) descendants.add(child.id)
+      }
+      const visible = await tx.document.count({ where: { organizationId, folderId: { in: [...descendants] }, deletedAt: null, visibility: 'ORGANIZATION' } })
+      if (!visible) throw new ApiError(404, 'FOLDER_NOT_FOUND', 'Папка не найдена.')
+    }
+    if (pinned) await tx.documentFolderPin.upsert({ where: { userId_folderId: { userId, folderId } }, create: { userId, folderId }, update: {} })
+    else await tx.documentFolderPin.deleteMany({ where: { userId, folderId } })
   })
 }
 export async function saveFolder(userId: string, organizationId: string, folderId: string | undefined, data: { name: string; parentId: string | null }) {

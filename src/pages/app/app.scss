@@ -669,8 +669,7 @@
 @media (max-width: 600px) { .notification-history-modal { width: calc(100vw - 16px); height: 94dvh; } .notification-history-modal .notifications-filter { padding: 12px; } }
 
 .notification-item__top { display: flex; align-items: center; gap: 8px; float: right; margin-left: 10px; color: #888; font-size: 11px; }
-.notification-unread-dot { width: 6px; height: 6px; border-radius: 50%; }
-.notification-unread-dot[data-unread="true"] { background: #222; }
+.notification-unread-dot { display: inline-block; flex: 0 0 6px; width: 6px; height: 6px; border-radius: 50%; background: #222; }
 .notification-context-menu > button { padding: 0 6px; cursor: pointer; font-size: 18px; }
 .notification-context-menu__options { position: absolute; right: 0; top: 25px; z-index: 3; display: grid; min-width: 215px; padding: 5px; border: 1px solid #ddd; border-radius: 10px; background: #fff; box-shadow: 0 5px 20px #0002; }
 .notification-context-menu__options button { padding: 10px; text-align: left; white-space: nowrap; cursor: pointer; }

@@ -30,7 +30,7 @@ export default function ProfileMenu({ user, organization, open, busy, onToggle, 
     </button>
     {open && <section className="topbar-popover topbar-popover--profile" aria-label="Профиль пользователя">
       <div className="profile-preview"><Avatar url={user.avatarUrl} name={initial} className="app-avatar profile-preview__avatar" eager /><div><strong>{user.displayName}</strong><span>{user.email}</span>{organization && <small><RoleBadge role={organization.role} /> в «{organization.name}»</small>}</div></div>
-      <nav><Link to={organization ? `/app/settings?section=documents&organization=${organization.id}` : "/app/settings?section=documents"} state={{ returnTo: location.pathname + location.search }} onClick={onClose}><span>Мои документы</span><small>{organization ? 'Личные документы этой организации' : 'Личные документы по организациям'}</small></Link><Link to="/app/settings" state={{ returnTo: location.pathname + location.search }} onClick={onClose}><span>Настройки профиля</span><small>Пароль и данные аккаунта</small></Link></nav>
+      <nav><Link to={organization ? `/app/organizations/${organization.id}/documents?section=mine` : "/app/settings?section=documents"} state={{ returnTo: location.pathname + location.search }} onClick={onClose}><span>Мои документы</span><small>{organization ? 'Личные документы этой организации' : 'Личные документы по организациям'}</small></Link><Link to="/app/settings" state={{ returnTo: location.pathname + location.search }} onClick={onClose}><span>Настройки профиля</span><small>Пароль и данные аккаунта</small></Link></nav>
       <button className="profile-preview__logout" type="button" disabled={busy} onClick={onLogout}>{busy ? 'Выходим…' : 'Выйти из аккаунта'}</button>
     </section>}
   </div>

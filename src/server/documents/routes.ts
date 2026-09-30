@@ -6,7 +6,7 @@ import { requireAuth, type AuthenticatedRequest } from '../auth.ts'
 import { ApiError } from '../api-error.ts'
 import { assignSchema, folderSchema, listSchema, metadataSchema, paramsSchema } from './schemas.ts'
 import { MAX_DOCUMENT_BYTES } from './file-validation.ts'
-import { acknowledgeDocument, assignAcknowledgements, cancelAcknowledgement, deleteDocument, deleteFolder, deliverDocument, documentMembers, documentProgress, getDocument, listDocuments, personalDocuments, recordDocumentOpened, saveFolder, updateDocument, uploadDocument } from './service.ts'
+import { acknowledgeDocument, assignAcknowledgements, cancelAcknowledgement, deleteDocument, deleteFolder, deliverDocument, documentMembers, documentProgress, getDocument, listDocuments, personalDocuments, recordDocumentOpened, saveFolder, setFolderPinned, updateDocument, uploadDocument } from './service.ts'
 const router = Router()
 const mutate = rateLimit({ windowMs: 60000, limit: 60, standardHeaders: 'draft-8', legacyHeaders: false })
 const upload = rateLimit({ windowMs: 15 * 60000, limit: 20, standardHeaders: 'draft-8', legacyHeaders: false })
@@ -46,5 +46,7 @@ router.post(`${base}/:documentId/acknowledgements/:acknowledgementId/cancel`, mu
 router.get(`${base}/:documentId/progress`, async (request, response) => { const { organizationId, documentId } = parse(paramsSchema, request.params); const { page } = parse(listSchema, request.query); response.json(await documentProgress(user(request), organizationId, documentId!, page)) })
 router.post('/organizations/:organizationId/document-folders', mutate, async (request, response) => { const { organizationId } = parse(paramsSchema, request.params); response.status(201).json({ folder: await saveFolder(user(request), organizationId, undefined, parse(folderSchema, request.body)) }) })
 router.patch('/organizations/:organizationId/document-folders/:folderId', mutate, async (request, response) => { const { organizationId, folderId } = parse(paramsSchema, request.params); response.json({ folder: await saveFolder(user(request), organizationId, folderId!, parse(folderSchema, request.body)) }) })
+router.put('/organizations/:organizationId/document-folders/:folderId/pin', mutate, async (request, response) => { const { organizationId, folderId } = parse(paramsSchema, request.params); await setFolderPinned(user(request), organizationId, folderId!, true); response.status(204).end() })
+router.delete('/organizations/:organizationId/document-folders/:folderId/pin', mutate, async (request, response) => { const { organizationId, folderId } = parse(paramsSchema, request.params); await setFolderPinned(user(request), organizationId, folderId!, false); response.status(204).end() })
 router.delete('/organizations/:organizationId/document-folders/:folderId', mutate, async (request, response) => { const { organizationId, folderId } = parse(paramsSchema, request.params); await deleteFolder(user(request), organizationId, folderId!); response.status(204).end() })
 export default router
