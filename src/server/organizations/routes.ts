@@ -1,3 +1,8 @@
+import { prisma } from '../db.ts'
+import { getMembership, requireOrganizationRole } from './permissions.ts'
+import { scopedLocationId } from './location-context.ts'
+import { archiveLocation, assignLocationMember, deleteTeam, listLocations, listTeams, locationMemberBody, removeLocationMember, saveLocation, saveTeam, teamBody, transferBody, transferMember } from './location-service.ts'
+import { locationBody } from './schemas.ts'
 import { listNotificationHistory, readHistoryNotification, updateAllNotifications } from './notification-service.ts'
 import { Router, type Request } from 'express'
 import { rateLimit } from 'express-rate-limit'
@@ -5,7 +10,7 @@ import { z } from 'zod'
 import { requireAuth, type AuthenticatedRequest } from '../auth.ts'
 import { deliverOrganizationCreated, deliverOrganizationInvitation, deliverSensitiveActionCode } from '../mail.ts'
 import { ApiError } from '../api-error.ts'
-import { changeMemberRole, createOrganization, getOrganization, listAccountNotifications, listMembers, listMembersPage, listOrganizations, readAccountNotification, removeMember, updateOrganization } from './organization-service.ts'
+import { createOrganization, getOrganization, listAccountNotifications, listMembers, listMembersPage, listOrganizations, readAccountNotification, removeMember, updateOrganization } from './organization-service.ts'
 import { acceptCodeInvitation, acceptEmailInvitation, createCodeInvitation, createEmailInvitation, listActiveOrganizationInvitations, listPendingInvitations, previewCodeInvitation, previewEmailInvitation, rejectEmailInvitation, revokeInvitation } from './invitation-service.ts'
 import { confirmOrganizationDeletion, confirmOwnershipTransfer, requestOrganizationDeletion, requestOwnershipTransfer } from './sensitive-action-service.ts'
 import { createOrganizationBody, emailInvitationBody, inviteCodeBody, inviteParams, memberListQuery, memberParams, organizationIdParams, ownershipRequestBody, roleBody, sensitiveCodeBody, updateOrganizationBody } from './schemas.ts'
@@ -26,7 +31,7 @@ function auth(request: Request) { return (request as AuthenticatedRequest).auth!
 
 router.get('/organizations', async (request, response) => response.json({ organizations: await listOrganizations(auth(request).userId) }))
 router.get('/notifications', async (request, response) => {
-  const options = parse(z.object({ limit: z.coerce.number().int().min(1).max(50).default(20), cursor: z.string().max(512).optional(), unread: z.enum(['true', 'false']).optional(), organizationId: z.string().uuid().optional(), category: z.enum(['SHIFT', 'REQUEST', 'ABSENCE', 'ROLE', 'ORGANIZATION', 'DOCUMENT']).optional() }), request.query)
+  const options = parse(z.object({ limit: z.coerce.number().int().min(1).max(50).default(20), cursor: z.string().max(512).optional(), unread: z.enum(['true', 'false']).optional(), organizationId: z.string().uuid().optional(), locationId: z.string().uuid().optional(), category: z.enum(['SHIFT', 'REQUEST', 'ABSENCE', 'ROLE', 'ORGANIZATION', 'DOCUMENT']).optional() }), request.query)
   response.json(await listNotificationHistory(auth(request).userId, auth(request).email, { ...options, unread: options.unread === 'true' }))
 })
 router.post('/notifications/:id/read', async (request, response) => {
@@ -87,16 +92,21 @@ router.get('/organizations/:organizationId/members', async (request, response) =
 router.patch('/organizations/:organizationId/members/:memberId/role', async (request, response) => {
   const { organizationId, memberId } = parse(memberParams, request.params)
   const { role } = parse(roleBody, request.body)
-  const member = await changeMemberRole(auth(request).userId, organizationId, memberId, role)
+  const member = await assignLocationMember(auth(request).userId, organizationId, scopedLocationId(organizationId)!, memberId, role)
   response.json({ member })
 })
 
 router.delete('/organizations/:organizationId/members/:memberId', async (request, response) => {
   const { organizationId, memberId } = parse(memberParams, request.params)
-  await removeMember(auth(request).userId, organizationId, memberId)
+  await removeLocationMember(auth(request).userId, organizationId, scopedLocationId(organizationId)!, memberId)
   response.status(204).end()
 })
 
+router.delete('/organizations/:organizationId/members/:memberId/organization', async (request, response) => {
+  const { organizationId, memberId } = parse(memberParams, request.params)
+  const actor = await getMembership(auth(request).userId, organizationId); requireOrganizationRole(actor.organizationRole, ['OWNER'])
+  await removeMember(auth(request).userId, organizationId, memberId); response.status(204).end()
+})
 router.post('/organizations/:organizationId/invitations/email', invitationLimiter, async (request, response) => {
   const { organizationId } = parse(organizationIdParams, request.params)
   const { email } = parse(emailInvitationBody, request.body)
@@ -180,4 +190,49 @@ router.post('/organizations/:organizationId/delete/confirm', sensitiveLimiter, a
   response.json(await confirmOrganizationDeletion(auth(request).userId, organizationId, code))
 })
 
+router.get('/organizations/:organizationId/locations', async (request, response) => {
+  const { organizationId } = parse(organizationIdParams, request.params)
+  response.json({ locations: await listLocations(auth(request).userId, organizationId) })
+})
+router.post('/organizations/:organizationId/locations', async (request, response) => {
+  const { organizationId } = parse(organizationIdParams, request.params)
+  response.status(201).json({ location: await saveLocation(auth(request).userId, organizationId, null, parse(locationBody, request.body)) })
+})
+router.patch('/organizations/:organizationId/locations/:locationId', async (request, response) => {
+  const { organizationId, locationId } = parse(organizationIdParams.extend({ locationId: z.uuid() }), request.params)
+  response.json({ location: await saveLocation(auth(request).userId, organizationId, locationId, parse(locationBody, request.body)) })
+})
+router.delete('/organizations/:organizationId/locations/:locationId', async (request, response) => {
+  const { organizationId, locationId } = parse(organizationIdParams.extend({ locationId: z.uuid() }), request.params)
+  await archiveLocation(auth(request).userId, organizationId, locationId); response.status(204).end()
+})
+router.post('/organizations/:organizationId/locations/:locationId/members', async (request, response) => {
+  const { organizationId, locationId } = parse(organizationIdParams.extend({ locationId: z.uuid() }), request.params)
+  const { memberId, role } = parse(locationMemberBody, request.body)
+  response.json({ member: await assignLocationMember(auth(request).userId, organizationId, locationId, memberId, role) })
+})
+router.get('/organizations/:organizationId/all-members', async (request, response) => {
+  const { organizationId } = parse(organizationIdParams, request.params)
+  await getMembership(auth(request).userId, organizationId)
+  // The organization directory is public to its members, like point calendars.
+  const members = await prisma.organizationMember.findMany({ where: { organizationId, leftAt: null, user: { deletedAt: null } }, select: { id: true, user: { select: { email: true, firstName: true, lastName: true } }, locationMemberships: { where: { leftAt: null }, select: { locationId: true, role: true } } } })
+  response.json({ members: members.map(m => ({ id: m.id, displayName: [m.user.lastName, m.user.firstName].filter(Boolean).join(' ') || m.user.email, locations: m.locationMemberships })) })
+})
+router.get('/organizations/:organizationId/teams', async (request, response) => response.json({ teams: await listTeams(auth(request).userId, parse(organizationIdParams, request.params).organizationId) }))
+router.post('/organizations/:organizationId/teams', async (request, response) => response.status(201).json({ team: await saveTeam(auth(request).userId, parse(organizationIdParams, request.params).organizationId, null, parse(teamBody, request.body)) }))
+router.patch('/organizations/:organizationId/teams/:teamId', async (request, response) => {
+  const { organizationId, teamId } = parse(organizationIdParams.extend({ teamId: z.uuid() }), request.params)
+  response.json({ team: await saveTeam(auth(request).userId, organizationId, teamId, parse(teamBody, request.body)) })
+})
+router.delete('/organizations/:organizationId/teams/:teamId', async (request, response) => {
+  const { organizationId, teamId } = parse(organizationIdParams.extend({ teamId: z.uuid() }), request.params)
+  await deleteTeam(auth(request).userId, organizationId, teamId); response.status(204).end()
+})
+router.post('/organizations/:organizationId/transfers', async (request, response) => response.status(201).json({ transfer: await transferMember(auth(request).userId, parse(organizationIdParams, request.params).organizationId, parse(transferBody, request.body)) }))
+router.get('/organizations/:organizationId/transfers', async (request, response) => {
+  const { organizationId } = parse(organizationIdParams, request.params)
+  const actor = await getMembership(auth(request).userId, organizationId)
+  requireOrganizationRole(actor.role, ['OWNER', 'ADMIN'])
+  response.json({ transfers: await prisma.locationTransfer.findMany({ where: { organizationId, OR: [{ fromLocationId: actor.locationId }, { toLocationId: actor.locationId }] }, include: { member: { include: { user: { select: { firstName: true, lastName: true, email: true } } } }, fromLocation: { select: { name: true } }, toLocation: { select: { name: true } } }, orderBy: { createdAt: 'desc' }, take: 100 }) })
+})
 export default router

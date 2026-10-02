@@ -19,26 +19,26 @@ function formatDescription(extension: string) {
   if (['ppt', 'pptx'].includes(extension)) return { title: 'Презентация PowerPoint', hint: 'Скачайте файл, чтобы открыть презентацию на устройстве.' }
   return { title: 'Файл без предпросмотра', hint: 'Скачайте файл, чтобы открыть его на устройстве.' }
 }
-export default function DocumentDrawer({ organizationId, documentId, manager, onClose, onEdit, onAssign, onDelete, onRevision, folders = [] }: { organizationId: string; documentId: string; manager: boolean; folders?: Folder[]; onRevision?: (item: DocumentItem) => void; onClose: () => void; onEdit?: (item: DocumentItem) => void; onAssign?: (item: DocumentItem) => void; onDelete?: (item: DocumentItem) => void }) {
+export default function DocumentDrawer({ organizationId, documentId, manager, pointId, onClose, onEdit, onAssign, onDelete, onRevision, folders = [] }: { organizationId: string; documentId: string; manager: boolean; pointId?: string | null; folders?: Folder[]; onRevision?: (item: DocumentItem) => void; onClose: () => void; onEdit?: (item: DocumentItem) => void; onAssign?: (item: DocumentItem) => void; onDelete?: (item: DocumentItem) => void }) {
   const toast = useToast()
-  const { apiRequest, previewFile, downloadFile } = useAuth(), refresh = useDocumentRefresh()
-  const path = documentPath(organizationId, documentId)
-  const doc = useQuery({ ...liveQueryOptions, queryKey: ['document', organizationId, documentId], queryFn: () => apiRequest<{ document: DocumentItem }>(path), retry: false })
+  const { locationId, apiRequest, previewFile, downloadFile } = useAuth(), refresh = useDocumentRefresh()
+  const path = documentPath(organizationId, documentId) + (pointId ? `?locationId=${pointId}` : '')
+  const doc = useQuery({ ...liveQueryOptions, queryKey: ['document', organizationId, documentId, pointId ?? locationId], queryFn: () => apiRequest<{ document: DocumentItem }>(path), retry: false })
   const [preview, setPreview] = useState(''), [text, setText] = useState(''), [previewLoaded, setPreviewLoaded] = useState(false)
   const [error, setError] = useState(''), [fileAction, setFileAction] = useState<'preview' | 'download' | null>(null)
   const [showRecipients, setShowRecipients] = useState(false), [progressPage, setProgressPage] = useState(1), [confirmCancel, setConfirmCancel] = useState<string | null>(null)
   const fileBusy = fileAction !== null
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview) }, [preview])
-  const progress = useQuery({ ...liveQueryOptions, queryKey: ['document-progress', organizationId, documentId, progressPage], queryFn: () => apiRequest<{ recipients: Recipient[]; pagination: { pages: number; total: number } }>(`${path}/progress?page=${progressPage}`), enabled: manager && showRecipients && Boolean(doc.data), retry: false })
-  const ack = useMutation({ mutationFn: () => apiRequest(`${path}/acknowledge`, { method: 'POST' }), onSuccess: async () => { await refresh(); toast('Ознакомление подтверждено.') } })
-  const cancel = useMutation({ mutationFn: (id: string) => apiRequest(`${path}/acknowledgements/${id}/cancel`, { method: 'POST' }), onSuccess: async () => { setConfirmCancel(null); await refresh() } })
+  const progress = useQuery({ ...liveQueryOptions, queryKey: ['document-progress', organizationId, documentId, progressPage, locationId], queryFn: () => apiRequest<{ recipients: Recipient[]; pagination: { pages: number; total: number } }>(`${documentPath(organizationId, documentId)}/progress?page=${progressPage}${pointId ? `&locationId=${pointId}` : ''}`), enabled: manager && Boolean(doc.data?.document.canManage) && showRecipients && Boolean(doc.data), retry: false })
+  const ack = useMutation({ mutationFn: () => apiRequest(`${documentPath(organizationId, documentId)}/acknowledge`, { method: 'POST' }), onSuccess: async () => { await refresh(); toast('Ознакомление подтверждено.') } })
+  const cancel = useMutation({ mutationFn: (id: string) => apiRequest(`${documentPath(organizationId, documentId)}/acknowledgements/${id}/cancel`, { method: 'POST' }), onSuccess: async () => { setConfirmCancel(null); await refresh() } })
   async function openFile(action: 'preview' | 'download') {
     if (fileBusy) return
     setFileAction(action); setError('')
     try {
-      if (action === 'download') await downloadFile(`${path}/content?action=download`, doc.data!.document.fileName, 'POST')
+      if (action === 'download') await downloadFile(`${documentPath(organizationId, documentId)}/content?action=download${pointId ? `&locationId=${pointId}` : ''}`, doc.data!.document.fileName, 'POST')
       else {
-        const blob = await previewFile(`${path}/content?action=preview`, 'POST')
+        const blob = await previewFile(`${documentPath(organizationId, documentId)}/content?action=preview${pointId ? `&locationId=${pointId}` : ''}`, 'POST')
         if (blob.type.startsWith('text/plain')) setText(await blob.text())
         else setPreview(URL.createObjectURL(blob))
         setPreviewLoaded(true)
@@ -60,7 +60,7 @@ export default function DocumentDrawer({ organizationId, documentId, manager, on
   const description = formatDescription(extension)
   const activeProgress = item?.progress
 
-  if (showRecipients && item && manager) return <DocumentDialog key="recipients" title="Ознакомление сотрудников" onClose={() => setShowRecipients(false)} onEscape={() => setShowRecipients(false)} className="document-recipients-dialog">
+  if (showRecipients && item && manager && item.canManage) return <DocumentDialog key="recipients" title="Ознакомление сотрудников" onClose={() => setShowRecipients(false)} onEscape={() => setShowRecipients(false)} className="document-recipients-dialog">
     <p className="document-recipients-title">{item.displayName}</p>
     {activeProgress && <div className="document-progress__summary"><span>Ознакомились: {activeProgress.acknowledged} из {activeProgress.total}</span><span>Ожидают: {activeProgress.total - activeProgress.acknowledged}</span></div>}
     {progress.isLoading ? <div className="app-state" role="status"><span className="app-spinner" />Загружаем статусы…</div> : progress.isError ? <div className="app-state" role="alert"><p>Не удалось загрузить статусы.</p><button className="app-secondary" onClick={() => void progress.refetch()}>Повторить</button></div> : !progress.data?.recipients.some(recipient => !recipient.cancelledAt) ? <p>Активных назначений нет.</p> : progress.data.recipients.filter(recipient => !recipient.cancelledAt).map(recipient => <article className="document-recipient" key={recipient.id}>
@@ -76,7 +76,7 @@ export default function DocumentDrawer({ organizationId, documentId, manager, on
   return <DocumentDialog key="viewer" viewer title={item?.displayName ?? 'Документ'} onClose={onClose} className={item?.previewable ? 'document-viewer--preview' : 'document-viewer--compact'} headerContent={<header className="document-viewer-header">
     <div className="document-viewer-heading"><span className="document-viewer-file-icon"><FileIcon /></span><div><h2>{item?.displayName ?? 'Документ'}</h2>{item && <p>{extension.toUpperCase()} · {sizeLabel(item.size)}</p>}</div></div>
     <div className="document-viewer-header__actions">{item && <button className="app-primary" disabled={fileBusy} onClick={() => void openFile('download')}>{fileAction === 'download' ? 'Скачиваем…' : 'Скачать'}</button>}
-      {manager && item && !item.deletedAt && <DocumentActionsMenu label="Действия с документом">
+      {manager && item?.canManage && item && !item.deletedAt && <DocumentActionsMenu label="Действия с документом">
         {onEdit && <><button onClick={() => onEdit(item)}>Переименовать</button><button onClick={() => onEdit(item)}>Переместить</button><button onClick={() => onEdit(item)}>Изменить доступ</button></>}
         {onRevision && <button onClick={() => onRevision(item)}>Загрузить новую редакцию</button>}
         {onDelete && <button className="document-action-delete" onClick={() => onDelete(item)}>Удалить документ</button>}
@@ -93,7 +93,7 @@ export default function DocumentDrawer({ organizationId, documentId, manager, on
         {item.deletedAt && <p className="app-alert">Документ удалён. История сохранена.</p>}
         <section><h3>Сведения</h3><dl className="document-viewer-facts"><dt>Папка</dt><dd>{item.folderId ? folders.find(folder => folder.id === item.folderId)?.name ?? 'В папке организации' : 'Без папки'}</dd><dt>Обновлён</dt><dd><time dateTime={item.updatedAt}>{new Date(item.updatedAt).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })}</time></dd><dt>Загрузил</dt><dd>{item.uploadedBy.name}</dd><dt>Имя файла</dt><dd>{item.fileName}</dd></dl></section>
         <section><h3>Доступ</h3><p className="document-viewer-access"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true"><rect x="4" y="8" width="12" height="9" rx="2" /><path d="M6 8V6a4 4 0 0 1 8 0v2" /></svg>{visibilityLabels[item.visibility]}</p>{item.targetMember && <p className="document-viewer-note">Относится к сотруднику: {item.targetMember.name}{item.targetMember.former ? ' · бывший сотрудник' : ''}</p>}{manager && !item.deletedAt && onEdit && <button className="document-viewer-link" onClick={() => onEdit(item)}>Изменить</button>}</section>
-        {manager && <section><h3>Ознакомление</h3>{activeProgress?.total ? <><p className="document-viewer-progress-label">Ознакомились {activeProgress.acknowledged} из {activeProgress.total}</p><progress className="document-viewer-progress-bar" aria-label="Прогресс ознакомления команды" value={activeProgress.acknowledged} max={activeProgress.total} /><button className="document-viewer-link" onClick={() => setShowRecipients(true)}>Посмотреть сотрудников</button></> : <><p className="document-viewer-note">Не назначено</p>{activeProgress?.cancelled ? <button className="document-viewer-link" onClick={() => setShowRecipients(true)}>История назначений</button> : null}</>}{!item.deletedAt && onAssign && <button className="document-viewer-link" onClick={() => onAssign(item)}>{activeProgress?.total ? 'Изменить получателей' : 'Назначить ознакомление'}</button>}</section>}
+        {manager && item.canManage && <section><h3>Ознакомление</h3>{activeProgress?.total ? <><p className="document-viewer-progress-label">Ознакомились {activeProgress.acknowledged} из {activeProgress.total}</p><progress className="document-viewer-progress-bar" aria-label="Прогресс ознакомления команды" value={activeProgress.acknowledged} max={activeProgress.total} /><button className="document-viewer-link" onClick={() => setShowRecipients(true)}>Посмотреть сотрудников</button></> : <><p className="document-viewer-note">Не назначено</p>{activeProgress?.cancelled ? <button className="document-viewer-link" onClick={() => setShowRecipients(true)}>История назначений</button> : null}</>}{!item.deletedAt && onAssign && <button className="document-viewer-link" onClick={() => onAssign(item)}>{activeProgress?.total ? 'Изменить получателей' : 'Назначить ознакомление'}</button>}</section>}
         {own && <section className="document-viewer-own-ack"><h3>Ваше ознакомление</h3>{own.assignedBy && <p className="document-viewer-note">Назначил {own.assignedBy}</p>}<p>{stateLabels[own.state]}</p>{own.acknowledgedAt && <p className="document-viewer-note">Подтверждено {new Date(own.acknowledgedAt).toLocaleString('ru-RU')}</p>}{own.comment && <p className="document-viewer-note">{own.comment}</p>}{!own.cancelledAt && !own.acknowledgedAt && !item.deletedAt && <><button className="app-primary" disabled={ack.isPending} onClick={() => ack.mutate()}>{ack.isPending ? 'Подтверждаем…' : 'Подтвердить ознакомление'}</button></>}{ack.error && <p className="form-inline-error" role="alert">{ack.error.message}</p>}</section>}
       </aside>
     </div>}

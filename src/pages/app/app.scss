@@ -226,12 +226,12 @@
 .organization-logo-editor { margin-bottom: 24px; padding-bottom: 24px; border-bottom: 1px solid #ededed; }
 .organization-logo-editor__preview { display: grid; width: 92px; height: 92px; flex: 0 0 92px; place-items: center; border-radius: 22px; background: #111; color: #fff; font-size: 28px; font-weight: 700; }
 .organization-profile-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
-.organization-profile-fields label { display: grid; gap: 7px; }
-.organization-profile-fields label > span { color: #555; font-size: 11px; font-weight: 700; }
-.organization-profile-fields input, .organization-profile-fields select, .organization-profile-fields textarea { width: 100%; border: 1px solid #d7d7d7; border-radius: 10px; outline: none; background: #fff; font: inherit; font-size: 13px; }
-.organization-profile-fields input, .organization-profile-fields select { min-height: 46px; padding: 0 13px; }
-.organization-profile-fields textarea { padding: 12px 13px; resize: vertical; }
-.organization-profile-fields input:focus, .organization-profile-fields select:focus, .organization-profile-fields textarea:focus { border-color: #777; box-shadow: 0 0 0 3px rgb(0 0 0 / 5%); }
+:is(.organization-profile-fields, .location-settings-form) label { display: grid; min-width: 0; gap: 7px; }
+:is(.organization-profile-fields, .location-settings-form) label > span:not(.staffly-time) { color: #555; font-size: 11px; font-weight: 700; }
+:is(.organization-profile-fields, .location-settings-form) :is(input, select, textarea) { width: 100%; min-width: 0; border: 1px solid #d7d7d7; border-radius: 10px; outline: none; background: #fff; font: inherit; font-size: 13px; font-weight: 400; }
+:is(.organization-profile-fields, .location-settings-form) :is(input, select) { min-height: 46px; padding: 0 13px; }
+:is(.organization-profile-fields, .location-settings-form) textarea { padding: 12px 13px; resize: vertical; }
+:is(.organization-profile-fields, .location-settings-form) :is(input, select, textarea):focus { border-color: #777; box-shadow: 0 0 0 3px rgb(0 0 0 / 5%); }
 .organization-profile-fields small { color: #999; font-size: 10px; text-align: right; }
 .organization-profile-editor__readonly { margin-top: 20px; padding: 14px; border-radius: 10px; background: #f5f5f5; color: #777; font-size: 12px; }
 .sensitive-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
@@ -715,3 +715,19 @@
 .workspace-content :is(.documents-page, .requests-page, .schedule-page, .settings-page) { width: 100%; max-width: 1440px; margin-inline: auto; }
 .workspace-sidebar nav a { position: relative; }
 .workspace-shell--collapsed .workspace-sidebar nav a .workspace-nav-badge { display: inline-grid; }
+
+.workspace-location { margin: 0 0 12px; padding: 0 10px; label { display: grid; gap: 7px; } label > span { color: #858585; font-size: 10px; font-weight: 600; } small { display: block; margin-top: 6px; padding-left: 30px; color: #858585; font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; } }
+.workspace-location__control { position: relative; display: flex; min-width: 0; align-items: center; gap: 10px; > svg { width: 17px; height: 17px; flex-shrink: 0; color: #777; } > strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; color: #333; } .staffly-control { min-height: 38px; padding: 8px 10px; border-color: transparent; border-radius: 8px; background: #f5f5f5; font-size: 12px; font-weight: 600; &:hover { background: #ededed; } } }
+.workspace-shell--collapsed .workspace-location { display: none; }
+.workspace-location-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; color: #777; font-size: 12px; strong { color: #555; font-weight: 600; } }
+.location-settings { display: grid; gap: 18px; .settings-card { align-items: start; } .settings-card--list { display: block; } .settings-card > header { min-width: 0; } .settings-card--list > header { margin-bottom: 20px; } p { line-height: 1.6; } }
+.location-settings-list { margin: 16px 0; > div { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; padding: 16px 0; border-bottom: 1px solid #e7e7e7; } p { margin: 6px 0; } small { color: #777; } }
+.location-settings-list:empty { display: none; }
+.location-settings > .settings-card > .location-settings-list { grid-column: 1 / -1; }
+.location-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.location-settings-form { display: grid; min-width: 0; gap: 16px; width: 100%; > button { justify-self: start; } .planning-time { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; } > p { margin: 0; font-size: 12px; } }
+.location-dialog .organization-profile-fields { margin-bottom: 0; }
+.location-dialog .document-checkbox > span { color: #333; font-size: 13px; font-weight: 400; }
+@media (max-width: 900px) { .workspace-shell--collapsed .workspace-location { display: block; } }
+@media (max-width: 480px) { .location-settings-form .planning-time { grid-template-columns: 1fr; } }
+.organization-location-create { display: grid; gap: 18px; min-width: 0; margin: 0; padding: 20px 0; border: 0; border-top: 1px solid #e7e7e7; legend { padding: 0; font-weight: 600; } > label { display: grid; gap: 8px; } }

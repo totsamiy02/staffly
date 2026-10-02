@@ -41,6 +41,7 @@ async function expectCode(action: () => Promise<unknown>, code: string) {
 }
 
 before(async () => {
+  await prisma.locationTransfer.deleteMany()
   await prisma.accountNotification.deleteMany()
   await prisma.documentAcknowledgement.deleteMany()
   await prisma.document.deleteMany()
@@ -356,7 +357,9 @@ describe('invitations', { concurrency: false }, () => {
       acceptCodeInvitation(member.id, member.email, codeInvite.code),
     ])
     assert.equal(attempts.filter((result) => result.status === 'fulfilled').length, 1)
-    assert.equal(await prisma.organizationMember.count({ where: { organizationId: organization.id, userId: { in: [outsider.id, member.id] } } }), 2)
+    const consumed = await prisma.organizationInvite.findUniqueOrThrow({ where: { id: codeInvite.invitation.id } })
+    assert.ok([outsider.id, member.id].includes(consumed.acceptedByUserId!))
+    assert.ok(await prisma.organizationMember.findUnique({ where: { organizationId_userId: { organizationId: organization.id, userId: consumed.acceptedByUserId! } } }))
     await expectCode(() => previewCodeInvitation(outsider.id, codeInvite.code), 'INVITATION_ALREADY_USED')
   })
 
@@ -383,7 +386,7 @@ describe('profiles and public organization details', { concurrency: false }, () 
 
     const organization = (await listOrganizations(owner.id))[0]
     await expectCode(() => replaceOrganizationLogo(member.id, organization.id, image), 'INSUFFICIENT_PERMISSIONS')
-    const logoUrl = await replaceOrganizationLogo(admin.id, organization.id, image)
+    const logoUrl = await replaceOrganizationLogo(owner.id, organization.id, image)
     assert.match(logoUrl!, /^\/api\/media\/[0-9a-f-]{36}$/)
     assert.equal((await getOrganization(owner.id, organization.id)).logoUrl, logoUrl)
     await removeOrganizationLogo(owner.id, organization.id)
@@ -441,9 +444,9 @@ describe('profiles and public organization details', { concurrency: false }, () 
     assert.equal(passwordValidationError('StrongPass1!'), '')
   })
 
-  it('lets OWNER and ADMIN edit public organization data and exposes member profiles safely', async () => {
+  it('lets only OWNER edit public organization data and exposes member profiles safely', async () => {
     const organization = (await listOrganizations(owner.id))[0]
-    await updateOrganization(admin.id, organization.id, { name: organization.name, description: 'Открытая кофейня', timezone: 'Europe/Moscow', contactEmail: 'team@example.test', phone: '+79991234567', website: 'https://example.test', address: 'Москва' })
+    await updateOrganization(owner.id, organization.id, { name: organization.name, description: 'Открытая кофейня', timezone: 'Europe/Moscow', contactEmail: 'team@example.test', phone: '+79991234567', website: 'https://example.test', address: 'Москва' })
     await expectCode(() => updateOrganization(member.id, organization.id, { name: organization.name, description: null, timezone: 'UTC', contactEmail: null, phone: null, website: null, address: null }), 'INSUFFICIENT_PERMISSIONS')
     await prisma.user.update({ where: { id: member.id }, data: { firstName: 'Анна', lastName: 'Иванова', phone: '+79991234567', lastSeenAt: new Date() } })
     const memberProfile = (await listMembers(owner.id, organization.id)).find((item) => item.userId === member.id)
@@ -538,7 +541,7 @@ describe('work schedule and time statistics', { concurrency: false }, () => {
     const overnight = await createShift(admin.id, scheduleOrganizationId, { memberId: scheduleAdminMemberId, startDate: '2025-01-11', startTime: '20:00', endDate: '2025-01-12', endTime: '08:00', breakMinutes: 30, description: null })
     assert.equal(overnight.effectiveMinutes, 720)
     await expectCode(() => createShift(member.id, scheduleOrganizationId, { memberId: scheduleEmployeeMemberId, startDate: '2025-01-13', startTime: '10:00', endDate: '2025-01-13', endTime: '18:00', breakMinutes: 0, description: null }), 'INSUFFICIENT_PERMISSIONS')
-    const foreign = await prisma.organizationMember.findFirstOrThrow({ where: { organizationId: { not: scheduleOrganizationId }, userId: outsider.id } })
+    const foreign = await prisma.organizationMember.findFirstOrThrow({ where: { organizationId: { not: scheduleOrganizationId }, userId: owner.id } })
     await expectCode(() => createShift(owner.id, scheduleOrganizationId, { memberId: foreign.id, startDate: '2025-01-13', startTime: '10:00', endDate: '2025-01-13', endTime: '18:00', breakMinutes: 0, description: null }), 'MEMBER_NOT_FOUND')
   })
 
@@ -927,7 +930,7 @@ describe('notification history, invitation presentation and email policy', { con
       item = (await listNotificationHistory(receiver.id, receiver.email, { limit: 20 })).notifications.find(item => item.id === id)!
       assert.equal(item.state, 'ACCEPTED')
       assert.ok(item.readAt)
-      assert.equal(item.href, `/app/organizations/${organization.id}`)
+      assert.ok(item.href?.startsWith(`/app/organizations/${organization.id}?location=`))
       await expectCode(() => acceptEmailInvitation(receiver.id, receiver.email, pending.id), 'INVITATION_ALREADY_USED')
       receiverMemberId = (await prisma.organizationMember.findUniqueOrThrow({ where: { organizationId_userId: { organizationId: organization.id, userId: receiver.id } } })).id
     } finally { await removeOrganizationLogo(maker.id, organization.id); await cleanupPendingFiles() }
@@ -1164,7 +1167,7 @@ describe('positions, templates, atomic batches and employee proposals', () => {
     const employee = await prisma.organizationMember.create({ data: { organizationId, userId: member.id, role: 'MEMBER' } }); employeeId = employee.id
     await prisma.organizationMember.create({ data: { organizationId, userId: admin.id, role: 'ADMIN' } })
     const first = await savePosition(owner.id, organizationId, null, { name: 'Бариста', isActive: true }); positionId = first.id
-    const second = await savePosition(admin.id, organizationId, null, { name: 'Кассир', isActive: true })
+    const second = await savePosition(owner.id, organizationId, null, { name: 'Кассир', isActive: true })
     await assignPositions(admin.id, organizationId, employeeId, [first.id, second.id])
     assert.equal((await planningData(member.id, organizationId)).assignments.filter(item => item.memberId === employeeId).length, 2)
     assert.equal((await prisma.organizationMember.findUniqueOrThrow({ where: { id: employeeId } })).role, 'MEMBER')
@@ -1286,7 +1289,7 @@ describe('employee absences: lifecycle, privacy and schedule consistency', { con
     assert.deepEqual(notifications.map(n => n.userId).sort(), [owner.id, admin.id].sort())
     assert.ok(notifications.every(n => n.emailAttemptedAt === null))
     const history = await listNotificationHistory(owner.id, owner.email, { limit: 50 })
-    assert.ok(history.notifications.some(n => n.href === `/app/organizations/${org}/requests?tab=history&request=${sick.sourceRequestId}`))
+    assert.ok(history.notifications.some(n => n.href?.startsWith(`/app/organizations/${org}/schedule?absences=1&absence=${sick.id}`)))
     await expectCode(() => reportSickness(member.id, org, { startDate: '2052-03-01', endDate: '2052-03-03' }), 'ABSENCE_OVERLAP')
     await expectCode(() => reportSickness(outsider.id, org, { startDate: '2052-03-01', endDate: '2052-03-03' }), 'ORGANIZATION_NOT_FOUND')
   })
@@ -1444,7 +1447,8 @@ describe('employee absences: lifecycle, privacy and schedule consistency', { con
   it('serializes overlapping reports and preserves history for former employees', async () => {
     const results = await Promise.allSettled([reportSickness(member.id, org, { startDate: '2052-07-01', endDate: '2052-07-03' }), reportSickness(member.id, org, { startDate: '2052-07-02', endDate: '2052-07-04' })])
     assert.equal(results.filter(r => r.status === 'fulfilled').length, 1)
-    const activeAbsence = await prisma.employeeAbsence.findFirstOrThrow({ where: { organizationId: org, memberId: employee, startDate: new Date('2052-07-01T00:00:00Z') } })
+    const winningReport = results.find(r => r.status === 'fulfilled') as PromiseFulfilledResult<Awaited<ReturnType<typeof reportSickness>>>
+    const activeAbsence = await prisma.employeeAbsence.findUniqueOrThrow({ where: { id: winningReport.value.id } })
     await changeAbsence(member.id, org, activeAbsence.id, { updatedAt: activeAbsence.updatedAt.toISOString(), reason: 'Проверка архива' })
     const types = await listRequestTypes(member.id, org)
     const pending = await createRequest(member.id, org, { requestTypeId: types.find(t => t.systemCode === 'DAY_OFF')!.id, startDate: '2052-08-01' })
@@ -1696,5 +1700,152 @@ describe('documents: privacy, immutable storage and acknowledgement lifecycle', 
     const autumn = { ...ack, deadline: new Date('2026-11-01') }
     assert.equal(documentsService.acknowledgementState(autumn, 'America/New_York', new Date('2026-11-02T04:59:59Z')).overdue, false)
     assert.equal(documentsService.acknowledgementState(autumn, 'America/New_York', new Date('2026-11-02T05:00:00Z')).overdue, true)
+  })
+})
+
+// Multi-location regressions exercise the same request scope used by the API.
+import { locationContext } from '../src/server/organizations/location-context.ts'
+import { archiveLocation, assignLocationMember, deleteTeam, listLocations, listTeams, removeLocationMember, saveLocation, saveTeam, transferMember } from '../src/server/organizations/location-service.ts'
+import { createOrganizationBody } from '../src/server/organizations/schemas.ts'
+async function locationFixture() {
+  const organization = await createOrganization(owner.id, { name: 'Сеть кофеен', description: null, timezone: 'Europe/Moscow', firstLocation: { name: 'На Пушкина', city: 'Москва', address: 'Пушкина, 10', timezone: 'Europe/Moscow', teamNames: ['Утренняя команда'] } })
+  const first = organization.locations[0]
+  const second = await saveLocation(owner.id, organization.id, null, { name: 'На Ленина', city: 'Москва', address: 'Ленина, 20', timezone: 'Europe/Moscow', teamNames: [] })
+  const manager = await prisma.organizationMember.create({ data: { organizationId: organization.id, userId: admin.id } })
+  const employee = await prisma.organizationMember.create({ data: { organizationId: organization.id, userId: member.id } })
+  await assignLocationMember(owner.id, organization.id, first.id, manager.id, 'ADMIN')
+  await assignLocationMember(owner.id, organization.id, first.id, employee.id, 'MEMBER')
+  return { organizationId: organization.id, first, second, manager, employee }
+}
+function atPoint<T>(f: { organizationId: string }, locationId: string, run: () => T) { return locationContext.run({ organizationId: f.organizationId, locationId }, run) }
+const pointShift = (memberId: string, date = '2060-05-02', startTime = '09:00', endTime = '18:00') => ({ memberId, startDate: date, endDate: date, startTime, endTime, breakMinutes: 0, description: null })
+describe('locations, teams and point authorization', { concurrency: false }, () => {
+  it('requires first-point data at creation and creates named teams atomically', async () => {
+    assert.equal(createOrganizationBody.safeParse({ name: 'Кофейня', timezone: 'Europe/Moscow' }).success, false)
+    const f = await locationFixture()
+    const locations = await listLocations(owner.id, f.organizationId)
+    assert.equal(locations.length, 2)
+    assert.equal(locations[0].address, 'Пушкина, 10')
+    assert.equal((await atPoint(f, f.first.id, () => listTeams(member.id, f.organizationId)))[0].name, 'Утренняя команда')
+  })
+  it('shows everyone the point calendar and directory but grants ADMIN only at assigned points', async () => {
+    const f = await locationFixture()
+    const first = await atPoint(f, f.first.id, () => getOrganization(admin.id, f.organizationId))
+    const second = await atPoint(f, f.second.id, () => getOrganization(admin.id, f.organizationId))
+    assert.equal(first.role, 'ADMIN'); assert.equal(second.role, 'MEMBER')
+    const shift = await atPoint(f, f.first.id, () => createShift(admin.id, f.organizationId, pointShift(f.employee.id)))
+    assert.equal((await atPoint(f, f.first.id, () => listSchedule(member.id, f.organizationId, '2060-05-01', '2060-06-01'))).shifts[0].id, shift.id)
+    assert.equal((await atPoint(f, f.second.id, () => listSchedule(member.id, f.organizationId, '2060-05-01', '2060-06-01'))).shifts.length, 0)
+    await expectCode(() => atPoint(f, f.second.id, () => cancelShift(admin.id, f.organizationId, shift.id, 'Чужая точка')), 'INSUFFICIENT_PERMISSIONS')
+    await expectCode(() => atPoint(f, f.second.id, () => cancelShift(owner.id, f.organizationId, shift.id, 'Неверная область')), 'SHIFT_NOT_FOUND')
+    assert.equal((await atPoint(f, f.first.id, () => listMembersPage(member.id, f.organizationId, { role: 'ADMIN' }))).members[0].id, f.manager.id)
+    assert.equal((await atPoint(f, f.second.id, () => listMembersPage(member.id, f.organizationId, {}))).members.some(m => m.id === f.employee.id), false)
+    await expectCode(() => atPoint(f, f.first.id, () => saveLocation(admin.id, f.organizationId, null, { name: 'Новая', city: 'Москва', address: 'Адрес 10', timezone: 'Europe/Moscow', teamNames: [] })), 'INSUFFICIENT_PERMISSIONS')
+    await expectCode(() => assignLocationMember(admin.id, f.organizationId, f.first.id, f.employee.id, 'ADMIN'), 'OWNER_REQUIRED')
+  })
+  it('validates HTTP point selection and applies local permissions through router dispatch', async () => {
+    const f = await locationFixture()
+    const { default: express } = await import('express')
+    const { default: router } = await import('../src/server/organizations/routes.ts')
+    const { requireAuth } = await import('../src/server/auth.ts')
+    const { selectLocation } = await import('../src/server/organizations/location-context.ts')
+    const { SignJWT } = await import('jose')
+    const session = await prisma.authSession.create({ data: { userId: admin.id, refreshTokenHash: randomUUID(), idleExpiresAt: new Date(Date.now() + 60000), absoluteExpiresAt: new Date(Date.now() + 60000) } })
+    const token = await new SignJWT({ sid: session.id }).setProtectedHeader({ alg: 'HS256' }).setSubject(admin.id).setIssuedAt().setExpirationTime('5m').sign(new TextEncoder().encode(process.env.JWT_SECRET!))
+    const app = express(); app.use(express.json()); app.use('/api/organizations/:organizationId', requireAuth, selectLocation); app.use('/api', router)
+    app.use((error: any, _req: any, res: any, _next: any) => res.status(error.status ?? 500).json({ code: error.code }))
+    const server = app.listen(0, '127.0.0.1'); await new Promise<void>(resolve => server.once('listening', resolve))
+    const base = `http://127.0.0.1:${(server.address() as import('node:net').AddressInfo).port}/api/organizations/${f.organizationId}`
+    const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
+    try {
+      assert.equal((await fetch(base)).status, 401)
+      assert.equal((await fetch(`${base}?locationId=invalid`, { headers })).status, 400)
+      assert.equal((await fetch(`${base}?locationId=${randomUUID()}`, { headers })).status, 404)
+      assert.equal((await fetch(`${base}?locationId=${f.first.id}`, { headers }).then(r => r.json())).organization.role, 'ADMIN')
+      assert.equal((await fetch(`${base}?locationId=${f.second.id}`, { headers }).then(r => r.json())).organization.role, 'MEMBER')
+      const result = await fetch(`${base}/teams?locationId=${f.second.id}`, { method: 'POST', headers, body: JSON.stringify({ name: 'Чужая команда', memberIds: [] }) })
+      assert.equal(result.status, 403)
+    } finally { await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())) }
+  })
+  it('keeps teams local and refuses foreign employees, cross-point IDs and MEMBER writes', async () => {
+    const f = await locationFixture()
+    const team = await atPoint(f, f.first.id, () => saveTeam(admin.id, f.organizationId, null, { name: 'Вечерняя команда', memberIds: [f.employee.id] }))
+    assert.equal((await atPoint(f, f.second.id, () => listTeams(member.id, f.organizationId))).length, 0)
+    await expectCode(() => atPoint(f, f.second.id, () => saveTeam(owner.id, f.organizationId, team.id, { name: 'Чужая', memberIds: [] })), 'TEAM_NOT_FOUND')
+    await expectCode(() => atPoint(f, f.second.id, () => saveTeam(owner.id, f.organizationId, null, { name: 'Команда', memberIds: [f.employee.id] })), 'TEAM_MEMBERS_INVALID')
+    await expectCode(() => atPoint(f, f.first.id, () => deleteTeam(member.id, f.organizationId, team.id)), 'INSUFFICIENT_PERMISSIONS')
+    await atPoint(f, f.first.id, () => removeLocationMember(admin.id, f.organizationId, f.first.id, f.employee.id))
+    assert.equal((await prisma.organizationMember.findUniqueOrThrow({ where: { id: f.employee.id } })).leftAt, null)
+    assert.equal(await prisma.locationTeamMember.count({ where: { teamId: team.id } }), 0)
+  })
+  it('checks overlap and workload across points while statistics use only the selected point', async () => {
+    const f = await locationFixture()
+    await assignLocationMember(owner.id, f.organizationId, f.second.id, f.employee.id, 'MEMBER')
+    await atPoint(f, f.first.id, () => createShift(admin.id, f.organizationId, pointShift(f.employee.id)))
+    await expectCode(() => atPoint(f, f.second.id, () => createShift(owner.id, f.organizationId, pointShift(f.employee.id))), 'SHIFT_OVERLAP')
+    await atPoint(f, f.second.id, () => saveWorkload(owner.id, f.organizationId, 600))
+    await expectCode(() => atPoint(f, f.second.id, () => createShift(owner.id, f.organizationId, pointShift(f.employee.id, '2060-05-03'))), 'WORKLOAD_WARNING')
+    await atPoint(f, f.second.id, () => createShift(owner.id, f.organizationId, { ...pointShift(f.employee.id, '2060-05-03'), acknowledgeWorkload: true }))
+    const options = { memberState: 'all' as const, sort: 'name' as const, direction: 'asc' as const, page: 1, limit: 50 }
+    const stats = await atPoint(f, f.second.id, () => organizationStatistics(owner.id, f.organizationId, options))
+    assert.equal(stats.summary.plannedMinutes, 540)
+    const firstStats = await atPoint(f, f.first.id, () => organizationStatistics(owner.id, f.organizationId, options))
+    assert.equal(firstStats.members.find(m => m.memberId === f.manager.id)?.role, 'ADMIN')
+    await removeLocationMember(owner.id, f.organizationId, f.first.id, f.employee.id)
+    const former = await atPoint(f, f.first.id, () => organizationStatistics(owner.id, f.organizationId, { ...options, memberState: 'former' }))
+    assert.equal(former.members.find(m => m.memberId === f.employee.id)?.active, false)
+    const active = await atPoint(f, f.first.id, () => organizationStatistics(owner.id, f.organizationId, { ...options, memberState: 'active' }))
+    assert.equal(active.members.some(m => m.memberId === f.employee.id), false)
+  })
+  it('allows transfers only with authority at both points and bounds temporary shifts to the placement period', async () => {
+    const f = await locationFixture()
+    const input = { memberId: f.employee.id, fromLocationId: f.first.id, toLocationId: f.second.id, temporary: true, startAt: '2060-05-02T06:00:00Z', endAt: '2060-05-02T15:00:00Z' }
+    await expectCode(() => transferMember(admin.id, f.organizationId, input), 'INSUFFICIENT_PERMISSIONS')
+    await assignLocationMember(owner.id, f.organizationId, f.second.id, f.manager.id, 'ADMIN')
+    await transferMember(admin.id, f.organizationId, input)
+    await atPoint(f, f.second.id, () => createShift(admin.id, f.organizationId, pointShift(f.employee.id)))
+    await expectCode(() => atPoint(f, f.second.id, () => createShift(admin.id, f.organizationId, pointShift(f.employee.id, '2060-05-03'))), 'MEMBER_NOT_IN_LOCATION')
+  })
+  it('preserves old and future shift point IDs on permanent transfer and prevents closing points with pending work', async () => {
+    const f = await locationFixture()
+    const past = await atPoint(f, f.first.id, () => createShift(owner.id, f.organizationId, pointShift(f.employee.id, '2020-05-02')))
+    const future = await atPoint(f, f.first.id, () => createShift(owner.id, f.organizationId, pointShift(f.employee.id)))
+    await transferMember(owner.id, f.organizationId, { memberId: f.employee.id, fromLocationId: f.first.id, toLocationId: f.second.id, temporary: false })
+    assert.equal((await prisma.workShift.findUniqueOrThrow({ where: { id: past.id } })).locationId, f.first.id)
+    assert.equal((await prisma.workShift.findUniqueOrThrow({ where: { id: future.id } })).status, 'SCHEDULED')
+    await expectCode(() => archiveLocation(owner.id, f.organizationId, f.first.id), 'LOCATION_HAS_WORK')
+    await atPoint(f, f.first.id, () => cancelShift(owner.id, f.organizationId, future.id, 'Закрытие точки'))
+    await archiveLocation(owner.id, f.organizationId, f.first.id)
+    await expectCode(() => archiveLocation(owner.id, f.organizationId, f.second.id), 'LAST_LOCATION')
+  })
+  it('isolates incoming requests, resolutions, attachments and shared organization settings', async () => {
+    const f = await locationFixture()
+    const type = (await listRequestTypes(member.id, f.organizationId)).find(t => t.systemCode === 'OTHER')!
+    const request = await atPoint(f, f.first.id, () => createRequest(member.id, f.organizationId, { requestTypeId: type.id, comment: 'Заявка точки А' }))
+    await assignLocationMember(owner.id, f.organizationId, f.second.id, f.manager.id, 'ADMIN')
+    assert.equal((await atPoint(f, f.second.id, () => listRequests(admin.id, f.organizationId, 'incoming', { page: 1, pageSize: 20 }))).requests.length, 0)
+    await expectCode(() => atPoint(f, f.second.id, () => resolveRequest(admin.id, f.organizationId, request.id, 'APPROVED', null)), 'REQUEST_NOT_FOUND')
+    await expectCode(() => atPoint(f, f.second.id, () => getRequest(admin.id, f.organizationId, request.id)), 'REQUEST_NOT_FOUND')
+    await expectCode(() => atPoint(f, f.first.id, () => updateOrganization(admin.id, f.organizationId, { name: 'Нельзя', description: null, timezone: 'Europe/Moscow', contactEmail: null, phone: null, website: null, address: null })), 'INSUFFICIENT_PERMISSIONS')
+  })
+  it('separates point and shared documents on lists, direct IDs and byte delivery', async () => {
+    const f = await locationFixture()
+    const metadata = { displayName: 'Инструкция', folderId: null, visibility: 'ORGANIZATION' as const, targetMemberId: null, shared: false }
+    const local = await atPoint(f, f.first.id, () => documentsService.uploadDocument(admin.id, f.organizationId, Buffer.from('Point document'), 'text/plain', 'instructions.txt', metadata))
+    const shared = await atPoint(f, f.first.id, () => documentsService.uploadDocument(owner.id, f.organizationId, Buffer.from('Shared document'), 'text/plain', 'shared.txt', { ...metadata, shared: true }))
+    const sharedAdmins = await atPoint(f, f.first.id, () => documentsService.uploadDocument(owner.id, f.organizationId, Buffer.from('Shared admin document'), 'text/plain', 'shared-admin.txt', { ...metadata, shared: true, visibility: 'ADMINS' }))
+    assert.equal((await atPoint(f, f.first.id, () => documentsService.getDocument(admin.id, f.organizationId, sharedAdmins.id))).canManage, false)
+    await atPoint(f, f.first.id, () => documentsService.assignAcknowledgements(owner.id, f.organizationId, sharedAdmins.id, assignmentSchema.parse({ recipients: 'roles', roles: ['ADMIN'] })))
+    assert.equal((await listNotificationHistory(admin.id, admin.email, { limit: 50, organizationId: f.organizationId })).notifications.some(n => n.documentId === sharedAdmins.id), true)
+    await expectCode(() => atPoint(f, f.second.id, () => documentsService.getDocument(admin.id, f.organizationId, sharedAdmins.id)), 'DOCUMENT_NOT_FOUND')
+    const list = await atPoint(f, f.second.id, () => documentsService.listDocuments(admin.id, f.organizationId, documentListSchema.parse({})))
+    assert.equal(list.documents.some(d => d.id === local.id), false)
+    assert.equal(list.documents.find(d => d.id === shared.id)?.canManage, false)
+    await expectCode(() => atPoint(f, f.second.id, () => documentsService.deliverDocument(admin.id, f.organizationId, local.id, 'download')), 'DOCUMENT_NOT_FOUND')
+    await expectCode(() => atPoint(f, f.first.id, () => documentsService.deleteDocument(admin.id, f.organizationId, shared.id)), 'INSUFFICIENT_PERMISSIONS')
+    const delivered = await atPoint(f, f.first.id, () => documentsService.deliverDocument(member.id, f.organizationId, local.id, 'download')); delivered.stream.destroy()
+    await atPoint(f, f.first.id, () => documentsService.assignAcknowledgements(admin.id, f.organizationId, local.id, assignmentSchema.parse({ recipients: 'members', memberIds: [f.employee.id] })))
+    const notifications = await listNotificationHistory(member.id, member.email, { limit: 50, organizationId: f.organizationId })
+    assert.equal(notifications.notifications.find(n => n.documentId === local.id)?.href?.includes(`location=${f.first.id}`), true)
   })
 })

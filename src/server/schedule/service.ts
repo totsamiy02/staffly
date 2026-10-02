@@ -1,3 +1,5 @@
+import { requireLocationManager } from '../organizations/location-service.ts'
+import { locationWhere, locationMemberWhere, scopedLocationId } from '../organizations/location-context.ts'
 import { mediaUrl } from '../storage/image-service.ts'
 import { absenceLabels } from './absence-service.ts'
 import { checkMonthlyWorkload } from './workload.ts'
@@ -32,14 +34,20 @@ function validateDuration(startAt: Date, endAt: Date, breakMinutes: number) {
   if (breakMinutes >= durationMinutes) throw new ApiError(400, 'INVALID_SHIFT_BREAK', 'Перерыв должен быть короче смены.')
 }
 
-async function activeTarget(tx: Prisma.TransactionClient | typeof prisma, organizationId: string, memberId: string) {
+export async function activeTarget(tx: Prisma.TransactionClient | typeof prisma, organizationId: string, memberId: string, startAt?: Date, endAt?: Date) {
   const member = await tx.organizationMember.findFirst({ where: { id: memberId, organizationId, leftAt: null, user: { deletedAt: null } }, include: { user: { select: { email: true } } } })
   if (!member) throw new ApiError(404, 'MEMBER_NOT_FOUND', 'Активный сотрудник организации не найден.')
+  const locationId = scopedLocationId(organizationId)
+  if (locationId && member.role !== 'OWNER') {
+    const permanent = await tx.locationMember.findFirst({ where: { locationId, memberId, leftAt: null } })
+    const temporary = startAt && endAt ? await tx.locationTransfer.findFirst({ where: { organizationId, memberId, toLocationId: locationId, temporary: true, startAt: { lte: startAt }, endAt: { gte: endAt } } }) : await tx.locationTransfer.findFirst({ where: { organizationId, memberId, toLocationId: locationId, temporary: true, endAt: { gt: new Date() } } })
+    if (!permanent && !temporary) throw new ApiError(400, 'MEMBER_NOT_IN_LOCATION', 'Сотрудник не назначен в эту точку на период смены.')
+  }
   return member
 }
 
 async function shiftInOrganization(tx: Prisma.TransactionClient | typeof prisma, organizationId: string, shiftId: string) {
-  const shift = await tx.workShift.findFirst({ where: { id: shiftId, organizationId } })
+  const shift = await tx.workShift.findFirst({ where: { id: shiftId, organizationId, ...locationWhere(organizationId) } })
   if (!shift) throw new ApiError(404, 'SHIFT_NOT_FOUND', 'Смена не найдена.')
   return shift
 }
@@ -59,6 +67,7 @@ function publicShift(shift: WorkShift & { member: { user: { email: string; first
   const effectiveEndAt = shift.actualEndAt ?? shift.scheduledEndAt
   return {
     id: shift.id,
+    locationId: shift.locationId,
     positionId: shift.positionId,
     positionName: shift.positionNameSnapshot,
     memberId: shift.memberId,
@@ -87,18 +96,18 @@ export async function listSchedule(userId: string, organizationId: string, fromD
   const to = startOfZonedDate(toDate, actor.organization.timezone)
   if (mode === 'history') requireOrganizationRole(actor.role, ['OWNER', 'ADMIN'])
   const shifts = await prisma.workShift.findMany({
-    where: { organizationId, status: mode === 'history' ? 'CANCELLED' : 'SCHEDULED', scheduledStartAt: { lt: to }, scheduledEndAt: { gt: from } },
+    where: { organizationId, ...locationWhere(organizationId), status: mode === 'history' ? 'CANCELLED' : 'SCHEDULED', scheduledStartAt: { lt: to }, scheduledEndAt: { gt: from } },
     include: shiftInclude,
     orderBy: [{ scheduledStartAt: 'asc' }, { member: { user: { lastName: 'asc' } } }],
   })
-  const absences = await prisma.employeeAbsence.findMany({ where: { organizationId, cancelledAt: null, startDate: { lt: new Date(`${toDate}T00:00:00.000Z`) }, endDate: { gte: new Date(`${fromDate}T00:00:00.000Z`) } }, include: { member: { include: { user: { select: { email: true, firstName: true, lastName: true, middleName: true, avatarFileId: true } } } } }, orderBy: { startDate: 'asc' } })
+  const absences = await prisma.employeeAbsence.findMany({ where: { organizationId, member: locationMemberWhere(organizationId), cancelledAt: null, startDate: { lt: new Date(`${toDate}T00:00:00.000Z`) }, endDate: { gte: new Date(`${fromDate}T00:00:00.000Z`) } }, include: { member: { include: { user: { select: { email: true, firstName: true, lastName: true, middleName: true, avatarFileId: true } } } } }, orderBy: { startDate: 'asc' } })
   return { timezone: actor.organization.timezone, shifts: shifts.map(publicShift), absences: (mode === 'history' ? [] : absences).map((item) => ({ id: item.id, memberId: item.memberId, memberName: displayName(item.member.user), memberAvatarUrl: mediaUrl(item.member.user.avatarFileId), reason: actor.role === 'MEMBER' && item.memberId !== actor.id ? null : item.reason, type: actor.role === 'MEMBER' && item.memberId !== actor.id ? 'ABSENCE' as const : item.type, startDate: dateText(item.startDate), endDate: dateText(item.endDate) })) }
 }
 
 export async function listMyUpcomingShifts(userId: string, organizationId: string) {
   const actor = await getMembership(userId, organizationId)
   const shifts = await prisma.workShift.findMany({
-    where: { organizationId, memberId: actor.id, status: 'SCHEDULED', scheduledEndAt: { gt: new Date() } },
+    where: { organizationId, ...locationWhere(organizationId), memberId: actor.id, status: 'SCHEDULED', scheduledEndAt: { gt: new Date() } },
     include: shiftInclude,
     orderBy: { scheduledStartAt: 'asc' },
   })
@@ -121,6 +130,7 @@ export async function createShiftBatch(userId: string, organizationId: string, i
   })
   try {
     const result = await prisma.$transaction(async tx => {
+      if (scopedLocationId(organizationId)) { await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId}, 1))::text`; await requireLocationManager(tx, userId, organizationId, actor.locationId) }
       const records = []
       for (const memberId of [...new Set(inputs.map(input => input.memberId))].sort()) {
         await activeTarget(tx, organizationId, memberId)
@@ -128,11 +138,12 @@ export async function createShiftBatch(userId: string, organizationId: string, i
       }
       for (const { input, start, end } of prepared) {
         try {
+          await activeTarget(tx, organizationId, input.memberId, start, end)
           await assertNoApprovedAbsence(organizationId, input.memberId, start, end, actor.organization.timezone, tx, input.acknowledgeAbsence)
           if (await tx.workShift.findFirst({ where: { organizationId, memberId: input.memberId, status: 'SCHEDULED', scheduledStartAt: { lt: end }, scheduledEndAt: { gt: start } } })) throw new ApiError(409, 'SHIFT_OVERLAP', 'У сотрудника уже есть пересекающаяся смена.')
           const position = input.positionId ? await tx.organizationPosition.findFirst({ where: { id: input.positionId, organizationId, isActive: true, members: { some: { memberId: input.memberId } } } }) : null
           if (input.positionId && !position) throw new ApiError(400, 'POSITION_NOT_ASSIGNED', 'Должность не назначена сотруднику или неактивна.')
-          const created = await tx.workShift.create({ data: { organizationId, memberId: input.memberId, createdByMemberId: actor.id, scheduledStartAt: start, scheduledEndAt: end, breakMinutes: input.breakMinutes, description: input.description, positionId: position?.id, positionNameSnapshot: position?.name }, include: shiftInclude })
+          const created = await tx.workShift.create({ data: { organizationId, locationId: actor.locationId, memberId: input.memberId, createdByMemberId: actor.id, scheduledStartAt: start, scheduledEndAt: end, breakMinutes: input.breakMinutes, description: input.description, positionId: position?.id, positionNameSnapshot: position?.name }, include: shiftInclude })
           const notification = await recordShiftNotification(tx, created, 'SHIFT_ASSIGNED', actor.organization.timezone)
           records.push({ created, notification })
         } catch (error) {
@@ -168,10 +179,11 @@ export async function updateShift(userId: string, organizationId: string, shiftI
   try {
     const assignmentChanged = current.memberId !== input.memberId || current.scheduledStartAt.getTime() !== startAt.getTime() || current.scheduledEndAt.getTime() !== endAt.getTime()
     const shift = await prisma.$transaction(async tx => {
-      await lockShift(tx, shiftId)
+      if (scopedLocationId(organizationId)) { await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId}, 1))::text`; await requireLocationManager(tx, userId, organizationId, actor.locationId) }
+    await lockShift(tx, shiftId)
       const fresh = await shiftInOrganization(tx, organizationId, shiftId)
       if (fresh.updatedAt.getTime() !== current.updatedAt.getTime() || fresh.status !== 'SCHEDULED') throw new ApiError(409, 'SHIFT_CHANGED', 'Смена уже изменилась. Откройте её заново.')
-      await activeTarget(tx, organizationId, input.memberId)
+      await activeTarget(tx, organizationId, input.memberId, startAt, endAt)
       await assertNoApprovedAbsence(organizationId, input.memberId, startAt, endAt, actor.organization.timezone, tx, input.acknowledgeAbsence)
       await checkMonthlyWorkload(tx, organizationId, input.memberId, actor.organization.timezone, actor.organization.monthlyWorkMinutes, [{ start: startAt, end: endAt }], [shiftId], input.acknowledgeWorkload)
       const position = input.positionId ? await tx.organizationPosition.findFirst({ where: { id: input.positionId, organizationId, isActive: true, members: { some: { memberId: input.memberId } } } }) : null
@@ -224,11 +236,11 @@ export async function readShiftNotification(userId: string, shiftId: string) {
 export async function getShift(userId: string, organizationId: string, shiftId: string, page = 1, limit = 20) {
   const actor = await getMembership(userId, organizationId)
   if (actor.role === 'MEMBER') {
-    const shift = await prisma.workShift.findFirst({ where: { id: shiftId, organizationId }, include: shiftInclude })
+    const shift = await prisma.workShift.findFirst({ where: { id: shiftId, organizationId, ...locationWhere(organizationId) }, include: shiftInclude })
     if (!shift) throw new ApiError(404, 'SHIFT_NOT_FOUND', 'Смена не найдена.')
     return { ...publicShift(shift), adjustments: [], adjustmentPagination: { page: 1, limit, total: 0, pages: 1 } }
   }
-  const shift = await prisma.workShift.findFirst({ where: { id: shiftId, organizationId }, include: { ...shiftInclude, adjustments: { include: { changedByMember: { include: { user: { select: { email: true, firstName: true, lastName: true, middleName: true, avatarFileId: true } } } } }, orderBy: { createdAt: 'desc' }, skip: (page - 1) * limit, take: limit } } })
+  const shift = await prisma.workShift.findFirst({ where: { id: shiftId, organizationId, ...locationWhere(organizationId) }, include: { ...shiftInclude, adjustments: { include: { changedByMember: { include: { user: { select: { email: true, firstName: true, lastName: true, middleName: true, avatarFileId: true } } } } }, orderBy: { createdAt: 'desc' }, skip: (page - 1) * limit, take: limit } } })
   if (!shift) throw new ApiError(404, 'SHIFT_NOT_FOUND', 'Смена не найдена.')
   const total = shift._count.adjustments
   return { ...publicShift(shift), adjustments: shift.adjustments.map((item) => ({ ...item, changedByName: displayName(item.changedByMember.user) })), adjustmentPagination: { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) } }
@@ -240,6 +252,7 @@ export async function cancelShift(userId: string, organizationId: string, shiftI
   const current = await shiftInOrganization(prisma, organizationId, shiftId)
   if (current.status === 'CANCELLED') throw new ApiError(409, 'SHIFT_CANCELLED', 'Смена уже отменена.')
   const shift = await prisma.$transaction(async tx => {
+    if (scopedLocationId(organizationId)) { await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId}, 1))::text`; await requireLocationManager(tx, userId, organizationId, actor.locationId) }
     await lockShift(tx, shiftId)
     const fresh = await shiftInOrganization(tx, organizationId, shiftId)
     if (fresh.status === 'CANCELLED') throw new ApiError(409, 'SHIFT_CANCELLED', 'Смена уже отменена.')
@@ -263,6 +276,7 @@ export async function correctActualTime(userId: string, organizationId: string, 
   validateDuration(startAt, endAt, input.breakMinutes)
   if (endAt > new Date()) throw new ApiError(400, 'ACTUAL_TIME_IN_FUTURE', 'Фактическое окончание не может быть в будущем.')
   return prisma.$transaction(async (tx) => {
+    if (scopedLocationId(organizationId)) { await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId}, 1))::text`; await requireLocationManager(tx, userId, organizationId, actor.locationId) }
     await lockShift(tx, shiftId)
     const fresh = await shiftInOrganization(tx, organizationId, shiftId)
     if (fresh.status === 'CANCELLED') throw new ApiError(409, 'SHIFT_CANCELLED', 'Отменённую смену нельзя корректировать.')

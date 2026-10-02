@@ -16,7 +16,7 @@ import type { EmployeeAbsence } from '../../../app/schedule/types.ts'
 type Absence = EmployeeAbsence & { sourceRequestId: string | null; updatedAt: string; cancelledAt: string | null; cancellationReason: string | null; formerMember: boolean; conflicts: Array<{ id: string; scheduledStartAt: string; scheduledEndAt: string }> }
 
 export default function AbsencePanel({ organization, focusId, onClose }: { organization: OrganizationSummary; focusId?: string | null; onClose: () => void }) {
-  const { apiRequest } = useAuth()
+  const { locationId, apiRequest } = useAuth()
   const dialog = useRef<HTMLElement>(null)
   useEffect(() => { const previous = document.activeElement; const previousOverflow = document.body.style.overflow; document.body.style.overflow = 'hidden'; dialog.current?.querySelector<HTMLButtonElement>('button')?.focus(); return () => { document.body.style.overflow = previousOverflow; if (previous instanceof HTMLElement && previous.isConnected) previous.focus() } }, [])
   const client = useQueryClient()
@@ -31,7 +31,7 @@ export default function AbsencePanel({ organization, focusId, onClose }: { organ
   const [message, setMessage] = useState('')
   useEffect(() => { if (!message) return; const timer = window.setTimeout(() => setMessage(''), 5000); return () => window.clearTimeout(timer) }, [message])
   const manager = organization.role !== 'MEMBER'
-  const list = useQuery({ ...liveQueryOptions, queryKey: ['absences', organization.id, history, page, selectedAbsenceId], queryFn: () => apiRequest<{ absences: Absence[]; pagination: { page: number; pages: number; total: number } }>(`/organizations/${organization.id}/absences?page=${selectedAbsenceId ? 1 : page}&history=${history}${selectedAbsenceId ? '&id=' + selectedAbsenceId : ''}`) })
+  const list = useQuery({ ...liveQueryOptions, queryKey: ['absences', organization.id, history, page, selectedAbsenceId, locationId], queryFn: () => apiRequest<{ absences: Absence[]; pagination: { page: number; pages: number; total: number } }>(`/organizations/${organization.id}/absences?page=${selectedAbsenceId ? 1 : page}&history=${history}${selectedAbsenceId ? '&id=' + selectedAbsenceId : ''}`) })
   useEffect(() => {
     const focused = list.data?.absences.find(item => item.id === selectedAbsenceId)
     if (focused) setHistory(!!focused.cancelledAt || focused.endDate < today)

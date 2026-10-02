@@ -1,3 +1,4 @@
+import { locationWhere } from '../organizations/location-context.ts'
 import type { Prisma } from '../../generated/prisma/client.ts'
 import { prisma } from '../db.ts'
 
@@ -34,7 +35,7 @@ function invalidReason(request: Proposal) {
 
 // Catch expiry/legacy changes on reads. Valid proposals need neither row locks nor N+1 queries.
 export async function reconcileShiftRequests(organizationId: string) {
-  const where = { organizationId, status: 'PENDING' as const, systemCodeSnapshot: 'SHIFT_CHANGE' as const }
+  const where = { organizationId, ...locationWhere(organizationId), status: 'PENDING' as const, systemCodeSnapshot: 'SHIFT_CHANGE' as const }
   const pending = await prisma.organizationRequest.findMany({ where, include: { relatedShift: true } })
   const shiftIds = [...new Set(pending.filter(request => invalidReason(request)).map(request => request.relatedShiftId))].sort()
   if (!shiftIds.length) return

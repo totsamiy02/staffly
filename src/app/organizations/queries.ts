@@ -19,17 +19,23 @@ export function usePendingInvitations() {
 }
 
 export function useAccountNotifications(organizationId?: string) {
-  const { apiRequest, user } = useAuth()
-  return useQuery({ ...liveQueryOptions, queryKey: ['account-notifications', organizationId], queryFn: () => apiRequest<{ notifications: AccountNotification[] }>(`/account-notifications${organizationId ? `?organizationId=${organizationId}` : ''}`), enabled: Boolean(user) })
+  const { apiRequest, user, locationId } = useAuth()
+  const params = new URLSearchParams({ unread: 'true', limit: '50' })
+  if (organizationId) params.set('organizationId', organizationId)
+  if (organizationId && locationId) params.set('locationId', locationId)
+  return useQuery({ ...liveQueryOptions, queryKey: ['account-notifications', organizationId, locationId], queryFn: async () => {
+    const page = await apiRequest<import('./types.ts').NotificationPage>(`/notifications?${params}`)
+    return { notifications: page.notifications.filter(n => n.source === 'event').map(n => ({ ...n, id: n.id.replace('event:', ''), requestId: n.requestId ?? null, type: n.type as AccountNotification['type'] })) as AccountNotification[] }
+  }, enabled: Boolean(user) })
 }
 
 export function useOrganization(organizationId: string | undefined) {
-  const { apiRequest, user } = useAuth()
-  return useQuery({ ...liveQueryOptions, queryKey: ['organization', organizationId], queryFn: () => apiRequest<{ organization: OrganizationSummary }>(`/organizations/${organizationId}`), enabled: Boolean(user && organizationId) })
+  const { locationId, apiRequest, user } = useAuth()
+  return useQuery({ ...liveQueryOptions, queryKey: ['organization', organizationId, locationId], queryFn: () => apiRequest<{ organization: OrganizationSummary }>(`/organizations/${organizationId}`), enabled: Boolean(user && organizationId) })
 }
 
 export function useOrganizationMembers(organizationId: string | undefined, options?: { page: number; pageSize: number; search?: string; role?: OrganizationRole; positionId?: string }) {
-  const { apiRequest, user } = useAuth()
+  const { locationId, apiRequest, user } = useAuth()
   const query = new URLSearchParams()
   if (options) {
     query.set('page', String(options.page)); query.set('pageSize', String(options.pageSize))
@@ -38,21 +44,22 @@ export function useOrganizationMembers(organizationId: string | undefined, optio
     if (options.positionId) query.set('positionId', options.positionId)
   }
   const suffix = query.size ? `?${query}` : ''
-  return useQuery({ ...liveQueryOptions, queryKey: ['organization-members', organizationId, options], queryFn: () => apiRequest<{ members: OrganizationMember[]; pagination?: MemberPagination }>(`/organizations/${organizationId}/members${suffix}`), enabled: Boolean(user && organizationId), placeholderData: (previous) => previous })
+  return useQuery({ ...liveQueryOptions, queryKey: ['organization-members', organizationId, options, locationId], queryFn: () => apiRequest<{ members: OrganizationMember[]; pagination?: MemberPagination }>(`/organizations/${organizationId}/members${suffix}`), enabled: Boolean(user && organizationId), placeholderData: (previous, previousQuery) => previousQuery?.queryKey.at(-1) === locationId ? previous : undefined })
 }
 
 export function useActiveOrganizationInvitations(organizationId: string | undefined, enabled = true) {
-  const { apiRequest, user } = useAuth()
-  return useQuery({ ...liveQueryOptions, queryKey: ['organization-invitations', organizationId], queryFn: () => apiRequest<{ invitations: ActiveOrganizationInvitation[] }>(`/organizations/${organizationId}/invitations`), enabled: Boolean(user && organizationId && enabled) })
+  const { locationId, apiRequest, user } = useAuth()
+  return useQuery({ ...liveQueryOptions, queryKey: ['organization-invitations', organizationId, locationId], queryFn: () => apiRequest<{ invitations: ActiveOrganizationInvitation[] }>(`/organizations/${organizationId}/invitations`), enabled: Boolean(user && organizationId && enabled) })
 }
 
 export function useNotificationHistory(options: { limit?: number; cursor?: string; unread?: boolean; organizationId?: string; category?: string } = {}) {
-  const { apiRequest, user } = useAuth()
+  const { apiRequest, user, locationId } = useAuth()
   const params = new URLSearchParams({ limit: String(options.limit ?? 20), unread: String(options.unread ?? false) })
+  if (options.organizationId && locationId) params.set('locationId', locationId)
   if (options.cursor) params.set('cursor', options.cursor)
   if (options.organizationId) params.set('organizationId', options.organizationId)
   if (options.category) params.set('category', options.category)
-  return useQuery({ ...liveQueryOptions, queryKey: ['notifications', options], queryFn: () => apiRequest<import('./types.ts').NotificationPage>(`/notifications?${params}`), enabled: Boolean(user) })
+  return useQuery({ ...liveQueryOptions, queryKey: ['notifications', options, options.organizationId ? locationId : undefined], queryFn: () => apiRequest<import('./types.ts').NotificationPage>(`/notifications?${params}`), enabled: Boolean(user) })
 }
 
 export function useNotificationActions(organizationId?: string) {
@@ -65,4 +72,13 @@ export function useNotificationActions(organizationId?: string) {
   const readAll = useMutation({ mutationFn: () => apiRequest('/notifications/read-all', { method: 'POST', body: { organizationId } }), onSuccess: refresh })
   const remove = useMutation({ mutationFn: async (id: string) => { await apiRequest(`/notifications/${id}${organizationId ? `?organizationId=${organizationId}` : ''}`, { method: 'DELETE' }); setRemovingId(id); await new Promise(resolve => window.setTimeout(resolve, 180)) }, onSuccess: refresh })
   return { read, invitation, readAll, remove, removingId, error: invitation.error || read.error || readAll.error || remove.error }
+}
+
+export function useLocations(organizationId: string | undefined) {
+  const { apiRequest } = useAuth()
+  return useQuery({ ...liveQueryOptions, queryKey: ['locations', organizationId], queryFn: () => apiRequest<{ locations: import('./types.ts').OrganizationLocation[] }>(`/organizations/${organizationId}/locations`), enabled: Boolean(organizationId) })
+}
+export function useLocationTeams(organizationId: string) {
+  const { apiRequest, locationId } = useAuth()
+  return useQuery({ ...liveQueryOptions, queryKey: ['location-teams', organizationId, locationId], queryFn: () => apiRequest<{ teams: import('./types.ts').LocationTeam[] }>(`/organizations/${organizationId}/teams`) })
 }

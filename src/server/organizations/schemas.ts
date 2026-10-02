@@ -15,7 +15,10 @@ export const memberListQuery = z.object({
   search: z.string().trim().max(100).optional(),
 })
 export const inviteParams = z.object({ inviteId: uuid })
+export const locationBody = z.object({ name: z.string().trim().min(2).max(120), city: z.string().trim().min(1).max(120), address: z.string().trim().min(3).max(300), timezone: z.enum(RUSSIAN_TIMEZONE_VALUES), teamNames: z.array(z.string().trim().max(120)).max(50).optional().transform(values => [...new Set((values ?? []).filter(Boolean))]) })
 export const createOrganizationBody = z.object({
+  firstLocation: locationBody,
+  locations: z.array(locationBody).max(49).optional(),
   name: z.string().trim().min(2).max(120),
   description: z.string().trim().max(1000).optional().transform((value) => value || null),
   timezone: z.enum(RUSSIAN_TIMEZONE_VALUES, { error: 'Выберите российский часовой пояс.' }),

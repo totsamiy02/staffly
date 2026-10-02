@@ -47,6 +47,6 @@ export default function RequestAlerts({ organizationId, suppressed }: { organiza
   if (suppressed || !visible.length) return null
   return <aside className="request-alerts" aria-label="Новые заявки">{visible.filter(({ item }) => !organizationId || item.organization.id === organizationId).map(({ item, seconds }) => <div className={`request-alert${seconds === 0 ? ' is-closing' : ''}`}  role="status" key={item.id}>
     <div>{!organizationId && <div className="request-alert__organization"><Avatar url={item.organization.logoUrl} name={item.organization.name} className="notification-organization-avatar" /><small>{item.organization.name}</small></div>}<strong>{item.title}</strong><p>{item.message}</p></div>
-    <div className="request-alert__actions"><button type="button" aria-label="Закрыть уведомление" onClick={() => close(item.id)}>×</button><Link to={`/app/organizations/${item.organization.id}/requests?tab=incoming&request=${item.requestId}`} onClick={() => open(item)}>Открыть</Link></div>
+    <div className="request-alert__actions"><button type="button" aria-label="Закрыть уведомление" onClick={() => close(item.id)}>×</button><Link to={item.href ?? `/app/organizations/${item.organization.id}/requests?tab=incoming&request=${item.requestId}`} onClick={() => open(item)}>Открыть</Link></div>
   </div>)}</aside>
 }

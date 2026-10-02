@@ -130,7 +130,7 @@ export async function removeUserAvatar(userId: string) {
 
 async function requireOrganizationEditor(userId: string, organizationId: string) {
   const membership = await getMembership(userId, organizationId)
-  if (membership.role !== 'OWNER' && membership.role !== 'ADMIN') throw new ApiError(403, 'INSUFFICIENT_PERMISSIONS', 'Изменять логотип могут владелец и администраторы.')
+  if (membership.organizationRole !== 'OWNER') throw new ApiError(403, 'INSUFFICIENT_PERMISSIONS', 'Изменять логотип может владелец организации.')
 }
 
 export async function replaceOrganizationLogo(userId: string, organizationId: string, input: unknown) {

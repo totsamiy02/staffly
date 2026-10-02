@@ -1,4 +1,5 @@
 import type { OrganizationRole } from '../../generated/prisma/client.ts'
+import { scopedLocationId } from './location-context.ts'
 import { prisma } from '../db.ts'
 import { ApiError } from '../api-error.ts'
 
@@ -8,7 +9,12 @@ export async function getMembership(userId: string, organizationId: string) {
     include: { organization: true },
   })
   if (!membership || membership.leftAt || membership.organization.deletedAt) throw new ApiError(404, 'ORGANIZATION_NOT_FOUND', 'Организация не найдена.')
-  return membership
+  const selected = scopedLocationId(organizationId)
+  const location = await prisma.organizationLocation.findFirst({ where: { organizationId, ...(selected ? { id: selected } : { archivedAt: null }) }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] })
+  if (!location || (location.archivedAt && membership.role !== 'OWNER')) throw new ApiError(404, 'LOCATION_NOT_FOUND', 'Точка не найдена.')
+  const assignment = await prisma.locationMember.findUnique({ where: { locationId_memberId: { locationId: location.id, memberId: membership.id } } })
+  const role: OrganizationRole = membership.role === 'OWNER' ? 'OWNER' : selected ? assignment && !assignment.leftAt ? assignment.role : 'MEMBER' : membership.role
+  return { ...membership, role, organizationRole: membership.role, locationId: location.id, location, organization: { ...membership.organization, timezone: location.timezone, monthlyWorkMinutes: location.monthlyWorkMinutes } }
 }
 
 export function requireOrganizationRole(role: OrganizationRole, allowed: OrganizationRole[]) {

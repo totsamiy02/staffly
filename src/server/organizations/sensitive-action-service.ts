@@ -75,8 +75,10 @@ export async function confirmOwnershipTransfer(userId: string, organizationId: s
     if (!token.targetUserId) throw new ApiError(400, 'INVALID_OWNERSHIP_TARGET', 'Участник для передачи владения не найден.')
     const target = await tx.organizationMember.findUnique({ where: { organizationId_userId: { organizationId, userId: token.targetUserId } }, include: { user: true } })
     if (!target || target.leftAt || target.user.deletedAt || target.role === 'OWNER') throw new ApiError(400, 'INVALID_OWNERSHIP_TARGET', 'Участник для передачи владения недоступен.')
-    await tx.organizationMember.update({ where: { id: actor.id }, data: { role: 'ADMIN' } })
+    await tx.organizationMember.update({ where: { id: actor.id }, data: { role: 'MEMBER' } })
     await tx.organizationMember.update({ where: { id: target.id }, data: { role: 'OWNER' } })
+    const locations = await tx.organizationLocation.findMany({ where: { organizationId, archivedAt: null }, select: { id: true } })
+    for (const location of locations) await tx.locationMember.upsert({ where: { locationId_memberId: { locationId: location.id, memberId: actor.id } }, create: { organizationId, locationId: location.id, memberId: actor.id, role: 'ADMIN' }, update: { role: 'ADMIN', leftAt: null } })
     await tx.accountNotification.createMany({ data: [
       { userId: target.userId, organizationId, type: 'ROLE_CHANGED', title: 'Вы стали владельцем', message: `Вам передано владение организацией «${actor.organization.name}».` },
       { userId, organizationId, type: 'ROLE_CHANGED', title: 'Владение передано', message: `Вы передали организацию «${actor.organization.name}» новому владельцу. Ваша новая роль — «Администратор».` },

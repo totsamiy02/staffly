@@ -1,3 +1,4 @@
+import { locationMemberWhere, scopedLocationId } from '../organizations/location-context.ts'
 import { createRequest, listRequestTypes } from '../requests/service.ts'
 import { mediaUrl } from '../storage/image-service.ts'
 import { z } from 'zod'
@@ -34,7 +35,7 @@ export async function listAbsences(userId: string, organizationId: string, optio
   const actor = await getMembership(userId, organizationId)
   const parts = new Intl.DateTimeFormat('en-CA', { timeZone: actor.organization.timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date())
   const today = ['year', 'month', 'day'].map(type => parts.find(item => item.type === type)!.value).join('-')
-  const where = { organizationId, id: options.id, memberId: actor.role === 'MEMBER' ? actor.id : options.memberId, ...(options.id ? {} : options.todayOnly === 'true' ? { cancelledAt: null, startDate: { lte: new Date(today + 'T00:00:00Z') }, endDate: { gte: new Date(today + 'T00:00:00Z') } } : options.history === 'false' ? { cancelledAt: null, endDate: { gte: new Date(today + 'T00:00:00Z') } } : { OR: [{ cancelledAt: { not: null } }, { endDate: { lt: new Date(today + 'T00:00:00Z') } }] }) }
+  const where = { organizationId, member: actor.role === 'MEMBER' ? undefined : locationMemberWhere(organizationId), id: options.id, memberId: actor.role === 'MEMBER' ? actor.id : options.memberId, ...(options.id ? {} : options.todayOnly === 'true' ? { cancelledAt: null, startDate: { lte: new Date(today + 'T00:00:00Z') }, endDate: { gte: new Date(today + 'T00:00:00Z') } } : options.history === 'false' ? { cancelledAt: null, endDate: { gte: new Date(today + 'T00:00:00Z') } } : { OR: [{ cancelledAt: { not: null } }, { endDate: { lt: new Date(today + 'T00:00:00Z') } }] }) }
   const [total, rows] = await Promise.all([prisma.employeeAbsence.count({ where }), prisma.employeeAbsence.findMany({ where, orderBy: [{ startDate: 'desc' }, { id: 'desc' }], skip: (options.page - 1) * options.limit, take: options.limit, include: { member: { include: { user: true } } } })])
   const absences = await Promise.all(rows.map(async item => ({ id: item.id, memberId: item.memberId, memberName: displayName(item.member.user), memberAvatarUrl: mediaUrl(item.member.user.avatarFileId), reason: item.reason, comment: item.comment, type: item.type, startDate: dateText(item.startDate), endDate: dateText(item.endDate), sourceRequestId: item.sourceRequestId, updatedAt: item.updatedAt, cancelledAt: item.cancelledAt, cancellationReason: item.cancellationReason, formerMember: !!item.member.leftAt, conflicts: await absenceShiftConflicts(prisma, organizationId, item.memberId, item.startDate, item.endDate, actor.organization.timezone) })))
   return { absences, pagination: { page: options.page, pages: Math.max(1, Math.ceil(total / options.limit)), total } }
@@ -42,7 +43,7 @@ export async function listAbsences(userId: string, organizationId: string, optio
 export async function notifyAbsence(tx: Prisma.TransactionClient, organizationId: string, memberId: string, absenceId: string, type: 'ABSENCE_REPORTED' | 'ABSENCE_CHANGED' | 'ABSENCE_CANCELLED', startDate: Date, endDate: Date) {
   const absence = await tx.employeeAbsence.findUniqueOrThrow({ where: { id: absenceId }, select: { sourceRequestId: true } })
   const employee = await tx.organizationMember.findUniqueOrThrow({ where: { id: memberId }, include: { user: true } })
-  const reviewers = await tx.organizationMember.findMany({ where: { organizationId, leftAt: null, role: { in: ['OWNER', 'ADMIN'] }, user: { deletedAt: null } }, select: { userId: true } })
+  const reviewers = await tx.organizationMember.findMany({ where: { organizationId, leftAt: null, OR: [{ role: 'OWNER' }, { role: 'ADMIN' }, { locationMemberships: { some: { role: 'ADMIN', leftAt: null, location: { archivedAt: null, members: { some: { memberId, leftAt: null } } } } } }], user: { deletedAt: null } }, select: { userId: true } })
   const recipients = [...new Set([...reviewers.map(item => item.userId), ...(type !== 'ABSENCE_REPORTED' ? [employee.userId] : [])])]
   if (recipients.length) await tx.accountNotification.createMany({ data: recipients.map(userId => ({ userId, organizationId, absenceId, requestId: absence.sourceRequestId, type, title: type === 'ABSENCE_REPORTED' ? 'Сотрудник сообщил об отсутствии' : type === 'ABSENCE_CHANGED' ? 'Период отсутствия изменён' : 'Отсутствие отменено', message: `${displayName(employee.user)} · ${dateText(startDate)}–${dateText(endDate)}` })) })
 }
@@ -58,6 +59,7 @@ export async function changeAbsence(userId: string, organizationId: string, abse
   return prisma.$transaction(async tx => {
     const item = await tx.employeeAbsence.findFirst({ where: { id: absenceId, organizationId } })
     if (!item || (actor.role === 'MEMBER' && item.memberId !== actor.id)) throw new ApiError(404, 'ABSENCE_NOT_FOUND', 'Отсутствие не найдено.')
+    if (actor.role !== 'OWNER' && item.memberId !== actor.id && scopedLocationId(organizationId) && !await tx.organizationMember.findFirst({ where: { id: item.memberId, ...locationMemberWhere(organizationId) } })) throw new ApiError(404, 'ABSENCE_NOT_FOUND', 'Отсутствие не найдено.')
     const source = item.sourceRequestId ? await tx.organizationRequest.findUnique({ where: { id: item.sourceRequestId } }) : null
     if (actor.role === 'MEMBER' && source && source.systemCodeSnapshot !== 'SICK') requireOrganizationRole(actor.role, ['OWNER', 'ADMIN'])
     if (item.cancelledAt || item.updatedAt.toISOString() !== input.updatedAt) throw new ApiError(409, 'ABSENCE_CHANGED', 'Отсутствие уже изменено или отменено. Обновите данные.')

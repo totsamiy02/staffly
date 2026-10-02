@@ -124,6 +124,8 @@ model Organization {
   website            String?                @db.VarChar(2048)
   address            String?                @db.VarChar(300)
   monthlyWorkMinutes Int?                   @map("monthly_work_minutes")
+  locations          OrganizationLocation[]
+  locationTransfers  LocationTransfer[]
   positions          OrganizationPosition[]
   shiftTemplates     ShiftTemplate[]
   logoFileId         String?                @unique @map("logo_file_id") @db.Uuid
@@ -225,6 +227,10 @@ model OrganizationMember {
   updatedAt      DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
   leftAt         DateTime?        @map("left_at") @db.Timestamptz(3)
 
+  locationMemberships LocationMember[]
+  teamMemberships     LocationTeamMember[]
+  locationTransfers   LocationTransfer[] @relation("TransferredMember")
+  authoredTransfers   LocationTransfer[] @relation("TransferAuthor")
   organization        Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   user                User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
   positions           MemberPosition[]
@@ -243,6 +249,7 @@ model OrganizationMember {
   assignedAcknowledgements DocumentAcknowledgement[] @relation("AcknowledgementAssigner")
 
   @@unique([organizationId, userId])
+  @@unique([organizationId, id])
   @@index([organizationId])
   @@index([userId])
   @@index([organizationId, role])
@@ -251,6 +258,8 @@ model OrganizationMember {
 }
 
 model WorkShift {
+  locationId String @map("location_id") @db.Uuid
+  location OrganizationLocation @relation(fields: [organizationId, locationId], references: [organizationId, id], onDelete: Restrict)
   id                   String                @id @default(uuid()) @db.Uuid
   organizationId       String                @map("organization_id") @db.Uuid
   memberId             String                @map("member_id") @db.Uuid
@@ -286,6 +295,7 @@ model WorkShift {
   @@index([organizationId, memberId, scheduledStartAt])
   @@index([memberId, scheduledStartAt])
   @@map("work_shifts")
+  @@index([organizationId, locationId])
 }
 
 model RequestType {
@@ -310,6 +320,8 @@ model RequestType {
 }
 
 model OrganizationRequest {
+  locationId String @map("location_id") @db.Uuid
+  location OrganizationLocation @relation(fields: [organizationId, locationId], references: [organizationId, id], onDelete: Restrict)
   id                 String             @id @default(uuid()) @db.Uuid
   organizationId     String             @map("organization_id") @db.Uuid
   createdByMemberId  String             @map("created_by_member_id") @db.Uuid
@@ -348,6 +360,7 @@ model OrganizationRequest {
   @@index([requestTypeId, createdAt])
   @@index([resolvedAt])
   @@map("requests")
+  @@index([organizationId, locationId])
 }
 
 model RequestRead {
@@ -442,6 +455,8 @@ model WorkShiftAdjustment {
 }
 
 model OrganizationInvite {
+  locationId String? @map("location_id") @db.Uuid
+  location OrganizationLocation? @relation(fields: [organizationId, locationId], references: [organizationId, id], onDelete: Restrict)
   id               String                 @id @default(uuid()) @db.Uuid
   organizationId   String                 @map("organization_id") @db.Uuid
   invitedByUserId  String                 @map("invited_by_user_id") @db.Uuid
@@ -468,6 +483,7 @@ model OrganizationInvite {
   @@index([invitedByUserId])
   @@index([acceptedByUserId])
   @@map("organization_invites")
+  @@index([organizationId, locationId])
 }
 
 model SensitiveActionToken {
@@ -571,6 +587,8 @@ model MemberPosition {
 }
 
 model ShiftTemplate {
+  locationId String @map("location_id") @db.Uuid
+  location OrganizationLocation @relation(fields: [organizationId, locationId], references: [organizationId, id], onDelete: Restrict)
   id             String                @id @default(uuid()) @db.Uuid
   organizationId String                @map("organization_id") @db.Uuid
   positionId     String?               @map("position_id") @db.Uuid
@@ -584,6 +602,7 @@ model ShiftTemplate {
 
   @@index([organizationId, isActive])
   @@map("shift_templates")
+  @@index([organizationId, locationId])
 }
 
 
@@ -594,6 +613,8 @@ enum DocumentVisibility {
 }
 
 model DocumentFolder {
+  locationId String? @map("location_id") @db.Uuid
+  location OrganizationLocation? @relation(fields: [organizationId, locationId], references: [organizationId, id], onDelete: Restrict)
   id String @id @default(uuid()) @db.Uuid
   organizationId String @map("organization_id") @db.Uuid
   parentId String? @map("parent_id") @db.Uuid
@@ -607,6 +628,7 @@ model DocumentFolder {
   pins DocumentFolderPin[]
   @@index([organizationId, parentId])
   @@map("document_folders")
+  @@index([organizationId, locationId])
 }
 
 model DocumentFolderPin {
@@ -621,6 +643,8 @@ model DocumentFolderPin {
 }
 
 model Document {
+  locationId String? @map("location_id") @db.Uuid
+  location OrganizationLocation? @relation(fields: [organizationId, locationId], references: [organizationId, id], onDelete: Restrict)
   id String @id @default(uuid()) @db.Uuid
   organizationId String @map("organization_id") @db.Uuid
   storedFileId String @unique @map("stored_file_id") @db.Uuid
@@ -643,6 +667,7 @@ model Document {
   @@index([organizationId, deletedAt, folderId, createdAt])
   @@index([organizationId, targetMemberId, deletedAt])
   @@map("documents")
+  @@index([organizationId, locationId])
 }
 
 model DocumentAcknowledgement {
@@ -663,4 +688,92 @@ model DocumentAcknowledgement {
   @@index([memberId, acknowledgedAt, cancelledAt])
   @@index([documentId, cancelledAt, acknowledgedAt])
   @@map("document_acknowledgements")
+}
+
+
+enum LocationRole {
+  ADMIN
+  MEMBER
+}
+
+model OrganizationLocation {
+  id String @id @default(uuid()) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  name String @db.VarChar(120)
+  city String @db.VarChar(120)
+  address String @db.VarChar(300)
+  timezone String @db.VarChar(64)
+  monthlyWorkMinutes Int? @map("monthly_work_minutes")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  archivedAt DateTime? @map("archived_at") @db.Timestamptz(3)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  members LocationMember[]
+  teams LocationTeam[]
+  shifts WorkShift[]
+  requests OrganizationRequest[]
+  templates ShiftTemplate[]
+  invitations OrganizationInvite[]
+  documents Document[]
+  folders DocumentFolder[]
+  transfersFrom LocationTransfer[] @relation("TransferFrom")
+  transfersTo LocationTransfer[] @relation("TransferTo")
+  @@unique([organizationId, id])
+  @@index([organizationId, archivedAt])
+  @@map("organization_locations")
+}
+
+model LocationMember {
+  organizationId String @map("organization_id") @db.Uuid
+  locationId String @map("location_id") @db.Uuid
+  memberId String @map("member_id") @db.Uuid
+  role LocationRole @default(MEMBER)
+  joinedAt DateTime @default(now()) @map("joined_at") @db.Timestamptz(3)
+  leftAt DateTime? @map("left_at") @db.Timestamptz(3)
+  location OrganizationLocation @relation(fields: [organizationId, locationId], references: [organizationId, id], onDelete: Cascade)
+  member OrganizationMember @relation(fields: [organizationId, memberId], references: [organizationId, id], onDelete: Cascade)
+  @@id([locationId, memberId])
+  @@index([memberId, leftAt])
+  @@map("location_members")
+}
+
+model LocationTeam {
+  id String @id @default(uuid()) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  locationId String @map("location_id") @db.Uuid
+  name String @db.VarChar(120)
+  location OrganizationLocation @relation(fields: [organizationId, locationId], references: [organizationId, id], onDelete: Cascade)
+  members LocationTeamMember[]
+  @@unique([organizationId, id])
+  @@unique([locationId, name])
+  @@map("location_teams")
+}
+
+model LocationTeamMember {
+  organizationId String @map("organization_id") @db.Uuid
+  teamId String @map("team_id") @db.Uuid
+  memberId String @map("member_id") @db.Uuid
+  team LocationTeam @relation(fields: [organizationId, teamId], references: [organizationId, id], onDelete: Cascade)
+  member OrganizationMember @relation(fields: [organizationId, memberId], references: [organizationId, id], onDelete: Cascade)
+  @@id([teamId, memberId])
+  @@map("location_team_members")
+}
+
+model LocationTransfer {
+  id String @id @default(uuid()) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  memberId String @map("member_id") @db.Uuid
+  createdByMemberId String @map("created_by_member_id") @db.Uuid
+  fromLocationId String @map("from_location_id") @db.Uuid
+  toLocationId String @map("to_location_id") @db.Uuid
+  temporary Boolean @default(false)
+  startAt DateTime @map("start_at") @db.Timestamptz(3)
+  endAt DateTime? @map("end_at") @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  member OrganizationMember @relation("TransferredMember", fields: [organizationId, memberId], references: [organizationId, id], onDelete: Cascade)
+  createdBy OrganizationMember @relation("TransferAuthor", fields: [organizationId, createdByMemberId], references: [organizationId, id], onDelete: Restrict)
+  fromLocation OrganizationLocation @relation("TransferFrom", fields: [organizationId, fromLocationId], references: [organizationId, id], onDelete: Restrict)
+  toLocation OrganizationLocation @relation("TransferTo", fields: [organizationId, toLocationId], references: [organizationId, id], onDelete: Restrict)
+  @@index([organizationId, toLocationId, memberId, startAt])
+  @@map("location_transfers")
 }

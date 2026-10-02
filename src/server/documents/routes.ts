@@ -17,11 +17,11 @@ function parse<T>(schema: z.ZodType<T>, value: unknown) { const parsed = schema.
 // Authentication is scoped to these endpoints; unrelated public routes stay unchanged.
 router.use(['/profile/documents', '/organizations/:organizationId/documents', '/organizations/:organizationId/document-folders', '/organizations/:organizationId/documents-members'], requireAuth, (_request, response, next) => { response.set('Cache-Control', 'private, no-store'); next() })
 router.get('/profile/documents', async (request, response) => { const { page, search } = parse(listSchema, request.query); const organizationId = typeof request.query.organizationId === 'string' ? parse(z.uuid(), request.query.organizationId) : undefined; response.json(await personalDocuments(user(request), page, search, organizationId)) })
-router.get('/organizations/:organizationId/documents-members', async (request, response) => { const { organizationId } = parse(paramsSchema, request.params); response.json({ members: await documentMembers(user(request), organizationId) }) })
+router.get('/organizations/:organizationId/documents-members', async (request, response) => { const { organizationId } = parse(paramsSchema, request.params); response.json({ members: await documentMembers(user(request), organizationId, parse(z.object({ all: z.enum(['true', 'false']).optional() }), request.query).all === 'true') }) })
 router.get(base, async (request, response) => { const { organizationId } = parse(paramsSchema, request.params); response.json(await listDocuments(user(request), organizationId, parse(listSchema, request.query))) })
 router.put(base, upload, body, async (request, response) => {
   const { organizationId } = parse(paramsSchema, request.params)
-  const data = parse(metadataSchema, { displayName: request.query.displayName, folderId: request.query.folderId ?? null, visibility: request.query.visibility, targetMemberId: request.query.targetMemberId ?? null })
+  const data = parse(metadataSchema, { shared: request.query.shared === 'true', displayName: request.query.displayName, folderId: request.query.folderId ?? null, visibility: request.query.visibility, targetMemberId: request.query.targetMemberId ?? null })
   response.status(201).json({ document: await uploadDocument(user(request), organizationId, request.body, request.get('content-type')?.split(';')[0] ?? '', request.get('x-file-name'), data) })
 })
 router.get(`${base}/:documentId`, async (request, response) => { const { organizationId, documentId } = parse(paramsSchema, request.params); response.json({ document: await getDocument(user(request), organizationId, documentId!) }) })

@@ -1,7 +1,9 @@
+import Select from '../../component/ui/select/select.tsx'
+import { useAuth } from '../../app/auth/auth-context.tsx'
 import RoleBadge from '../../component/ui/role-badge/role-badge.tsx'
-import { Navigate, Link, NavLink, Route, Routes, useLocation, useParams } from 'react-router-dom'
-import { useState, type ReactNode } from 'react'
-import { useOrganization } from '../../app/organizations/queries.ts'
+import { Navigate, Link, NavLink, Route, Routes, useLocation, useParams, useNavigate } from 'react-router-dom'
+import { useState, useEffect, type ReactNode } from 'react'
+import { useOrganization, useLocations } from '../../app/organizations/queries.ts'
 import AppTopbar from './app-topbar.tsx'
 import OrganizationDashboard from './organization-dashboard.tsx'
 import OrganizationMembers from './organization-members.tsx'
@@ -22,6 +24,7 @@ const navigation = [
 
 function NavigationIcon({ section }: { section: string }) {
   const common = { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.7, 'aria-hidden': true } as const
+  if (section === 'location') return <svg {...common}><path d="M19 10c0 5-7 11-7 11S5 15 5 10a7 7 0 1 1 14 0Z" /><circle cx="12" cy="10" r="2.5" /></svg>
   if (section === '') return <svg {...common}><path d="M3 11.5 12 4l9 7.5" /><path d="M5.5 10v10h13V10M9 20v-6h6v6" /></svg>
   if (section === 'employees') return <svg {...common}><circle cx="9" cy="8" r="3" /><path d="M3.5 20v-2.5A4.5 4.5 0 0 1 8 13h2a4.5 4.5 0 0 1 4.5 4.5V20M15 5.5a3 3 0 0 1 0 5.5M17 13a4 4 0 0 1 3.5 4v3" /></svg>
   if (section === 'schedule') return <svg {...common}><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M7 3v4M17 3v4M3 10h18M7 14h3M14 14h3M7 17h3" /></svg>
@@ -63,6 +66,13 @@ export default function OrganizationLayout() {
   const { organizationId } = useParams()
   const location = useLocation()
   const query = useOrganization(organizationId)
+  const locations = useLocations(organizationId)
+  const { user } = useAuth()
+  const navigate = useNavigate()
+  const selectedId = query.data?.organization.locationId
+  useEffect(() => {
+    if (selectedId) window.sessionStorage.setItem(`staffly:location:${user?.id}:${organizationId}`, selectedId)
+  }, [selectedId, user?.id, organizationId])
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem('staffly:sidebar-collapsed') === 'true')
   if (query.isLoading) return <main className="app-loading"><span /></main>
   if (query.isError || !query.data) return <WorkspaceLoadError organizationId={organizationId} retry={() => void query.refetch()} notFound={Boolean(query.error && 'status' in query.error && query.error.status === 404)} />
@@ -70,21 +80,24 @@ export default function OrganizationLayout() {
   const organizationPath = `/app/organizations/${organization.id}`
   const currentSegment = location.pathname.slice(organizationPath.length).split('/').filter(Boolean)[0] ?? ''
   const currentSection = navigation.find(([path]) => path === currentSegment)?.[1] ?? 'Неизвестный раздел'
-  const module = (content: ReactNode) => <ModuleErrorBoundary key={location.pathname} organizationPath={organizationPath}>{content}</ModuleErrorBoundary>
+  const points = locations.data?.locations ?? (organization.location ? [organization.location] : [])
+  const locationAddress = [organization.location?.city, organization.location?.address].filter(Boolean).join(' · ')
+  const module = (content: ReactNode) => <ModuleErrorBoundary key={location.pathname + organization.locationId} organizationPath={organizationPath}>{content}</ModuleErrorBoundary>
   function toggleSidebar() {
     setSidebarCollapsed((value) => {
       window.localStorage.setItem('staffly:sidebar-collapsed', String(!value))
       return !value
     })
   }
-  return <div className="app-page"><AppTopbar organization={organization} /><div className={`workspace-shell${sidebarCollapsed ? ' workspace-shell--collapsed' : ''}`}>
+  return <div className="app-page"><AppTopbar key={organization.locationId} organization={organization} /><div className={`workspace-shell${sidebarCollapsed ? ' workspace-shell--collapsed' : ''}`}>
     <aside className="workspace-sidebar" aria-label="Навигация организации">
       <div className="workspace-sidebar__organization"><Avatar url={organization.logoUrl} name={organization.name} className="workspace-sidebar__organization-avatar" eager /><div><strong>{organization.name}</strong><small><RoleBadge role={organization.role} /> · {currentSection}</small></div></div>
+      <div className="workspace-location"><label><span>Рабочая точка</span><div className="workspace-location__control"><NavigationIcon section="location" />{points.length === 1 && !locations.isLoading && !locations.isError ? <strong title={points[0].name}>{points[0].name}{points[0].archivedAt ? ' · закрыта' : ''}</strong> : <Select aria-label="Текущая точка" value={organization.locationId ?? ''} disabled={locations.isLoading || locations.isError} onChange={event => { window.sessionStorage.setItem(`staffly:location:${user?.id}:${organization.id}`, event.target.value); navigate({ pathname: location.pathname, search: `?location=${event.target.value}` }) }}>{points.map(point => <option key={point.id} value={point.id}>{point.name}{point.archivedAt ? ' · закрыта' : ''}</option>)}</Select>}</div></label>{locationAddress && <small>{locationAddress}</small>}{locations.isError && <button className="app-secondary" onClick={() => void locations.refetch()}>Повторить загрузку точек</button>}</div>
       <button className="workspace-sidebar__collapse" type="button" aria-label={sidebarCollapsed ? 'Развернуть меню' : 'Свернуть меню'} onClick={toggleSidebar}><CollapseIcon collapsed={sidebarCollapsed} /><span>{sidebarCollapsed ? 'Развернуть' : 'Свернуть'}</span></button>
-      <nav aria-label="Разделы организации">{navigation.map(([path, label]) => <NavLink end title={sidebarCollapsed ? label : undefined} to={path ? `${organizationPath}/${path}` : organizationPath} key={label}><NavigationIcon section={path} /><span>{label}</span>{path === 'documents' && <DocumentNavBadge organizationId={organization.id} />}</NavLink>)}</nav>
+      <nav aria-label="Разделы организации">{navigation.map(([path, label]) => <NavLink end title={sidebarCollapsed ? label : undefined} to={`${path ? `${organizationPath}/${path}` : organizationPath}?location=${organization.locationId}`} key={label}><NavigationIcon section={path} /><span>{label}</span>{path === 'documents' && <DocumentNavBadge organizationId={organization.id} />}</NavLink>)}</nav>
       <div className="workspace-sidebar__footer"><NavLink className="workspace-sidebar__back" title={sidebarCollapsed ? 'Все организации' : undefined} to="/app"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m10 6-6 6 6 6M4 12h16" /></svg><span>Все организации</span></NavLink></div>
     </aside>
-    <main className="workspace-content">
+    <main className="workspace-content" key={organization.locationId}><div className="workspace-location-heading"><span>Точка ·</span><strong>{organization.location?.name}</strong></div>
       <Routes>
         <Route index element={module(<OrganizationDashboard organization={organization} />)} />
         <Route path="employees" element={module(<OrganizationMembers organization={organization} />)} />

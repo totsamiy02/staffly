@@ -1,7 +1,8 @@
+import { useLocation } from 'react-router-dom'
 import { postAuthJson as postJson } from './session-transport.ts'
 import { useQueryClient } from '@tanstack/react-query'
 /* oxlint-disable react/only-export-components -- The provider and its hook share one context. */
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useRef, useState, useMemo, type ReactNode } from 'react'
 
 export type AuthUser = { id: string; email: string; displayName: string; firstName: string | null; lastName: string | null; middleName: string | null; phone: string | null; bio: string | null; avatarUrl: string | null }
 type AuthResult = { user: AuthUser; accessToken: string }
@@ -180,5 +181,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 export function useAuth() {
   const context = useContext(AuthContext)
   if (!context) throw new Error('AuthProvider is missing')
-  return context
+  const route = useLocation()
+  const organizationId = /^\/app\/organizations\/([^/]+)/.exec(route.pathname)?.[1]
+  const locationId = new URLSearchParams(route.search).get('location') ?? (organizationId ? window.sessionStorage.getItem(`staffly:location:${context.user?.id}:${organizationId}`) : null) ?? undefined
+  return useMemo(() => {
+  const scopePath = (path: string) => {
+    if (!locationId || !organizationId || !path.startsWith(`/organizations/${organizationId}`)) return path
+    const url = new URL(path, window.location.origin)
+    if (!url.searchParams.has('locationId')) url.searchParams.set('locationId', locationId)
+    return url.pathname + url.search
+  }
+  return { ...context, locationId, organizationId,
+    apiRequest: <T,>(path: string, options?: ApiOptions) => context.apiRequest<T>(scopePath(path), options),
+    uploadFile: <T,>(path: string, file: File) => context.uploadFile<T>(scopePath(path), file),
+    uploadImage: <T,>(path: string, file: File) => context.uploadImage<T>(scopePath(path), file),
+    downloadFile: (path: string, name: string, method?: 'GET' | 'POST') => context.downloadFile(scopePath(path), name, method),
+    previewFile: (path: string, method?: 'GET' | 'POST') => context.previewFile(scopePath(path), method),
+  }
+  }, [context, locationId, organizationId])
 }

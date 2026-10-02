@@ -4,13 +4,13 @@ import { useAuth } from '../auth/auth-context.tsx'
 import type { EmployeeAbsence, MemberWorkTime, ShiftDetails, ShiftNotification, WorkShift, WorkTimeStatistics } from './types.ts'
 
 export function useSchedule(organizationId: string, from: string, to: string, mode: 'current' | 'history' = 'current') {
-  const { apiRequest } = useAuth()
-  return useQuery({ ...liveQueryOptions, queryKey: ['schedule', organizationId, from, to, mode], queryFn: () => apiRequest<{ timezone: string; shifts: WorkShift[]; absences: EmployeeAbsence[] }>(`/organizations/${organizationId}/schedule?from=${from}&to=${to}&mode=${mode}`), placeholderData: (previous) => previous })
+  const { locationId, apiRequest } = useAuth()
+  return useQuery({ ...liveQueryOptions, queryKey: ['schedule', organizationId, from, to, mode, locationId], queryFn: () => apiRequest<{ timezone: string; shifts: WorkShift[]; absences: EmployeeAbsence[] }>(`/organizations/${organizationId}/schedule?from=${from}&to=${to}&mode=${mode}`), placeholderData: (previous, previousQuery) => previousQuery?.queryKey.at(-1) === locationId ? previous : undefined })
 }
 
 export function useMyUpcomingShifts(organizationId: string, enabled = true) {
-  const { apiRequest } = useAuth()
-  return useQuery({ ...liveQueryOptions, queryKey: ['my-upcoming-shifts', organizationId], queryFn: () => apiRequest<{ timezone: string; shifts: WorkShift[] }>(`/organizations/${organizationId}/schedule/mine/upcoming`), enabled })
+  const { locationId, apiRequest } = useAuth()
+  return useQuery({ ...liveQueryOptions, queryKey: ['my-upcoming-shifts', organizationId, locationId], queryFn: () => apiRequest<{ timezone: string; shifts: WorkShift[] }>(`/organizations/${organizationId}/schedule/mine/upcoming`), enabled })
 }
 
 export function useShiftNotifications() {
@@ -33,21 +33,21 @@ function queryString(params: StatisticsParams) {
 }
 
 export function useWorkTimeStatistics(organizationId: string, params: StatisticsParams, enabled = true) {
-  const { apiRequest } = useAuth()
-  return useQuery({ ...liveQueryOptions, queryKey: ['work-time-statistics', organizationId, params], queryFn: () => apiRequest<WorkTimeStatistics>(`/organizations/${organizationId}/statistics/work-time?${queryString(params)}`), enabled })
+  const { locationId, apiRequest } = useAuth()
+  return useQuery({ ...liveQueryOptions, queryKey: ['work-time-statistics', organizationId, params, locationId], queryFn: () => apiRequest<WorkTimeStatistics>(`/organizations/${organizationId}/statistics/work-time?${queryString(params)}`), enabled })
 }
 
 export function useMemberWorkTime(organizationId: string, memberId: string | null, params: StatisticsParams) {
-  const { apiRequest } = useAuth()
-  return useQuery({ ...liveQueryOptions, queryKey: ['member-work-time', organizationId, memberId, params], queryFn: () => apiRequest<MemberWorkTime>(`/organizations/${organizationId}/members/${memberId}/work-time?${queryString({ ...params, memberState: 'all' })}`), enabled: Boolean(memberId) })
+  const { locationId, apiRequest } = useAuth()
+  return useQuery({ ...liveQueryOptions, queryKey: ['member-work-time', organizationId, memberId, params, locationId], queryFn: () => apiRequest<MemberWorkTime>(`/organizations/${organizationId}/members/${memberId}/work-time?${queryString({ ...params, memberState: 'all' })}`), enabled: Boolean(memberId) })
 }
 
 export function useMyWorkTime(organizationId: string, params: StatisticsParams, enabled = true) {
-  const { apiRequest } = useAuth()
-  return useQuery({ ...liveQueryOptions, queryKey: ['my-work-time', organizationId, params], queryFn: () => apiRequest<MemberWorkTime>(`/organizations/${organizationId}/me/work-time?${queryString({ ...params, memberState: 'all' })}`), enabled })
+  const { locationId, apiRequest } = useAuth()
+  return useQuery({ ...liveQueryOptions, queryKey: ['my-work-time', organizationId, params, locationId], queryFn: () => apiRequest<MemberWorkTime>(`/organizations/${organizationId}/me/work-time?${queryString({ ...params, memberState: 'all' })}`), enabled })
 }
 
 export function useShiftDetails(organizationId: string, shiftId: string | null, page = 1) {
-  const { apiRequest } = useAuth()
-  return useQuery({ ...liveQueryOptions, queryKey: ['shift-details', organizationId, shiftId, page], queryFn: () => apiRequest<{ shift: ShiftDetails }>(`/organizations/${organizationId}/shifts/${shiftId}?page=${page}&limit=20`), enabled: Boolean(shiftId) })
+  const { locationId, apiRequest } = useAuth()
+  return useQuery({ ...liveQueryOptions, queryKey: ['shift-details', organizationId, shiftId, page, locationId], queryFn: () => apiRequest<{ shift: ShiftDetails }>(`/organizations/${organizationId}/shifts/${shiftId}?page=${page}&limit=20`), enabled: Boolean(shiftId) })
 }

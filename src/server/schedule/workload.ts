@@ -1,10 +1,12 @@
+import { scopedLocationId } from '../organizations/location-context.ts'
 import type { Prisma } from '../../generated/prisma/client.ts'
 import { ApiError } from '../api-error.ts'
 import { startOfZonedDate, zonedParts } from './timezone.ts'
 
 // Month attribution follows existing statistics: scheduled start; actual time takes precedence.
 export async function checkMonthlyWorkload(tx: Prisma.TransactionClient, organizationId: string, memberId: string, timezone: string, limit: number | null, additions: Array<{ start: Date; end: Date }>, excludedIds: string[] = [], acknowledged = false) {
-  limit = (await tx.organization.findUniqueOrThrow({ where: { id: organizationId }, select: { monthlyWorkMinutes: true } })).monthlyWorkMinutes
+  const locationId = scopedLocationId(organizationId)
+  limit = locationId ? (await tx.organizationLocation.findUniqueOrThrow({ where: { id: locationId }, select: { monthlyWorkMinutes: true } })).monthlyWorkMinutes : (await tx.organization.findUniqueOrThrow({ where: { id: organizationId }, select: { monthlyWorkMinutes: true } })).monthlyWorkMinutes
   if (!limit) return []
   const warnings: Array<{ month: string; minutes: number; limit: number }> = []
   const monthOf = (date: Date) => { const p = zonedParts(date, timezone); return String(p.year) + '-' + String(p.month).padStart(2, '0') }

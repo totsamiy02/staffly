@@ -2,7 +2,8 @@ import express from 'express'
 import cookieParser from 'cookie-parser'
 import helmet from 'helmet'
 import { prisma } from './db.ts'
-import authRouter from './auth.ts'
+import authRouter, { requireAuth } from './auth.ts'
+import { selectLocation } from './organizations/location-context.ts'
 import organizationRouter from './organizations/routes.ts'
 import profileRouter from './profile/routes.ts'
 import scheduleRouter from './schedule/routes.ts'
@@ -54,6 +55,7 @@ if (process.env.NODE_ENV !== 'production') app.get('/api/database-status', async
   }
 })
 
+app.use('/api/organizations/:organizationId', requireAuth, selectLocation)
 app.use('/api', storageRouter)
 app.use('/api/auth', (_request, response, next) => { response.set('Cache-Control', 'no-store'); next() }, authRouter)
 app.use('/api', (_request, response, next) => { response.set('Cache-Control', 'no-store'); next() }, profileRouter)

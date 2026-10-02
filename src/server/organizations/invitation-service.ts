@@ -1,3 +1,4 @@
+import { locationWhere } from './location-context.ts'
 import { createHash, createCipheriv, createDecipheriv, randomBytes, randomInt } from 'node:crypto'
 import { prisma } from '../db.ts'
 import { mediaUrl } from '../storage/image-service.ts'
@@ -46,22 +47,23 @@ export async function createEmailInvitation(actorUserId: string, organizationId:
   const actorUser = await prisma.user.findUniqueOrThrow({ where: { id: actorUserId } })
   if (actorUser.email === invitedEmail) throw new ApiError(400, 'CANNOT_INVITE_SELF', 'Нельзя пригласить самого себя.')
   const existingUser = await prisma.user.findUnique({ where: { email: invitedEmail } })
-  if (existingUser && await prisma.organizationMember.findFirst({ where: { organizationId, userId: existingUser.id, leftAt: null } })) {
+  if (existingUser && await prisma.organizationMember.findFirst({ where: { organizationId, userId: existingUser.id, leftAt: null, locationMemberships: { some: { locationId: actor.locationId, leftAt: null } } } })) {
     throw new ApiError(409, 'ALREADY_MEMBER', 'Пользователь уже состоит в организации.')
   }
 
   const now = new Date()
   await prisma.organizationInvite.updateMany({
-    where: { organizationId, type: 'EMAIL', invitedEmail, acceptedAt: null, rejectedAt: null, revokedAt: null, expiresAt: { lte: now } },
+    where: { organizationId, ...locationWhere(organizationId), type: 'EMAIL', invitedEmail, acceptedAt: null, rejectedAt: null, revokedAt: null, expiresAt: { lte: now } },
     data: { revokedAt: now },
   })
-  const duplicate = await prisma.organizationInvite.findFirst({ where: { organizationId, type: 'EMAIL', invitedEmail, ...activeInviteWhere(now) } })
+  const duplicate = await prisma.organizationInvite.findFirst({ where: { organizationId, ...locationWhere(organizationId), type: 'EMAIL', invitedEmail, ...activeInviteWhere(now) } })
   if (duplicate) throw new ApiError(409, 'INVITATION_ALREADY_EXISTS', 'Активное приглашение уже отправлено.')
 
   const token = randomBytes(32).toString('base64url')
   try {
     const invitation = await prisma.organizationInvite.create({ data: {
       organizationId,
+      locationId: actor.locationId,
       invitedByUserId: actorUserId,
       type: 'EMAIL',
       invitedEmail,
@@ -84,6 +86,7 @@ export async function createCodeInvitation(actorUserId: string, organizationId: 
     try {
       const invitation = await prisma.organizationInvite.create({ data: {
         organizationId,
+        locationId: actor.locationId,
         invitedByUserId: actorUserId,
         type: 'CODE',
         tokenHash: digest(code),
@@ -116,7 +119,7 @@ export async function listActiveOrganizationInvitations(actorUserId: string, org
   const actor = await getMembership(actorUserId, organizationId)
   requireOrganizationRole(actor.role, ['OWNER', 'ADMIN'])
   const invitations = await prisma.organizationInvite.findMany({
-    where: { organizationId, ...activeInviteWhere() },
+    where: { organizationId, ...locationWhere(organizationId), ...activeInviteWhere() },
     select: { id: true, type: true, invitedEmail: true, expiresAt: true, createdAt: true, codeCiphertext: true },
     orderBy: { createdAt: 'desc' },
   })
@@ -165,14 +168,16 @@ async function acceptInvitation(userId: string, userEmail: string, lookup: { id:
     validateInvitation(invite, expectedType)
     if (expectedType === 'EMAIL' && invite.invitedEmail !== userEmail) throw new ApiError(403, 'INVITATION_EMAIL_MISMATCH', 'Приглашение предназначено для другого аккаунта.')
     const existing = await tx.organizationMember.findUnique({ where: { organizationId_userId: { organizationId: invite.organizationId, userId } } })
-    if (existing && !existing.leftAt) throw new ApiError(409, 'ALREADY_MEMBER', 'Вы уже состоите в этой организации.')
+    if (existing && !existing.leftAt && (!invite.locationId || await tx.locationMember.findFirst({ where: { memberId: existing.id, locationId: invite.locationId, leftAt: null } }))) throw new ApiError(409, 'ALREADY_MEMBER', 'Вы уже состоите в этой организации.')
     const claimed = await tx.organizationInvite.updateMany({
       where: { id: invite.id, acceptedAt: null, rejectedAt: null, revokedAt: null, expiresAt: { gt: new Date() } },
       data: { acceptedAt: new Date(), acceptedByUserId: userId, readAt: new Date() },
     })
     if (!claimed.count) throw new ApiError(409, 'INVITATION_ALREADY_USED', 'Приглашение уже использовано.')
-    if (existing) await tx.organizationMember.update({ where: { id: existing.id }, data: { leftAt: null, role: 'MEMBER' } })
-    else await tx.organizationMember.create({ data: { organizationId: invite.organizationId, userId, role: 'MEMBER' } })
+    if (invite.locationId && !await tx.organizationLocation.findFirst({ where: { id: invite.locationId, organizationId: invite.organizationId, archivedAt: null } })) throw new ApiError(410, 'LOCATION_CLOSED', 'Точка приглашения закрыта.')
+    const member = existing ? existing.leftAt ? await tx.organizationMember.update({ where: { id: existing.id }, data: { leftAt: null, role: 'MEMBER' } }) : existing : await tx.organizationMember.create({ data: { organizationId: invite.organizationId, userId, role: 'MEMBER' } })
+    const locationId = invite.locationId ?? (await tx.organizationLocation.findFirstOrThrow({ where: { organizationId: invite.organizationId, archivedAt: null }, orderBy: { createdAt: 'asc' } })).id
+    await tx.locationMember.upsert({ where: { locationId_memberId: { locationId, memberId: member.id } }, create: { organizationId: invite.organizationId, locationId, memberId: member.id }, update: { leftAt: null, role: 'MEMBER' } })
     return { organizationId: invite.organizationId }
   }, { isolationLevel: 'Serializable' })
 }
@@ -196,6 +201,6 @@ export async function rejectEmailInvitation(userEmail: string, inviteId: string)
 export async function revokeInvitation(actorUserId: string, organizationId: string, inviteId: string) {
   const actor = await getMembership(actorUserId, organizationId)
   requireOrganizationRole(actor.role, ['OWNER', 'ADMIN'])
-  const revoked = await prisma.organizationInvite.updateMany({ where: { id: inviteId, organizationId, acceptedAt: null, rejectedAt: null, revokedAt: null }, data: { revokedAt: new Date() } })
+  const revoked = await prisma.organizationInvite.updateMany({ where: { id: inviteId, organizationId, ...locationWhere(organizationId), acceptedAt: null, rejectedAt: null, revokedAt: null }, data: { revokedAt: new Date() } })
   if (!revoked.count) throw new ApiError(404, 'INVITATION_NOT_FOUND', 'Активное приглашение не найдено.')
 }
