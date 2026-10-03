@@ -1,7 +1,8 @@
+import { mediaUrl } from '../storage/image-service.ts'
 import { prisma } from '../db.ts'
 import { getMembership, requireOrganizationRole } from './permissions.ts'
 import { scopedLocationId } from './location-context.ts'
-import { archiveLocation, assignLocationMember, deleteTeam, listLocations, listTeams, locationMemberBody, removeLocationMember, saveLocation, saveTeam, teamBody, transferBody, transferMember } from './location-service.ts'
+import { archiveLocation, requestLocationClosure, assignLocationMember, deleteTeam, listLocations, locationOverview, listTeams, locationMemberBody, removeLocationMember, saveLocation, saveTeam, teamBody, transferBody, transferMember } from './location-service.ts'
 import { locationBody } from './schemas.ts'
 import { listNotificationHistory, readHistoryNotification, updateAllNotifications } from './notification-service.ts'
 import { Router, type Request } from 'express'
@@ -10,7 +11,7 @@ import { z } from 'zod'
 import { requireAuth, type AuthenticatedRequest } from '../auth.ts'
 import { deliverOrganizationCreated, deliverOrganizationInvitation, deliverSensitiveActionCode } from '../mail.ts'
 import { ApiError } from '../api-error.ts'
-import { createOrganization, getOrganization, listAccountNotifications, listMembers, listMembersPage, listOrganizations, readAccountNotification, removeMember, updateOrganization } from './organization-service.ts'
+import { changeMemberRole, createOrganization, getOrganization, listAccountNotifications, listMembers, listMembersPage, listOrganizations, readAccountNotification, removeMember, updateOrganization } from './organization-service.ts'
 import { acceptCodeInvitation, acceptEmailInvitation, createCodeInvitation, createEmailInvitation, listActiveOrganizationInvitations, listPendingInvitations, previewCodeInvitation, previewEmailInvitation, rejectEmailInvitation, revokeInvitation } from './invitation-service.ts'
 import { confirmOrganizationDeletion, confirmOwnershipTransfer, requestOrganizationDeletion, requestOwnershipTransfer } from './sensitive-action-service.ts'
 import { createOrganizationBody, emailInvitationBody, inviteCodeBody, inviteParams, memberListQuery, memberParams, organizationIdParams, ownershipRequestBody, roleBody, sensitiveCodeBody, updateOrganizationBody } from './schemas.ts'
@@ -82,7 +83,7 @@ router.patch('/organizations/:organizationId', async (request, response) => {
 router.get('/organizations/:organizationId/members', async (request, response) => {
   const { organizationId } = parse(organizationIdParams, request.params)
   const options = parse(memberListQuery, request.query)
-  if (options.page || options.pageSize || options.role || options.search || options.positionId) {
+  if (options.page || options.pageSize || options.role || options.search || options.positionId || options.directory || options.pointId) {
     response.json(await listMembersPage(auth(request).userId, organizationId, options))
     return
   }
@@ -92,7 +93,7 @@ router.get('/organizations/:organizationId/members', async (request, response) =
 router.patch('/organizations/:organizationId/members/:memberId/role', async (request, response) => {
   const { organizationId, memberId } = parse(memberParams, request.params)
   const { role } = parse(roleBody, request.body)
-  const member = await assignLocationMember(auth(request).userId, organizationId, scopedLocationId(organizationId)!, memberId, role)
+  const member = await changeMemberRole(auth(request).userId, organizationId, memberId, role)
   response.json({ member })
 })
 
@@ -194,6 +195,10 @@ router.get('/organizations/:organizationId/locations', async (request, response)
   const { organizationId } = parse(organizationIdParams, request.params)
   response.json({ locations: await listLocations(auth(request).userId, organizationId) })
 })
+router.get('/organizations/:organizationId/locations/overview', async (request, response) => {
+  const { organizationId } = parse(organizationIdParams, request.params)
+  response.json({ locations: await locationOverview(auth(request).userId, organizationId) })
+})
 router.post('/organizations/:organizationId/locations', async (request, response) => {
   const { organizationId } = parse(organizationIdParams, request.params)
   response.status(201).json({ location: await saveLocation(auth(request).userId, organizationId, null, parse(locationBody, request.body)) })
@@ -204,7 +209,13 @@ router.patch('/organizations/:organizationId/locations/:locationId', async (requ
 })
 router.delete('/organizations/:organizationId/locations/:locationId', async (request, response) => {
   const { organizationId, locationId } = parse(organizationIdParams.extend({ locationId: z.uuid() }), request.params)
-  await archiveLocation(auth(request).userId, organizationId, locationId); response.status(204).end()
+  await archiveLocation(auth(request).userId, organizationId, locationId, parse(sensitiveCodeBody, request.body).code); response.status(204).end()
+})
+router.post('/organizations/:organizationId/locations/:locationId/close/request', sensitiveLimiter, async (request, response) => {
+  const { organizationId, locationId } = parse(organizationIdParams.extend({ locationId: z.uuid() }), request.params)
+  const result = await requestLocationClosure(auth(request).userId, organizationId, locationId)
+  await deliverSensitiveActionCode('location', auth(request).email, `${result.organizationName} · ${result.locationName}`, result.code)
+  response.status(202).json({ message: 'Код отправлен на почту владельца.' })
 })
 router.post('/organizations/:organizationId/locations/:locationId/members', async (request, response) => {
   const { organizationId, locationId } = parse(organizationIdParams.extend({ locationId: z.uuid() }), request.params)
@@ -215,8 +226,8 @@ router.get('/organizations/:organizationId/all-members', async (request, respons
   const { organizationId } = parse(organizationIdParams, request.params)
   await getMembership(auth(request).userId, organizationId)
   // The organization directory is public to its members, like point calendars.
-  const members = await prisma.organizationMember.findMany({ where: { organizationId, leftAt: null, user: { deletedAt: null } }, select: { id: true, user: { select: { email: true, firstName: true, lastName: true } }, locationMemberships: { where: { leftAt: null }, select: { locationId: true, role: true } } } })
-  response.json({ members: members.map(m => ({ id: m.id, displayName: [m.user.lastName, m.user.firstName].filter(Boolean).join(' ') || m.user.email, locations: m.locationMemberships })) })
+  const members = await prisma.organizationMember.findMany({ where: { organizationId, leftAt: null, user: { deletedAt: null } }, select: { id: true, user: { select: { email: true, firstName: true, lastName: true, middleName: true, avatarFileId: true } }, role: true, locationMemberships: { where: { leftAt: null, location: { archivedAt: null } }, select: { locationId: true, role: true } } } })
+  response.json({ members: members.map(m => ({ id: m.id, displayName: [m.user.lastName, m.user.firstName, m.user.middleName].filter(Boolean).join(' ') || m.user.email, email: m.user.email, avatarUrl: mediaUrl(m.user.avatarFileId), role: m.role, locations: m.locationMemberships })) })
 })
 router.get('/organizations/:organizationId/teams', async (request, response) => response.json({ teams: await listTeams(auth(request).userId, parse(organizationIdParams, request.params).organizationId) }))
 router.post('/organizations/:organizationId/teams', async (request, response) => response.status(201).json({ team: await saveTeam(auth(request).userId, parse(organizationIdParams, request.params).organizationId, null, parse(teamBody, request.body)) }))

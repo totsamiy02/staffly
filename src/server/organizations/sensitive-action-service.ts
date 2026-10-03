@@ -12,14 +12,14 @@ const CODE_MS = 10 * 60 * 1000
 const COOLDOWN_MS = 60 * 1000
 const MAX_ATTEMPTS = 5
 
-type Action = 'TRANSFER_OWNERSHIP' | 'DELETE_ORGANIZATION'
+type Action = 'TRANSFER_OWNERSHIP' | 'DELETE_ORGANIZATION' | 'ARCHIVE_LOCATION'
 function newCode() { return randomInt(0, 1_000_000).toString().padStart(6, '0') }
 function codeHash(userId: string, organizationId: string, action: Action, code: string) {
   return createHmac('sha256', SECRET).update(`${userId}:${organizationId}:${action}:${code}`).digest('hex')
 }
 function equalHash(left: string, right: string) { return timingSafeEqual(Buffer.from(left, 'hex'), Buffer.from(right, 'hex')) }
 
-async function createSensitiveToken(userId: string, organizationId: string, action: Action, targetUserId?: string) {
+export async function createSensitiveToken(userId: string, organizationId: string, action: Action, targetUserId?: string, targetLocationId?: string) {
   const latest = await prisma.sensitiveActionToken.findFirst({ where: { userId, organizationId, action }, orderBy: { createdAt: 'desc' } })
   if (latest && latest.createdAt > new Date(Date.now() - COOLDOWN_MS)) throw new ApiError(429, 'CODE_COOLDOWN', 'Новый код можно запросить через минуту.')
   const code = newCode()
@@ -30,6 +30,7 @@ async function createSensitiveToken(userId: string, organizationId: string, acti
       organizationId,
       action,
       targetUserId,
+      targetLocationId,
       codeHash: codeHash(userId, organizationId, action, code),
       expiresAt: new Date(Date.now() + CODE_MS),
     } }),
@@ -54,15 +55,18 @@ export async function requestOrganizationDeletion(userId: string, organizationId
   return { code, organizationName: actor.organization.name }
 }
 
-async function claimSensitiveToken(tx: Prisma.TransactionClient, userId: string, organizationId: string, action: Action, code: string) {
+export async function claimSensitiveToken(tx: Prisma.TransactionClient, userId: string, organizationId: string, action: Action, code: string, locationId?: string) {
   const token = await tx.sensitiveActionToken.findFirst({ where: { userId, organizationId, action, usedAt: null }, orderBy: { createdAt: 'desc' } })
   if (!token || token.expiresAt <= new Date() || token.attempts >= MAX_ATTEMPTS) throw new ApiError(400, 'INVALID_VERIFICATION_CODE', 'Код неверен или срок его действия истёк.')
-  const valid = equalHash(token.codeHash, codeHash(userId, organizationId, action, code))
+  const valid = (!locationId || token.targetLocationId === locationId) && equalHash(token.codeHash, codeHash(userId, organizationId, action, code))
   const claimed = await tx.sensitiveActionToken.updateMany({
     where: { id: token.id, usedAt: null, attempts: { lt: MAX_ATTEMPTS }, expiresAt: { gt: new Date() } },
     data: { attempts: { increment: 1 }, ...(valid ? { usedAt: new Date() } : {}) },
   })
-  if (!claimed.count || !valid) throw new ApiError(400, 'INVALID_VERIFICATION_CODE', 'Код неверен или срок его действия истёк.')
+  if (!claimed.count || !valid) {
+    if (action === 'ARCHIVE_LOCATION') return null
+    throw new ApiError(400, 'INVALID_VERIFICATION_CODE', 'Код неверен или срок его действия истёк.')
+  }
   return token
 }
 
@@ -72,7 +76,7 @@ export async function confirmOwnershipTransfer(userId: string, organizationId: s
   const actorUser = await prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { email: true } })
   const result = await prisma.$transaction(async (tx) => {
     const token = await claimSensitiveToken(tx, userId, organizationId, 'TRANSFER_OWNERSHIP', code)
-    if (!token.targetUserId) throw new ApiError(400, 'INVALID_OWNERSHIP_TARGET', 'Участник для передачи владения не найден.')
+    if (!token?.targetUserId) throw new ApiError(400, 'INVALID_OWNERSHIP_TARGET', 'Участник для передачи владения не найден.')
     const target = await tx.organizationMember.findUnique({ where: { organizationId_userId: { organizationId, userId: token.targetUserId } }, include: { user: true } })
     if (!target || target.leftAt || target.user.deletedAt || target.role === 'OWNER') throw new ApiError(400, 'INVALID_OWNERSHIP_TARGET', 'Участник для передачи владения недоступен.')
     await tx.organizationMember.update({ where: { id: actor.id }, data: { role: 'MEMBER' } })

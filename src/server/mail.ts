@@ -60,10 +60,10 @@ export function deliverOrganizationInvitation(email: string, organizationName: s
   return sendMail(email, `Приглашение в ${organizationName} — Staffly`, `${inviterEmail} приглашает вас присоединиться к организации «${organizationName}».\n${link}`, emailHtml('Приглашение в организацию', `<strong>${safeInviter}</strong> приглашает вас присоединиться к организации <strong>«${safeName}»</strong>. Войдите или зарегистрируйтесь с этим адресом электронной почты.`, logo + button), `organization invitation for ${email}: ${link}`)
 }
 
-export function deliverSensitiveActionCode(kind: 'ownership' | 'deletion', email: string, organizationName: string, code: string) {
+export function deliverSensitiveActionCode(kind: 'ownership' | 'deletion' | 'location', email: string, organizationName: string, code: string) {
   const ownership = kind === 'ownership'
-  const title = ownership ? 'Передача владения' : 'Удаление организации'
-  const action = ownership ? `подтвердить передачу владения организацией «${organizationName}»` : `подтвердить удаление организации «${organizationName}»`
+  const title = ownership ? 'Передача владения' : kind === 'location' ? 'Закрытие точки' : 'Удаление организации'
+  const action = ownership ? `подтвердить передачу владения организацией «${organizationName}»` : kind === 'location' ? `подтвердить закрытие точки «${organizationName}»` : `подтвердить удаление организации «${organizationName}»`
   return sendMail(email, `${title} — Staffly`, `Используйте код ${code}, чтобы ${action}. Код действует 10 минут.`, emailHtml(title, `Используйте код ниже, чтобы ${escapeHtml(action)}.`, codeBlock(code)), `${kind} code for ${email}: ${code}`)
 }
 

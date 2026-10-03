@@ -400,3 +400,13 @@
 .work-time-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .statistics-period { flex-shrink: 0; }
 .statistics-period button { white-space: nowrap; }
+
+.schedule-calendar { grid-template-rows: 30px repeat(var(--calendar-weeks), minmax(250px, auto)); }
+.schedule-day { min-height: 250px; padding: 10px; }
+.schedule-day__shifts { gap: 5px; }
+.schedule-shift-chip { padding: 5px 7px; }
+.schedule-day__more { margin-top: auto; color: #333; }
+@media (max-width: 700px) { .schedule-calendar { grid-template-rows: 30px repeat(var(--calendar-weeks), minmax(110px, auto)); } .schedule-day { min-height: 110px; padding: 6px; } }
+
+.schedule-member-filter { width: min(100%, 360px); margin-top: 14px; }
+.schedule-member-filter .employee-picker { margin-bottom: 0; }

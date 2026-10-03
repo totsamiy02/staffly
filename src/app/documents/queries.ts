@@ -13,7 +13,7 @@ export function useDocumentRefresh() {
   return () => Promise.all(['documents', 'document', 'document-progress', 'personal-documents', 'notifications', 'account-notifications'].map(key => client.invalidateQueries({ queryKey: [key] })))
 }
 
-export function useDocumentMembers(organizationId: string, enabled = true, all = false) {
+export function useDocumentMembers(organizationId: string, enabled = true, all = false, pointId?: string | null) {
   const { locationId, apiRequest } = useAuth()
-  return useQuery({ enabled, queryKey: ['document-members', organizationId, locationId, all], queryFn: () => apiRequest<{ members: Array<{ id: string; name: string; email: string; avatarUrl: string | null; role: 'OWNER' | 'ADMIN' | 'MEMBER'; former: boolean }> }>(`/organizations/${organizationId}/documents-members?all=${all}`) })
+  return useQuery({ enabled, queryKey: ['document-members', organizationId, locationId, all, pointId], queryFn: () => apiRequest<{ members: Array<{ id: string; name: string; email: string; avatarUrl: string | null; role: 'OWNER' | 'ADMIN' | 'MEMBER'; former: boolean }> }>(`/organizations/${organizationId}/documents-members?all=${all}${pointId ? `&locationId=${pointId}` : ''}`) })
 }

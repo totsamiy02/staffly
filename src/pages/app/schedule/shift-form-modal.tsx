@@ -1,4 +1,3 @@
-import { useLocationTeams } from '../../../app/organizations/queries.ts'
 import { useToast, useToastFeedback } from '../../../component/ui/toast/toast-context.ts'
 import Select from '../../../component/ui/select/select.tsx'
 import { useSchedulePlanning } from '../../../app/schedule/planning.ts'
@@ -34,10 +33,7 @@ export default function ShiftFormModal({ organization, members, date, shift, act
   useToastFeedback('', error)
   const [busy, setBusy] = useState(false)
   const planning = useSchedulePlanning(organization.id)
-  const teams = useLocationTeams(organization.id)
-  const [teamId, setTeamId] = useState('')
-  const chosenTeam = teams.data?.teams.find(team => team.id === teamId)
-  const teamMembers = chosenTeam ? members.filter(member => chosenTeam.members.some(item => item.memberId === member.id)) : members
+
   const [positionId, setPositionId] = useState(shift?.positionId ?? '')
   const [templateId, setTemplateId] = useState('')
   const [batch, setBatch] = useState(false)
@@ -109,8 +105,8 @@ export default function ShiftFormModal({ organization, members, date, shift, act
   return <AnimatedOverlay variant="modal" onClose={onClose}>{(close) => <form className="shift-form" onChangeCapture={event => { if (!(event.target instanceof HTMLInputElement && ['ackWorkload', 'ackAbsence'].includes(event.target.name))) { setAcknowledgeWorkload(false); if (workloadWarning) { setWorkloadWarning(false); setError('') } } }} onSubmit={(event) => void submit(event, close)}>
     <header><div><p className="app-eyebrow">{actual ? 'Завершённая смена' : shift ? 'Редактирование графика' : displayDate(date)}</p><h2>{actual ? 'Изменить отработанное время' : shift ? 'Изменить смену' : 'Новая смена'}</h2><p>{actual ? 'План сохранится без изменений. Укажите фактическое время и причину.' : 'Выберите сотрудника и время его работы.'}</p></div><button type="button" aria-label="Закрыть" onClick={close}>×</button></header>
     {actual && shift && <div className="shift-form__plan"><span>Запланированное время</span><strong>{scheduledStart.time}–{scheduledEnd.time}</strong><small>{displayDate(scheduledStart.date)}{scheduledEnd.date !== scheduledStart.date ? ` → ${displayDate(scheduledEnd.date)}` : ''}</small></div>}
-    {!actual && Boolean(teams.data?.teams.length) && <label><span>Команда</span><Select value={teamId} onChange={event => { setTeamId(event.target.value); setMemberId('') }}><option value="">Все сотрудники точки</option>{teams.data?.teams.map(team => <option key={team.id} value={team.id}>{team.name}</option>)}</Select></label>}
-    {!actual && <EmployeePicker members={teamMembers} value={memberId} onChange={chooseEmployee} />}
+
+    {!actual && <EmployeePicker members={members} value={memberId} onChange={chooseEmployee} />}
     {!actual && <div className="planning-time"><label><span>Должность в смене</span><Select value={positionId} onChange={event => choosePosition(event.target.value)}><option value="">Без должности</option>{positions.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</Select></label><label><span>Шаблон времени</span><Select value={templateId} onChange={event => applyTemplate(event.target.value)}><option value="">Свободное время</option>{templates.map(item => <option key={item.id} value={item.id}>{item.name} · {item.startTime}–{item.endTime}</option>)}</Select></label></div>}
     {!shift && !actual && <label className="planning-checkbox"><input type="checkbox" checked={batch} onChange={event => setBatch(event.target.checked)} /><span>Добавить смены на несколько дат</span></label>}
     {!batch && <div className="shift-form__timeline"><fieldset><legend>Начало смены</legend>{!batch && <label><span>Дата</span><DatePicker value={startDate} onChange={(event) => setStartDate(event.target.value)} required /></label>}<label><span>Время</span><TimeInput value={startTime} onChange={(event) => setStartTime(event.target.value)} required /></label></fieldset><span className="shift-form__timeline-arrow">→</span><fieldset><legend>Окончание смены</legend>{!batch && <label><span>Дата</span><DatePicker value={endDate} min={startDate} onChange={(event) => setEndDate(event.target.value)} required /></label>}<label><span>Время</span><TimeInput value={endTime} onChange={(event) => setEndTime(event.target.value)} required /></label></fieldset></div>}

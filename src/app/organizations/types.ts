@@ -1,7 +1,7 @@
 export type OrganizationRole = 'OWNER' | 'ADMIN' | 'MEMBER'
 export type OrganizationLocation = { id: string; organizationId: string; name: string; city: string; address: string; timezone: string; monthlyWorkMinutes: number | null; archivedAt: string | null; role: OrganizationRole; memberCount: number }
 export type LocationTeam = { id: string; name: string; locationId: string; members: Array<{ memberId: string }> }
-export type OrganizationSummary = { viewerMemberId?: string; organizationTimezone?: string; organizationRole?: OrganizationRole; locationId?: string; location?: OrganizationLocation; id: string; name: string; description: string | null; timezone: string; contactEmail: string | null; phone: string | null; website: string | null; address: string | null; logoUrl: string | null; role: OrganizationRole; memberCount: number; joinedAt?: string }
+export type OrganizationSummary = { assignedToLocation?: boolean; viewerMemberId?: string; organizationTimezone?: string; organizationRole?: OrganizationRole; locationId?: string; location?: OrganizationLocation; id: string; name: string; description: string | null; timezone: string; contactEmail: string | null; phone: string | null; website: string | null; address: string | null; logoUrl: string | null; role: OrganizationRole; memberCount: number; joinedAt?: string }
 export type PendingInvitation = { id: string; organization: { id: string; name: string; logoUrl: string | null }; readAt: string | null; invitedBy: string; expiresAt: string; createdAt: string }
 export type OrganizationMember = { locations?: Array<{ locationId: string; role: 'ADMIN' | 'MEMBER' }>; teams?: Array<{ id: string; name: string; locationId: string }>; positions?: Array<{ id: string; name: string }>; id: string; userId: string; email: string; displayName: string; firstName: string | null; lastName: string | null; middleName: string | null; phone: string | null; bio: string | null; avatarUrl: string | null; lastSeenAt: string | null; online: boolean; role: OrganizationRole; joinedAt: string }
 export type MemberPagination = { page: number; pageSize: number; total: number; pages: number }
@@ -29,3 +29,5 @@ export type HistoryNotification = {
   href: string | null
 }
 export type NotificationPage = { notifications: HistoryNotification[]; nextCursor: string | null; unreadCount: number; actionableCount?: number; pendingCount?: number }
+
+export type DirectoryMember = Pick<OrganizationMember, 'id' | 'displayName' | 'email' | 'avatarUrl' | 'role'> & { locations: Array<{ locationId: string; role: 'ADMIN' | 'MEMBER' }> }

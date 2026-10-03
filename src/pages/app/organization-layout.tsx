@@ -1,8 +1,8 @@
-import Select from '../../component/ui/select/select.tsx'
+import { locationTone } from '../../app/organizations/format.ts'
 import { useAuth } from '../../app/auth/auth-context.tsx'
 import RoleBadge from '../../component/ui/role-badge/role-badge.tsx'
 import { Navigate, Link, NavLink, Route, Routes, useLocation, useParams, useNavigate } from 'react-router-dom'
-import { useState, useEffect, type ReactNode } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef, type ReactNode } from 'react'
 import { useOrganization, useLocations } from '../../app/organizations/queries.ts'
 import AppTopbar from './app-topbar.tsx'
 import OrganizationDashboard from './organization-dashboard.tsx'
@@ -70,6 +70,15 @@ export default function OrganizationLayout() {
   const { user } = useAuth()
   const navigate = useNavigate()
   const selectedId = query.data?.organization.locationId
+  const contentRef = useRef<HTMLElement>(null)
+  const sectionParams = new URLSearchParams(location.search)
+  const sectionKey = [location.pathname, selectedId, sectionParams.get('section'), sectionParams.get('tab'), sectionParams.get('view'), sectionParams.get('folder')].join(':')
+  useLayoutEffect(() => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    const panel = contentRef.current?.querySelector(':scope > :not(.workspace-location-banner)')
+    const animation = panel?.animate([{ opacity: .3 }, { opacity: 1 }], { duration: 220, easing: 'ease-out' })
+    return () => animation?.cancel()
+  }, [sectionKey])
   useEffect(() => {
     if (selectedId) window.sessionStorage.setItem(`staffly:location:${user?.id}:${organizationId}`, selectedId)
   }, [selectedId, user?.id, organizationId])
@@ -91,13 +100,24 @@ export default function OrganizationLayout() {
   }
   return <div className="app-page"><AppTopbar key={organization.locationId} organization={organization} /><div className={`workspace-shell${sidebarCollapsed ? ' workspace-shell--collapsed' : ''}`}>
     <aside className="workspace-sidebar" aria-label="Навигация организации">
-      <div className="workspace-sidebar__organization"><Avatar url={organization.logoUrl} name={organization.name} className="workspace-sidebar__organization-avatar" eager /><div><strong>{organization.name}</strong><small><RoleBadge role={organization.role} /> · {currentSection}</small></div></div>
-      <div className="workspace-location"><label><span>Рабочая точка</span><div className="workspace-location__control"><NavigationIcon section="location" />{points.length === 1 && !locations.isLoading && !locations.isError ? <strong title={points[0].name}>{points[0].name}{points[0].archivedAt ? ' · закрыта' : ''}</strong> : <Select aria-label="Текущая точка" value={organization.locationId ?? ''} disabled={locations.isLoading || locations.isError} onChange={event => { window.sessionStorage.setItem(`staffly:location:${user?.id}:${organization.id}`, event.target.value); navigate({ pathname: location.pathname, search: `?location=${event.target.value}` }) }}>{points.map(point => <option key={point.id} value={point.id}>{point.name}{point.archivedAt ? ' · закрыта' : ''}</option>)}</Select>}</div></label>{locationAddress && <small>{locationAddress}</small>}{locations.isError && <button className="app-secondary" onClick={() => void locations.refetch()}>Повторить загрузку точек</button>}</div>
+      <div className="workspace-sidebar__organization"><Avatar url={organization.logoUrl} name={organization.name} className="workspace-sidebar__organization-avatar" eager /><div><strong>{organization.name}</strong><small><RoleBadge role={organization.organizationRole ?? organization.role} /> · {currentSection}</small></div></div>
+      <div className="workspace-points" role="radiogroup" aria-label="Точки организации">
+        {points.map((point, index) => <button type="button" role="radio" tabIndex={point.id === organization.locationId ? 0 : -1} onKeyDown={event => {
+          if (!['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+          event.preventDefault()
+          const next = event.key === 'Home' ? 0 : event.key === 'End' ? points.length - 1 : (index + (['ArrowUp', 'ArrowLeft'].includes(event.key) ? -1 : 1) + points.length) % points.length
+          const target = event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role=radio]')[next]
+          target?.focus(); target?.click()
+        }} aria-checked={point.id === organization.locationId} aria-label={`${point.name}${point.archivedAt ? ', закрыта' : ''}`} title={`${point.name}${point.id === organization.locationId ? ' · выбрана' : ''}${point.address ? '\n' + point.address : ''}`} className="workspace-point" data-tone={locationTone(point.id)} key={point.id} onClick={() => { window.sessionStorage.setItem(`staffly:location:${user?.id}:${organization.id}`, point.id); const next = new URLSearchParams({ location: point.id }); for (const key of ['section', 'tab', 'view']) { const value = sectionParams.get(key); if (value) next.set(key, value) } navigate({ pathname: location.pathname, search: `?${next}` }) }}>
+          <span className="workspace-point__icon"><NavigationIcon section="location" /><small>{index + 1}</small></span><span className="workspace-point__name">{point.name}{point.archivedAt && <small>Закрыта</small>}</span><span className="workspace-point__selected" aria-hidden="true" />
+        </button>)}
+        {locations.isError && <button className="app-secondary" onClick={() => void locations.refetch()}>Повторить</button>}
+      </div>
       <button className="workspace-sidebar__collapse" type="button" aria-label={sidebarCollapsed ? 'Развернуть меню' : 'Свернуть меню'} onClick={toggleSidebar}><CollapseIcon collapsed={sidebarCollapsed} /><span>{sidebarCollapsed ? 'Развернуть' : 'Свернуть'}</span></button>
       <nav aria-label="Разделы организации">{navigation.map(([path, label]) => <NavLink end title={sidebarCollapsed ? label : undefined} to={`${path ? `${organizationPath}/${path}` : organizationPath}?location=${organization.locationId}`} key={label}><NavigationIcon section={path} /><span>{label}</span>{path === 'documents' && <DocumentNavBadge organizationId={organization.id} />}</NavLink>)}</nav>
       <div className="workspace-sidebar__footer"><NavLink className="workspace-sidebar__back" title={sidebarCollapsed ? 'Все организации' : undefined} to="/app"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m10 6-6 6 6 6M4 12h16" /></svg><span>Все организации</span></NavLink></div>
     </aside>
-    <main className="workspace-content" key={organization.locationId}><div className="workspace-location-heading"><span>Точка ·</span><strong>{organization.location?.name}</strong></div>
+    <main ref={contentRef} className="workspace-content" key={organization.locationId}><div className="workspace-location-banner" data-tone={locationTone(organization.locationId ?? '')}><NavigationIcon section="location" /><strong title={organization.location?.name}>{organization.location?.name}</strong>{locationAddress && <span title={locationAddress}>{locationAddress}</span>}</div>
       <Routes>
         <Route index element={module(<OrganizationDashboard organization={organization} />)} />
         <Route path="employees" element={module(<OrganizationMembers organization={organization} />)} />

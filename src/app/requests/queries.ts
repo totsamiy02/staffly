@@ -9,9 +9,10 @@ export function useRequestTypes(organizationId: string, includeInactive = false)
   return useQuery({ ...liveQueryOptions, queryKey: ['request-types', organizationId, includeInactive, locationId], queryFn: () => apiRequest<{ types: RequestType[] }>(`/organizations/${organizationId}/request-types${includeInactive ? '?includeInactive=true' : ''}`) })
 }
 
-export function useRequests(organizationId: string, scope: 'mine' | 'incoming' | 'history', filters: { page: number; status?: RequestStatus; typeId?: string; memberId?: string; role?: OrganizationRole; from?: string; to?: string; search?: string }) {
+export function useRequests(organizationId: string, scope: 'mine' | 'incoming' | 'history' | 'staffing', filters: { pointId?: string; page: number; status?: RequestStatus; typeId?: string; memberId?: string; role?: OrganizationRole; from?: string; to?: string; search?: string }) {
   const { locationId, apiRequest } = useAuth()
   const query = new URLSearchParams({ page: String(filters.page), pageSize: '20' })
+  if (filters.pointId) query.set('pointId', filters.pointId)
   if (filters.status) query.set('status', filters.status)
   if (filters.typeId) query.set('typeId', filters.typeId)
   if (filters.memberId) query.set('memberId', filters.memberId)

@@ -716,10 +716,6 @@
 .workspace-sidebar nav a { position: relative; }
 .workspace-shell--collapsed .workspace-sidebar nav a .workspace-nav-badge { display: inline-grid; }
 
-.workspace-location { margin: 0 0 12px; padding: 0 10px; label { display: grid; gap: 7px; } label > span { color: #858585; font-size: 10px; font-weight: 600; } small { display: block; margin-top: 6px; padding-left: 30px; color: #858585; font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; } }
-.workspace-location__control { position: relative; display: flex; min-width: 0; align-items: center; gap: 10px; > svg { width: 17px; height: 17px; flex-shrink: 0; color: #777; } > strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; color: #333; } .staffly-control { min-height: 38px; padding: 8px 10px; border-color: transparent; border-radius: 8px; background: #f5f5f5; font-size: 12px; font-weight: 600; &:hover { background: #ededed; } } }
-.workspace-shell--collapsed .workspace-location { display: none; }
-.workspace-location-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; color: #777; font-size: 12px; strong { color: #555; font-weight: 600; } }
 .location-settings { display: grid; gap: 18px; .settings-card { align-items: start; } .settings-card--list { display: block; } .settings-card > header { min-width: 0; } .settings-card--list > header { margin-bottom: 20px; } p { line-height: 1.6; } }
 .location-settings-list { margin: 16px 0; > div { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; padding: 16px 0; border-bottom: 1px solid #e7e7e7; } p { margin: 6px 0; } small { color: #777; } }
 .location-settings-list:empty { display: none; }
@@ -728,6 +724,62 @@
 .location-settings-form { display: grid; min-width: 0; gap: 16px; width: 100%; > button { justify-self: start; } .planning-time { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; } > p { margin: 0; font-size: 12px; } }
 .location-dialog .organization-profile-fields { margin-bottom: 0; }
 .location-dialog .document-checkbox > span { color: #333; font-size: 13px; font-weight: 400; }
-@media (max-width: 900px) { .workspace-shell--collapsed .workspace-location { display: block; } }
 @media (max-width: 480px) { .location-settings-form .planning-time { grid-template-columns: 1fr; } }
 .organization-location-create { display: grid; gap: 18px; min-width: 0; margin: 0; padding: 20px 0; border: 0; border-top: 1px solid #e7e7e7; legend { padding: 0; font-weight: 600; } > label { display: grid; gap: 8px; } }
+
+.member-location-labels { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+@media (min-width: 1001px) { .members-toolbar:has(label:nth-of-type(4)) { grid-template-columns: minmax(220px, 1.4fr) minmax(140px, .6fr) minmax(180px, 1fr) minmax(180px, 1fr); } }
+.member-position-labels em, .member-positions-selected button { color: var(--accent-purple); background: var(--accent-purple-bg); border-color: var(--accent-purple-border); }
+.member-action-item:disabled { opacity: .5; cursor: not-allowed; }
+
+.location-overview { margin: 24px 0; h2 { font-size: 20px; margin-bottom: 16px; } }
+.location-overview__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr)); gap: 16px; > article { display: grid; gap: 10px; padding: 22px; border: 1px solid #e0e0e0; border-radius: 14px; background: #fff; } h3 { font-size: 16px; } p, small { color: #777; font-size: 12px; } button { margin-top: 6px; justify-self: start; } }
+.location-today-list { display: grid; gap: 14px; article { display: flex; align-items: center; gap: 12px; } article > div { display: grid; gap: 4px; } strong { font-size: 13px; } small { font-size: 12px; color: #777; } }
+
+/* Point navigation shares a stable colour with cards and access labels. */
+.workspace-sidebar { overflow-x: hidden; }
+.workspace-points { display: grid; flex-shrink: 0; gap: 4px; max-height: 240px; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; margin-bottom: 20px; padding-bottom: 12px; border-bottom: 1px solid #eee; }
+.workspace-point { display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; padding: 6px 8px; border: 0; border-radius: 8px; background: transparent; color: #666; text-align: left; font: inherit; cursor: pointer; transition: background .18s, color .18s;
+  &:hover { background: #f6f6f6; }
+  &[aria-checked=true] { background: var(--point-bg); color: var(--point-color); }
+  &:focus-visible { outline: 2px solid var(--point-color); outline-offset: -2px; }
+}
+.workspace-point__icon { position: relative; display: grid; place-items: center; flex: 0 0 28px; height: 28px; color: var(--point-color); svg { width: 18px; height: 18px; } small { position: absolute; right: -3px; bottom: -3px; min-width: 13px; height: 13px; border-radius: 4px; background: var(--point-bg); font-size: 9px; font-weight: 700; text-align: center; line-height: 13px; } }
+.workspace-point__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 550; small { display: block; font-size: 10px; opacity: .7; } }
+.workspace-point__selected { flex: 0 0 5px; height: 5px; margin-left: auto; border-radius: 50%; }
+.workspace-point[aria-checked=true] .workspace-point__selected { background: currentColor; }
+.workspace-location-banner { display: flex; align-items: center; gap: 8px; min-width: 0; height: 24px; margin-bottom: 14px; font-size: 12px; color: #888; > svg { width: 14px; height: 14px; flex-shrink: 0; color: var(--point-color); } strong { color: var(--point-color); max-width: 45%; flex-shrink: 0; font-weight: 550; } strong, > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } > span { border-left: 1px solid #ddd; padding-left: 8px; } }
+.workspace-content:has(> .workspace-location-banner) { padding-top: 22px; }
+@media (min-width: 901px) {
+  .workspace-shell--collapsed .workspace-point { justify-content: center; padding: 7px 0; }
+  .workspace-shell--collapsed .workspace-point__name, .workspace-shell--collapsed .workspace-point__selected { display: none; }
+}
+@media (max-width: 900px) { .workspace-points { display: flex; max-width: 100%; overflow-x: auto; margin-bottom: 10px; padding-bottom: 8px; } .workspace-point { width: auto; max-width: 220px; flex-shrink: 0; } }
+.member-summary { flex: 1; min-width: 0; }
+.member-summary .member-profile-trigger { width: 100%; }
+.member-tags { display: flex; align-items: center; gap: 8px; min-width: 0; margin-left: 70px; margin-top: 5px; &:empty { display: none; } }
+.member-tags-group { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.member-tag { display: inline-flex; align-items: center; gap: 3px; min-width: 0; max-width: 150px; padding: 3px 6px; border: 1px solid #e7e2f0; border-radius: 5px; color: var(--accent-purple); background: var(--accent-purple-bg); font-size: 10px; line-height: 15px; font-style: normal; > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } svg { width: 12px; height: 12px; flex-shrink: 0; } }
+.member-tags-more { flex-shrink: 0; summary { width: auto; height: 23px; min-width: 26px; padding: 0 5px; background: #f1f1f3; border-radius: 5px; font-size: 10px; font-weight: 600; color: #666; } > div { left: 0; right: auto; min-width: 200px; max-width: min(280px, 70vw); max-height: 240px; overflow-y: auto; display: grid; gap: 5px; padding: 10px; } > div > strong { font-size: 10px; color: #888; padding: 3px 2px; } .member-tag { max-width: 100%; > span { white-space: normal; overflow-wrap: anywhere; } } }
+.member-row:has(details[open]) { z-index: 10; }
+@media (max-width: 600px) { .member-tags { margin-left: 0; } .member-row { flex-wrap: nowrap; gap: 8px; } .member-row > .role-badge { font-size: 9px; padding: 4px; } .member-summary .app-avatar { width: 36px; height: 36px; } }
+.location-mark { display: inline-grid; place-items: center; width: 36px; height: 36px; flex: 0 0 36px; border-radius: 10px; background: var(--point-bg); color: var(--point-color); svg { width: 19px; height: 19px; } }
+.location-settings-list { display: grid; gap: 10px; > .location-settings-item { flex-wrap: nowrap; justify-content: flex-start; padding: 16px; border: 1px solid #e9e9eb; border-radius: 12px; background: #fff; } }
+.location-settings-item__body { min-width: 0; flex: 1; strong { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 14px; overflow-wrap: anywhere; } p { font-size: 12px; overflow-wrap: anywhere; } small { font-size: 11px; } }
+.location-current { padding: 2px 6px; border-radius: 4px; color: var(--point-color); background: var(--point-bg); font-size: 10px; font-weight: 500; }
+.location-settings-item .location-actions { flex-wrap: nowrap; .app-secondary { min-height: 32px; font-size: 11px; padding: 6px 10px; } }
+@media (max-width: 650px) { .location-settings-list > .location-settings-item { flex-wrap: wrap; } .location-settings-item .location-actions { width: 100%; padding-left: 48px; } }
+.location-overview__grid .location-today-card { display: flex; flex-direction: column; gap: 10px; width: 100%; margin: 0; padding: 18px; border: 1px solid #e5e5e8; border-radius: 14px; background: #fff; text-align: left; font: inherit; color: #252525; cursor: pointer; transition: border-color .2s, box-shadow .2s, transform .2s; &:hover { border-color: var(--point-border); box-shadow: 0 5px 18px #00000008; transform: translateY(-2px); } &:focus-visible { outline: 2px solid var(--point-color); outline-offset: 3px; } }
+.location-today-card__heading { display: flex; align-items: center; gap: 10px; width: 100%; strong { min-width: 0; overflow-wrap: anywhere; font-size: 14px; } }
+.location-today-card__arrow { margin-left: auto; width: 18px; height: 18px; flex-shrink: 0; color: #999; }
+.location-today-card__address { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #888; font-size: 11px; }
+.location-today-card__metric { display: flex; align-items: center; gap: 12px; padding: 9px 0; > strong { font-size: 32px; line-height: 1; font-weight: 600; letter-spacing: -1px; color: var(--point-color); } > span { font-size: 12px; } small { display: block; margin-top: 3px; font-size: 10px; color: #999; } }
+.location-today-card__footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-height: 34px; margin-top: auto; padding-top: 10px; border-top: 1px solid #f0f0f0; font-size: 10px; color: #888; }
+.location-today-card__avatars { display: flex; padding-left: 5px; .app-avatar, > span { width: 28px; height: 28px; margin-left: -5px; border: 2px solid white; border-radius: 50%; font-size: 9px; } > span { display: grid; place-items: center; background: #f2f2f4; } }
+:is(.settings-sections, .requests-tabs, .account-settings-tabs, .planning-tabs, .schedule-tabs, .schedule-view-switch) :is(button, a) { transition: color .2s, background-color .2s, border-color .2s, box-shadow .2s; }
+@media (prefers-reduced-motion: reduce) { .workspace-point, .location-overview__grid .location-today-card, :is(.settings-sections, .requests-tabs, .account-settings-tabs, .planning-tabs, .schedule-tabs, .schedule-view-switch) :is(button, a) { transition: none; transform: none; } }
+
+.member-tags-more > summary { min-height: 23px; min-width: 26px; padding: 0 5px; }
+
+.member-row__identity strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.members-toolbar > label { min-width: 0; }

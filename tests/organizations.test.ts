@@ -25,7 +25,7 @@ import sharp from 'sharp'
 import { stageStoredFile, cleanupPendingFiles, removeOrganizationLogo, removeUserAvatar, replaceOrganizationLogo, replaceUserAvatar } from '../src/server/storage/image-service.ts'
 import { deleteObject, readObject, storageRoot, writeObject } from '../src/server/storage/local-file-storage.ts'
 import { formatRussianPhone, normalizeRussianPhone } from '../src/app/profile/phone.ts'
-import { cancelRequest, createRequest, createRequestType, getRequest, listRequests, listRequestTypes, resolveRequest, updateRequest, updateRequestType } from '../src/server/requests/service.ts'
+import { respondToStaffing, cancelRequest, createRequest, createRequestType, getRequest, listRequests, listRequestTypes, resolveRequest, updateRequest, updateRequestType } from '../src/server/requests/service.ts'
 import { addRequestAttachment, deleteRequestAttachment, downloadRequestAttachment } from '../src/server/requests/attachment-service.ts'
 import { createRequestBody } from '../src/server/requests/schemas.ts'
 
@@ -108,7 +108,7 @@ describe('organizations and authorization', { concurrency: false }, () => {
     await expectCode(() => getOrganization(outsider.id, first.id), 'ORGANIZATION_NOT_FOUND')
     await expectCode(() => createEmailInvitation(member.id, first.id, email('new')), 'INSUFFICIENT_PERMISSIONS')
     const ownerMembership = await prisma.organizationMember.findUniqueOrThrow({ where: { organizationId_userId: { organizationId: first.id, userId: owner.id } } })
-    await expectCode(() => changeMemberRole(admin.id, first.id, ownerMembership.id, 'MEMBER'), 'INSUFFICIENT_PERMISSIONS')
+    await expectCode(() => changeMemberRole(admin.id, first.id, ownerMembership.id, 'MEMBER'), 'OWNER_REQUIRED')
     await expectCode(() => removeMember(admin.id, first.id, ownerMembership.id), 'INSUFFICIENT_PERMISSIONS')
     assert.notEqual(first.id, second.id)
   })
@@ -118,7 +118,7 @@ describe('requests workflow, privacy and schedule integration', { concurrency: f
   it('supports system and custom types while protecting type management', async () => {
     const organization = (await listOrganizations(owner.id))[0]
     const types = await listRequestTypes(member.id, organization.id)
-    assert.equal(types.filter((type) => type.systemCode).length, 7)
+    assert.equal(types.filter((type) => type.systemCode).length, 9)
     const custom = await createRequestType(owner.id, organization.id, { name: 'Удалённый день', description: 'Работа вне офиса', dateMode: 'SINGLE', requiresComment: true, allowsAttachments: true })
     await expectCode(() => createRequestType(member.id, organization.id, { name: 'Запрещённый', dateMode: 'NONE', requiresComment: false, allowsAttachments: false }), 'INSUFFICIENT_PERMISSIONS')
     await expectCode(() => createRequest(member.id, organization.id, { requestTypeId: custom.id, startDate: '2027-01-10' }), 'REQUEST_COMMENT_REQUIRED')
@@ -472,10 +472,11 @@ describe('profiles and public organization details', { concurrency: false }, () 
 })
 
 describe('roles and sensitive actions', { concurrency: false }, () => {
-  it('lets OWNER and ADMIN manage non-owner roles with the documented limits', async () => {
+  it('lets only OWNER manage shared non-owner roles', async () => {
     const organization = (await listOrganizations(owner.id))[0]
     const target = await prisma.organizationMember.findUniqueOrThrow({ where: { organizationId_userId: { organizationId: organization.id, userId: member.id } } })
-    await changeMemberRole(admin.id, organization.id, target.id, 'ADMIN')
+    await expectCode(() => changeMemberRole(admin.id, organization.id, target.id, 'ADMIN'), 'OWNER_REQUIRED')
+    await changeMemberRole(owner.id, organization.id, target.id, 'ADMIN')
     assert.equal((await prisma.organizationMember.findUniqueOrThrow({ where: { id: target.id } })).role, 'ADMIN')
     const roleNotification = (await listAccountNotifications(member.id)).find((notification) => notification.organizationId === organization.id)
     assert.equal(roleNotification?.type, 'ROLE_CHANGED')
@@ -1573,8 +1574,8 @@ describe('documents: privacy, immutable storage and acknowledgement lifecycle', 
     assert.equal(counted.folders.find(folder => folder.id === nested)?.documentCount, 1)
     await documentsService.deleteDocument(owner.id, org, nestedDoc.id)
     assert.equal((await documentsService.listDocuments(member.id, org, documentListSchema.parse({}))).folders.find(folder => folder.id === root)?.documentCount, 1)
-    assert.ok(!workspace.folders.some(folder => folder.id === nested))
-    assert.ok(!(await documentsService.listDocuments(member.id, org, documentListSchema.parse({}))).folders.some(folder => folder.id === confidential))
+    assert.ok(workspace.folders.some(folder => folder.id === nested))
+    assert.ok((await documentsService.listDocuments(member.id, org, documentListSchema.parse({}))).folders.some(folder => folder.id === confidential))
   })
   it('snapshots recipients, separates notification read/open/ack, and rejects duplicate or inaccessible assignments', async () => {
     const doc = await documentsService.uploadDocument(owner.id, org, pdf, 'application/pdf', 'ack.pdf', metadata())
@@ -1705,7 +1706,7 @@ describe('documents: privacy, immutable storage and acknowledgement lifecycle', 
 
 // Multi-location regressions exercise the same request scope used by the API.
 import { locationContext } from '../src/server/organizations/location-context.ts'
-import { archiveLocation, assignLocationMember, deleteTeam, listLocations, listTeams, removeLocationMember, saveLocation, saveTeam, transferMember } from '../src/server/organizations/location-service.ts'
+import { requestLocationClosure, locationOverview, archiveLocation, assignLocationMember, deleteTeam, listLocations, listTeams, removeLocationMember, saveLocation, saveTeam, transferMember } from '../src/server/organizations/location-service.ts'
 import { createOrganizationBody } from '../src/server/organizations/schemas.ts'
 async function locationFixture() {
   const organization = await createOrganization(owner.id, { name: 'Сеть кофеен', description: null, timezone: 'Europe/Moscow', firstLocation: { name: 'На Пушкина', city: 'Москва', address: 'Пушкина, 10', timezone: 'Europe/Moscow', teamNames: ['Утренняя команда'] } })
@@ -1813,10 +1814,11 @@ describe('locations, teams and point authorization', { concurrency: false }, () 
     await transferMember(owner.id, f.organizationId, { memberId: f.employee.id, fromLocationId: f.first.id, toLocationId: f.second.id, temporary: false })
     assert.equal((await prisma.workShift.findUniqueOrThrow({ where: { id: past.id } })).locationId, f.first.id)
     assert.equal((await prisma.workShift.findUniqueOrThrow({ where: { id: future.id } })).status, 'SCHEDULED')
-    await expectCode(() => archiveLocation(owner.id, f.organizationId, f.first.id), 'LOCATION_HAS_WORK')
+    await expectCode(() => requestLocationClosure(owner.id, f.organizationId, f.first.id), 'LOCATION_HAS_WORK')
     await atPoint(f, f.first.id, () => cancelShift(owner.id, f.organizationId, future.id, 'Закрытие точки'))
-    await archiveLocation(owner.id, f.organizationId, f.first.id)
-    await expectCode(() => archiveLocation(owner.id, f.organizationId, f.second.id), 'LAST_LOCATION')
+    const closure = await requestLocationClosure(owner.id, f.organizationId, f.first.id)
+    await archiveLocation(owner.id, f.organizationId, f.first.id, closure.code)
+    await expectCode(() => requestLocationClosure(owner.id, f.organizationId, f.second.id), 'LAST_LOCATION')
   })
   it('isolates incoming requests, resolutions, attachments and shared organization settings', async () => {
     const f = await locationFixture()
@@ -1837,15 +1839,158 @@ describe('locations, teams and point authorization', { concurrency: false }, () 
     assert.equal((await atPoint(f, f.first.id, () => documentsService.getDocument(admin.id, f.organizationId, sharedAdmins.id))).canManage, false)
     await atPoint(f, f.first.id, () => documentsService.assignAcknowledgements(owner.id, f.organizationId, sharedAdmins.id, assignmentSchema.parse({ recipients: 'roles', roles: ['ADMIN'] })))
     assert.equal((await listNotificationHistory(admin.id, admin.email, { limit: 50, organizationId: f.organizationId })).notifications.some(n => n.documentId === sharedAdmins.id), true)
-    await expectCode(() => atPoint(f, f.second.id, () => documentsService.getDocument(admin.id, f.organizationId, sharedAdmins.id)), 'DOCUMENT_NOT_FOUND')
+    assert.equal((await atPoint(f, f.second.id, () => documentsService.getDocument(admin.id, f.organizationId, sharedAdmins.id))).canManage, false)
     const list = await atPoint(f, f.second.id, () => documentsService.listDocuments(admin.id, f.organizationId, documentListSchema.parse({})))
-    assert.equal(list.documents.some(d => d.id === local.id), false)
+    assert.equal(list.documents.some(d => d.id === local.id), true)
     assert.equal(list.documents.find(d => d.id === shared.id)?.canManage, false)
-    await expectCode(() => atPoint(f, f.second.id, () => documentsService.deliverDocument(admin.id, f.organizationId, local.id, 'download')), 'DOCUMENT_NOT_FOUND')
+    const ownPointFile = await atPoint(f, f.second.id, () => documentsService.deliverDocument(admin.id, f.organizationId, local.id, 'download')); ownPointFile.stream.destroy()
     await expectCode(() => atPoint(f, f.first.id, () => documentsService.deleteDocument(admin.id, f.organizationId, shared.id)), 'INSUFFICIENT_PERMISSIONS')
     const delivered = await atPoint(f, f.first.id, () => documentsService.deliverDocument(member.id, f.organizationId, local.id, 'download')); delivered.stream.destroy()
     await atPoint(f, f.first.id, () => documentsService.assignAcknowledgements(admin.id, f.organizationId, local.id, assignmentSchema.parse({ recipients: 'members', memberIds: [f.employee.id] })))
     const notifications = await listNotificationHistory(member.id, member.email, { limit: 50, organizationId: f.organizationId })
     assert.equal(notifications.notifications.find(n => n.documentId === local.id)?.href?.includes(`location=${f.first.id}`), true)
+  })
+})
+
+describe('location workflow refinements', { concurrency: false }, () => {
+  it('creates multiple points at once and filters the organization directory without unassigned people', async () => {
+    const f = await locationFixture()
+    await prisma.organizationMember.create({ data: { organizationId: f.organizationId, userId: outsider.id } })
+    await assignLocationMember(owner.id, f.organizationId, f.second.id, f.employee.id)
+    const all = await atPoint(f, f.second.id, () => listMembersPage(member.id, f.organizationId, { directory: 'true', role: 'ADMIN' }))
+    assert.deepEqual(all.members.map(item => item.id), [f.manager.id])
+    const second = await atPoint(f, f.first.id, () => listMembersPage(member.id, f.organizationId, { directory: 'true', pointId: f.second.id }))
+    assert.equal(second.members.some(item => item.id === f.employee.id), true)
+    assert.equal(second.members.some(item => item.userId === outsider.id), false)
+    assert.equal(second.members.find(item => item.id === f.employee.id)?.locations.length, 2)
+    const created = await createOrganization(owner.id, createOrganizationBody.parse({ name: 'Две точки сразу', timezone: 'Europe/Moscow', firstLocation: { name: 'Основная', city: 'Москва', address: 'Дом 1', timezone: 'Europe/Moscow' }, locations: [{ name: 'Вторая', city: 'Тула', address: 'Дом 2', timezone: 'Europe/Moscow' }] }))
+    assert.equal(created.locations.length, 2)
+  })
+  it('keeps an administrator role global but grants management only at their assigned points', async () => {
+    const f = await locationFixture()
+    assert.equal((await atPoint(f, f.second.id, () => getOrganization(admin.id, f.organizationId))).organizationRole, 'ADMIN')
+    assert.equal((await atPoint(f, f.second.id, () => getOrganization(admin.id, f.organizationId))).role, 'MEMBER')
+    await assignLocationMember(owner.id, f.organizationId, f.second.id, f.manager.id)
+    assert.equal((await atPoint(f, f.second.id, () => getOrganization(admin.id, f.organizationId))).role, 'ADMIN')
+    await atPoint(f, f.first.id, () => changeMemberRole(owner.id, f.organizationId, f.manager.id, 'MEMBER'))
+    assert.equal((await atPoint(f, f.second.id, () => getOrganization(admin.id, f.organizationId))).role, 'MEMBER')
+    assert.equal((await prisma.locationMember.findMany({ where: { memberId: f.manager.id } })).every(item => item.role === 'MEMBER'), true)
+    await expectCode(() => atPoint(f, f.first.id, () => changeMemberRole(admin.id, f.organizationId, f.employee.id, 'ADMIN')), 'OWNER_REQUIRED')
+    await changeMemberRole(owner.id, f.organizationId, f.manager.id, 'ADMIN')
+    const otherAdmin = await prisma.organizationMember.create({ data: { organizationId: f.organizationId, userId: outsider.id, role: 'ADMIN' } })
+    await assignLocationMember(owner.id, f.organizationId, f.second.id, otherAdmin.id)
+    await expectCode(() => assignLocationMember(admin.id, f.organizationId, f.first.id, otherAdmin.id, 'MEMBER'), 'OWNER_REQUIRED')
+    assert.equal((await prisma.organizationMember.findUniqueOrThrow({ where: { id: otherAdmin.id } })).role, 'ADMIN')
+
+  })
+  it('requires a point-bound email code, records wrong attempts and protects the last active point', async () => {
+    const f = await locationFixture()
+    await expectCode(() => archiveLocation(owner.id, f.organizationId, f.second.id), 'VERIFICATION_REQUIRED')
+    await expectCode(() => requestLocationClosure(admin.id, f.organizationId, f.second.id), 'INSUFFICIENT_PERMISSIONS')
+    const closure = await requestLocationClosure(owner.id, f.organizationId, f.second.id)
+    const wrong = closure.code === '000000' ? '999999' : '000000'
+    await expectCode(() => archiveLocation(owner.id, f.organizationId, f.second.id, wrong), 'INVALID_VERIFICATION_CODE')
+    assert.equal((await prisma.sensitiveActionToken.findFirstOrThrow({ where: { organizationId: f.organizationId, action: 'ARCHIVE_LOCATION' } })).attempts, 1)
+    await expectCode(() => archiveLocation(owner.id, f.organizationId, f.first.id, closure.code), 'INVALID_VERIFICATION_CODE')
+    await archiveLocation(owner.id, f.organizationId, f.second.id, closure.code)
+    await expectCode(() => requestLocationClosure(owner.id, f.organizationId, f.first.id), 'LAST_LOCATION')
+  })
+  it('exposes all assigned point documents, hides foreign point bytes, and inherits restricted folder access', async () => {
+    const f = await locationFixture()
+    const metadata = { displayName: 'Доступ точки', folderId: null, visibility: 'ORGANIZATION' as const, targetMemberId: null }
+    const foreign = await atPoint(f, f.second.id, () => documentsService.uploadDocument(owner.id, f.organizationId, Buffer.from('Foreign point'), 'text/plain', 'foreign.txt', metadata))
+    await expectCode(() => atPoint(f, f.second.id, () => documentsService.getDocument(member.id, f.organizationId, foreign.id)), 'DOCUMENT_NOT_FOUND')
+    await expectCode(() => atPoint(f, f.second.id, () => documentsService.deliverDocument(member.id, f.organizationId, foreign.id, 'download')), 'DOCUMENT_NOT_FOUND')
+    const folder = await atPoint(f, f.first.id, () => documentsService.saveFolder(admin.id, f.organizationId, undefined, { name: 'Только руководители', parentId: null, visibility: 'ADMINS' }))
+    const child = await atPoint(f, f.first.id, () => documentsService.saveFolder(admin.id, f.organizationId, undefined, { name: 'Вложенная', parentId: folder.id }))
+    const privateDoc = await atPoint(f, f.first.id, () => documentsService.uploadDocument(admin.id, f.organizationId, Buffer.from('Restricted folder'), 'text/plain', 'restricted.txt', { ...metadata, folderId: child.id }))
+    await expectCode(() => atPoint(f, f.first.id, () => documentsService.getDocument(member.id, f.organizationId, privateDoc.id)), 'DOCUMENT_NOT_FOUND')
+    await expectCode(() => atPoint(f, f.first.id, () => documentsService.assignAcknowledgements(admin.id, f.organizationId, privateDoc.id, assignmentSchema.parse({ recipients: 'members', memberIds: [f.employee.id] }))), 'RECIPIENT_ACCESS_DENIED')
+    const visible = await atPoint(f, f.second.id, () => documentsService.listDocuments(member.id, f.organizationId, documentListSchema.parse({})))
+    assert.equal(visible.documents.some(item => item.id === foreign.id || item.id === privateDoc.id), false)
+    assert.equal(visible.folders.some(item => item.id === folder.id || item.id === child.id), false)
+    await assignLocationMember(owner.id, f.organizationId, f.second.id, f.employee.id)
+    assert.equal((await atPoint(f, f.first.id, () => documentsService.getDocument(member.id, f.organizationId, foreign.id))).locationId, f.second.id)
+    const all = await atPoint(f, f.first.id, () => documentsService.listDocuments(owner.id, f.organizationId, documentListSchema.parse({ pointId: f.second.id })))
+    assert.deepEqual(all.documents.map(item => item.id), [foreign.id])
+  })
+  it('confirms a staffing response using only the receiving administrator and creates placement plus shift atomically', async () => {
+    const f = await locationFixture()
+    await removeLocationMember(owner.id, f.organizationId, f.first.id, f.manager.id)
+    await assignLocationMember(owner.id, f.organizationId, f.second.id, f.manager.id)
+    const staffing = (await listRequestTypes(owner.id, f.organizationId)).find(type => type.systemCode === 'STAFFING')!
+    const offer = await atPoint(f, f.second.id, () => createRequest(admin.id, f.organizationId, { requestTypeId: staffing.id, staffingPositionName: 'Бариста', proposedStartDate: '2062-05-02', proposedEndDate: '2062-05-02', proposedStartTime: '09:00', proposedEndTime: '18:00' }))
+    const notifications = await listNotificationHistory(member.id, member.email, { limit: 50, organizationId: f.organizationId, locationId: f.first.id })
+    assert.equal(notifications.notifications.some(item => item.requestId === offer.id && item.href?.includes('tab=staffing')), true)
+    assert.equal((await atPoint(f, f.first.id, () => listRequests(member.id, f.organizationId, 'staffing', { page: 1, pageSize: 20, pointId: 'all' }))).requests[0].id, offer.id)
+    assert.equal((await atPoint(f, f.first.id, () => listRequests(member.id, f.organizationId, 'staffing', { page: 1, pageSize: 20, pointId: 'all', from: '2062-05-02', to: '2062-05-02' }))).pagination.total, 1)
+    assert.equal((await atPoint(f, f.first.id, () => listRequests(member.id, f.organizationId, 'staffing', { page: 1, pageSize: 20, pointId: 'all', from: '2062-05-03', to: '2062-05-03' }))).pagination.total, 0)
+    const response = await atPoint(f, f.second.id, () => respondToStaffing(member.id, f.organizationId, offer.id, 'Могу выйти'))
+    await expectCode(() => atPoint(f, f.second.id, () => respondToStaffing(member.id, f.organizationId, offer.id)), 'ALREADY_RESPONDED')
+    await expectCode(() => atPoint(f, f.first.id, () => resolveRequest(admin.id, f.organizationId, response.id, 'APPROVED', null)), 'INSUFFICIENT_PERMISSIONS')
+    await atPoint(f, f.second.id, () => resolveRequest(admin.id, f.organizationId, response.id, 'APPROVED', null))
+    assert.equal((await prisma.organizationRequest.findUniqueOrThrow({ where: { id: offer.id } })).status, 'APPROVED')
+    const shift = await prisma.workShift.findFirstOrThrow({ where: { organizationId: f.organizationId, memberId: f.employee.id } })
+    assert.equal(shift.locationId, f.second.id); assert.equal(shift.positionNameSnapshot, 'Бариста')
+    assert.equal(await prisma.locationTransfer.count({ where: { organizationId: f.organizationId, memberId: f.employee.id, toLocationId: f.second.id, temporary: true } }), 1)
+    await expectCode(() => atPoint(f, f.second.id, () => createShift(admin.id, f.organizationId, pointShift(f.employee.id, '2062-05-03'))), 'MEMBER_NOT_IN_LOCATION')
+  })
+  it('rolls back staffing approval on cross-point overlap and cancels responses when an offer is cancelled', async () => {
+    const f = await locationFixture()
+    const staffing = (await listRequestTypes(owner.id, f.organizationId)).find(type => type.systemCode === 'STAFFING')!
+    const offer = await atPoint(f, f.second.id, () => createRequest(owner.id, f.organizationId, { requestTypeId: staffing.id, staffingPositionName: 'Кассир', proposedStartDate: '2063-05-02', proposedEndDate: '2063-05-02', proposedStartTime: '09:00', proposedEndTime: '18:00' }))
+    const response = await atPoint(f, f.second.id, () => respondToStaffing(member.id, f.organizationId, offer.id))
+    await atPoint(f, f.first.id, () => createShift(owner.id, f.organizationId, pointShift(f.employee.id, '2063-05-02')))
+    await expectCode(() => atPoint(f, f.second.id, () => resolveRequest(owner.id, f.organizationId, response.id, 'APPROVED', null)), 'SHIFT_OVERLAP')
+    assert.equal(await prisma.locationTransfer.count({ where: { organizationId: f.organizationId } }), 0)
+    assert.equal((await prisma.organizationRequest.findUniqueOrThrow({ where: { id: response.id } })).status, 'PENDING')
+    await atPoint(f, f.second.id, () => cancelRequest(owner.id, f.organizationId, offer.id))
+    assert.equal((await prisma.organizationRequest.findUniqueOrThrow({ where: { id: response.id } })).status, 'CANCELLED')
+  })
+  it('preserves recipient folder access when editing a document and reports inherited restrictions', async () => {
+    const f = await locationFixture()
+    const metadata = { displayName: 'Ознакомление', folderId: null, visibility: 'ORGANIZATION' as const, targetMemberId: null }
+    const doc = await atPoint(f, f.first.id, () => documentsService.uploadDocument(admin.id, f.organizationId, Buffer.from('Policy'), 'text/plain', 'policy.txt', metadata))
+    await atPoint(f, f.first.id, () => documentsService.assignAcknowledgements(admin.id, f.organizationId, doc.id, assignmentSchema.parse({ recipients: 'members', memberIds: [f.employee.id] })))
+    const restricted = await atPoint(f, f.first.id, () => documentsService.saveFolder(admin.id, f.organizationId, undefined, { name: 'Руководителям', parentId: null, visibility: 'ADMINS' }))
+    const child = await atPoint(f, f.first.id, () => documentsService.saveFolder(admin.id, f.organizationId, undefined, { name: 'Вложенная', parentId: restricted.id }))
+    await expectCode(() => atPoint(f, f.first.id, () => documentsService.updateDocument(admin.id, f.organizationId, doc.id, { ...metadata, folderId: child.id })), 'ACKNOWLEDGEMENT_ACCESS_CONFLICT')
+    const nested = await atPoint(f, f.first.id, () => documentsService.uploadDocument(admin.id, f.organizationId, Buffer.from('Manager'), 'text/plain', 'manager.txt', { ...metadata, folderId: child.id }))
+    assert.equal((await atPoint(f, f.first.id, () => documentsService.getDocument(admin.id, f.organizationId, nested.id))).accessVisibility, 'ADMINS')
+    const publicFolder = await atPoint(f, f.first.id, () => documentsService.saveFolder(admin.id, f.organizationId, undefined, { name: 'Открытая папка', parentId: null }))
+    await atPoint(f, f.first.id, () => documentsService.updateDocument(admin.id, f.organizationId, doc.id, { ...metadata, folderId: publicFolder.id }))
+    await atPoint(f, f.first.id, () => documentsService.saveFolder(admin.id, f.organizationId, publicFolder.id, { name: 'Закрытая папка', parentId: restricted.id }))
+    assert.ok((await prisma.documentAcknowledgement.findFirstOrThrow({ where: { documentId: doc.id } })).cancelledAt)
+
+    await expectCode(() => atPoint(f, f.first.id, () => documentsService.uploadDocument(admin.id, f.organizationId, Buffer.from('Personal'), 'text/plain', 'personal.txt', { ...metadata, visibility: 'PRIVATE_MEMBER', targetMemberId: f.employee.id, folderId: child.id })), 'RECIPIENT_ACCESS_DENIED')
+    const types = await listRequestTypes(member.id, f.organizationId)
+    const normal = await atPoint(f, f.first.id, () => createRequest(member.id, f.organizationId, { requestTypeId: types.find(type => type.systemCode === 'OTHER')!.id, comment: 'Обычная заявка' }))
+    await expectCode(() => atPoint(f, f.first.id, () => updateRequest(member.id, f.organizationId, normal.id, { requestTypeId: types.find(type => type.systemCode === 'STAFFING')!.id })), 'STAFFING_EDIT_LOCKED')
+  })
+  it('paginates a directory of more than 50 people and returns every employee on a busy calendar day', async () => {
+    const f = await locationFixture()
+    const users = Array.from({ length: 51 }, (_, index) => ({ id: randomUUID(), email: email(`directory-${index}`), passwordHash: 'test-only' }))
+    await prisma.user.createMany({ data: users })
+    const members = users.map(user => ({ id: randomUUID(), organizationId: f.organizationId, userId: user.id }))
+    await prisma.organizationMember.createMany({ data: members })
+    await prisma.locationMember.createMany({ data: members.map(person => ({ organizationId: f.organizationId, memberId: person.id, locationId: f.first.id })) })
+    const page = await atPoint(f, f.second.id, () => listMembersPage(member.id, f.organizationId, { directory: 'true', page: 3, pageSize: 20 }))
+    assert.equal(page.pagination.total, 54)
+    assert.equal(page.members.length, 14)
+    for (const person of members.slice(0, 10)) await atPoint(f, f.first.id, () => createShift(owner.id, f.organizationId, pointShift(person.id, '2064-05-02')))
+    const calendar = await atPoint(f, f.first.id, () => listSchedule(member.id, f.organizationId, '2064-05-01', '2064-06-01'))
+    assert.equal(calendar.shifts.length, 10)
+    assert.equal(new Set(calendar.shifts.map(shift => shift.memberId)).size, 10)
+    assert.equal((await atPoint(f, f.second.id, () => listSchedule(member.id, f.organizationId, '2064-05-01', '2064-06-01'))).shifts.length, 0)
+  })
+  it('returns today employees in each point timezone without mixing point schedules', async () => {
+    const f = await locationFixture()
+    const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Moscow', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date())
+    const today = ['year', 'month', 'day'].map(type => parts.find(part => part.type === type)?.value).join('-')
+    await atPoint(f, f.first.id, () => createShift(owner.id, f.organizationId, pointShift(f.employee.id, today)))
+    const summary = await locationOverview(member.id, f.organizationId)
+    assert.equal(summary.find(point => point.id === f.first.id)?.todayMemberCount, 1)
+    assert.equal(summary.find(point => point.id === f.second.id)?.todayMemberCount, 0)
+    assert.equal(summary.find(point => point.id === f.first.id)?.shifts[0].memberId, f.employee.id)
   })
 })

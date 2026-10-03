@@ -34,13 +34,15 @@ export function useOrganization(organizationId: string | undefined) {
   return useQuery({ ...liveQueryOptions, queryKey: ['organization', organizationId, locationId], queryFn: () => apiRequest<{ organization: OrganizationSummary }>(`/organizations/${organizationId}`), enabled: Boolean(user && organizationId) })
 }
 
-export function useOrganizationMembers(organizationId: string | undefined, options?: { page: number; pageSize: number; search?: string; role?: OrganizationRole; positionId?: string }) {
+export function useOrganizationMembers(organizationId: string | undefined, options?: { page: number; pageSize: number; search?: string; role?: OrganizationRole; positionId?: string; directory?: boolean; pointId?: string }) {
   const { locationId, apiRequest, user } = useAuth()
   const query = new URLSearchParams()
   if (options) {
     query.set('page', String(options.page)); query.set('pageSize', String(options.pageSize))
     if (options.search) query.set('search', options.search)
     if (options.role) query.set('role', options.role)
+    if (options.directory) query.set('directory', 'true')
+    if (options.pointId) query.set('pointId', options.pointId)
     if (options.positionId) query.set('positionId', options.positionId)
   }
   const suffix = query.size ? `?${query}` : ''
@@ -81,4 +83,9 @@ export function useLocations(organizationId: string | undefined) {
 export function useLocationTeams(organizationId: string) {
   const { apiRequest, locationId } = useAuth()
   return useQuery({ ...liveQueryOptions, queryKey: ['location-teams', organizationId, locationId], queryFn: () => apiRequest<{ teams: import('./types.ts').LocationTeam[] }>(`/organizations/${organizationId}/teams`) })
+}
+
+export function useOrganizationDirectory(organizationId: string, enabled = true) {
+  const { apiRequest, locationId } = useAuth()
+  return useQuery({ ...liveQueryOptions, queryKey: ['location-directory', organizationId, locationId], queryFn: () => apiRequest<{ members: import('./types.ts').DirectoryMember[] }>(`/organizations/${organizationId}/all-members`), enabled })
 }

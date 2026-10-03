@@ -9,7 +9,7 @@ export const liveQueryOptions = {
 } as const
 
 export async function invalidateOrganizationWork(client: QueryClient, organizationId: string) {
-  const prefixes = ['absences', 'schedule', 'my-upcoming-shifts', 'shift-details', 'requests', 'request', 'work-time-statistics', 'member-work-time', 'my-work-time']
+  const prefixes = ['locations-overview', 'locations', 'absences', 'schedule', 'my-upcoming-shifts', 'shift-details', 'requests', 'request', 'work-time-statistics', 'member-work-time', 'my-work-time']
   await Promise.all([
     ...prefixes.map(prefix => client.invalidateQueries({ queryKey: [prefix, organizationId] })),
     client.invalidateQueries({ queryKey: ['shift-notifications'] }),

@@ -63,6 +63,7 @@ export async function getOrganization(userId: string, organizationId: string) {
     role: membership.role,
     organizationRole: membership.organizationRole,
     viewerMemberId: membership.id,
+    assignedToLocation: !!membership.assignedLocationId,
     organizationTimezone: (await prisma.organization.findUniqueOrThrow({ where: { id: organizationId }, select: { timezone: true } })).timezone,
     locationId: membership.locationId,
     location: membership.location,
@@ -94,18 +95,18 @@ export async function listMembers(userId: string, organizationId: string) {
   })
 }
 
-export async function listMembersPage(userId: string, organizationId: string, options: { page?: number; pageSize?: number; role?: OrganizationRole; search?: string; positionId?: string }) {
+export async function listMembersPage(userId: string, organizationId: string, options: { directory?: string; pointId?: string; page?: number; pageSize?: number; role?: OrganizationRole; search?: string; positionId?: string }) {
   await getMembership(userId, organizationId)
   const page = options.page ?? 1
   const pageSize = options.pageSize ?? 20
   const terms = options.search?.trim().split(/\s+/).filter(Boolean) ?? []
   const where: Prisma.OrganizationMemberWhereInput = {
     organizationId,
-    ...locationMemberWhere(organizationId),
+    ...(options.directory === 'true' ? { locationMemberships: { some: { leftAt: null, location: { archivedAt: null }, ...(options.pointId ? { locationId: options.pointId } : {}) } } } : locationMemberWhere(organizationId)),
     leftAt: null,
     organization: { deletedAt: null },
     user: { deletedAt: null },
-    ...(options.role ? scopedLocationId(organizationId) && options.role !== 'OWNER' ? { AND: [{ role: { not: 'OWNER' } }, options.role === 'ADMIN' ? { locationMemberships: { some: { locationId: scopedLocationId(organizationId), role: 'ADMIN', leftAt: null } } } : { locationMemberships: { none: { locationId: scopedLocationId(organizationId), role: 'ADMIN', leftAt: null } } }] } : { role: options.role } : {}),
+    ...(options.role ? { role: options.role } : {}),
     ...(options.positionId ? { positions: options.positionId === 'unassigned' ? { none: { position: { isActive: true } } } : { some: { positionId: options.positionId, position: { organizationId, isActive: true } } } } : {}),
     ...(terms.length ? { NOT: { OR: terms.map((term) => ({ NOT: { user: { OR: [
       { email: { contains: term, mode: 'insensitive' } },
@@ -127,7 +128,7 @@ export async function listMembersPage(userId: string, organizationId: string, op
   return {
     members: members.map((member) => {
       const displayName = [member.user.lastName, member.user.firstName, member.user.middleName].filter(Boolean).join(' ') || member.user.email.split('@')[0]
-      return { positions: member.positions.map(item => item.position), id: member.id, userId: member.userId, email: member.user.email, displayName, firstName: member.user.firstName, lastName: member.user.lastName, middleName: member.user.middleName, phone: member.user.phone, bio: member.user.bio, avatarUrl: mediaUrl(member.user.avatarFileId), lastSeenAt: member.user.lastSeenAt, online: member.user.sessions.length > 0, role: member.role === 'OWNER' ? 'OWNER' : scopedLocationId(organizationId) ? member.locationMemberships.find(m => m.locationId === scopedLocationId(organizationId))?.role ?? 'MEMBER' : member.role, locations: member.locationMemberships, teams: member.teamMemberships.map(m => m.team), joinedAt: member.joinedAt }
+      return { positions: member.positions.map(item => item.position), id: member.id, userId: member.userId, email: member.user.email, displayName, firstName: member.user.firstName, lastName: member.user.lastName, middleName: member.user.middleName, phone: member.user.phone, bio: member.user.bio, avatarUrl: mediaUrl(member.user.avatarFileId), lastSeenAt: member.user.lastSeenAt, online: member.user.sessions.length > 0, role: member.role, locations: member.locationMemberships, teams: member.teamMemberships.map(m => m.team), joinedAt: member.joinedAt }
     }),
     pagination: { page, pageSize, total, pages: Math.max(1, Math.ceil(total / pageSize)) },
   }
@@ -137,11 +138,18 @@ export async function changeMemberRole(actorUserId: string, organizationId: stri
   const actor = await getMembership(actorUserId, organizationId)
   const target = await prisma.organizationMember.findFirst({ where: { id: memberId, organizationId, leftAt: null }, include: { user: true } })
   if (!target || target.user.deletedAt) throw new ApiError(404, 'MEMBER_NOT_FOUND', 'Участник не найден.')
+  if (actor.organizationRole !== 'OWNER') throw new ApiError(403, 'OWNER_REQUIRED', 'Роли назначает владелец.')
   assertCanChangeRole(actor.role, target.role)
   if (target.role === nextRole) return target
   const roleName = nextRole === 'ADMIN' ? 'Администратор' : 'Пользователь'
   const member = await prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId}, 1))::text`
+    const currentActor = await tx.organizationMember.findFirst({ where: { id: actor.id, organizationId, leftAt: null, organization: { deletedAt: null } } })
+    if (currentActor?.role !== 'OWNER') throw new ApiError(403, 'OWNER_REQUIRED', 'Роли назначает владелец.')
+    const currentTarget = await tx.organizationMember.findFirst({ where: { id: target.id, organizationId, leftAt: null, user: { deletedAt: null } } })
+    if (!currentTarget) throw new ApiError(404, 'MEMBER_NOT_FOUND', 'Участник не найден.')
+    assertCanChangeRole(currentActor.role, currentTarget.role)
+    await tx.locationMember.updateMany({ where: { organizationId, memberId: target.id, leftAt: null }, data: { role: nextRole } })
     const updated = await tx.organizationMember.update({ where: { id: target.id }, data: { role: nextRole } })
     if (nextRole === 'MEMBER') await tx.documentAcknowledgement.updateMany({ where: { memberId: target.id, acknowledgedAt: null, cancelledAt: null, document: { organizationId, OR: [{ visibility: 'ADMINS' }, { visibility: 'PRIVATE_MEMBER', targetMemberId: { not: target.id } }] } }, data: { cancelledAt: new Date() } })
     await tx.accountNotification.create({ data: { userId: target.userId, organizationId, type: 'ROLE_CHANGED', title: 'Роль изменена', message: `В организации «${actor.organization.name}» вам назначена роль «${roleName}».` } })

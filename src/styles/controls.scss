@@ -55,3 +55,21 @@ input[type=time]::-webkit-calendar-picker-indicator { display: none; }
 input[aria-invalid=true]:focus-visible, textarea[aria-invalid=true]:focus-visible, input:user-invalid:focus-visible, textarea:user-invalid:focus-visible { outline-color: #a34b4b !important; }
 .auth__field:has(input:focus-visible), .account-password-field > div:has(input:focus-visible) { outline: 2px solid #686868; outline-offset: 2px; }
 .auth__field input:focus-visible, .account-password-field input:focus-visible { outline: none !important; }
+
+/* Shared semantic accents for people, positions and locations. */
+:root { --accent-gold: #8a560b; --accent-gold-bg: #fff0cf; --accent-gold-border: #e4bd69; --accent-purple: #633bb6; --accent-purple-bg: #eee5ff; --accent-purple-border: #c0a5ee; --accent-blue: #265da4; --accent-blue-bg: #e6f0ff; --accent-blue-border: #9ebee8; --accent-green: #247451; --accent-green-bg: #e1f4e9; --accent-green-border: #97cbae; }
+.role-badge--owner { color: var(--accent-gold); background: var(--accent-gold-bg); border-color: var(--accent-gold-border); }
+.role-badge--admin { color: var(--accent-purple); background: var(--accent-purple-bg); border-color: var(--accent-purple-border); }
+.role-badge--member { color: var(--accent-blue); background: var(--accent-blue-bg); border-color: var(--accent-blue-border); }
+.location-badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border: 1px solid var(--accent-green-border); border-radius: 6px; background: var(--accent-green-bg); color: var(--accent-green); font-size: 11px; font-weight: 600; font-style: normal; }
+
+[data-tone=green] { --point-color: var(--accent-green); --point-bg: var(--accent-green-bg); --point-border: var(--accent-green-border); }
+[data-tone=blue] { --point-color: var(--accent-blue); --point-bg: var(--accent-blue-bg); --point-border: var(--accent-blue-border); }
+[data-tone=purple] { --point-color: var(--accent-purple); --point-bg: var(--accent-purple-bg); --point-border: var(--accent-purple-border); }
+[data-tone=gold] { --point-color: var(--accent-gold); --point-bg: var(--accent-gold-bg); --point-border: var(--accent-gold-border); }
+.location-badge[data-tone] { color: var(--point-color); background: var(--point-bg); border-color: var(--point-border); }
+[data-tone=teal] { --point-color: #23766b; --point-bg: #eaf6f2; --point-border: #cbe7dd; }
+[data-tone=cyan] { --point-color: #257386; --point-bg: #edf7fa; --point-border: #cde6ec; }
+[data-tone=rose] { --point-color: #ac526d; --point-bg: #fcf0f4; --point-border: #f0d4dd; }
+[data-tone=clay] { --point-color: #996145; --point-bg: #faf1e9; --point-border: #ead8c9; }
+.staffly-select__options--floating { z-index: 2000; min-width: 0; overscroll-behavior: contain; scrollbar-width: thin; box-sizing: border-box; }

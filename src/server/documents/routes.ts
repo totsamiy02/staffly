@@ -21,7 +21,7 @@ router.get('/organizations/:organizationId/documents-members', async (request, r
 router.get(base, async (request, response) => { const { organizationId } = parse(paramsSchema, request.params); response.json(await listDocuments(user(request), organizationId, parse(listSchema, request.query))) })
 router.put(base, upload, body, async (request, response) => {
   const { organizationId } = parse(paramsSchema, request.params)
-  const data = parse(metadataSchema, { shared: request.query.shared === 'true', displayName: request.query.displayName, folderId: request.query.folderId ?? null, visibility: request.query.visibility, targetMemberId: request.query.targetMemberId ?? null })
+  const data = parse(metadataSchema, { pointId: request.query.pointId === 'shared' ? null : request.query.pointId, shared: request.query.shared === 'true', displayName: request.query.displayName, folderId: request.query.folderId ?? null, visibility: request.query.visibility, targetMemberId: request.query.targetMemberId ?? null })
   response.status(201).json({ document: await uploadDocument(user(request), organizationId, request.body, request.get('content-type')?.split(';')[0] ?? '', request.get('x-file-name'), data) })
 })
 router.get(`${base}/:documentId`, async (request, response) => { const { organizationId, documentId } = parse(paramsSchema, request.params); response.json({ document: await getDocument(user(request), organizationId, documentId!) }) })

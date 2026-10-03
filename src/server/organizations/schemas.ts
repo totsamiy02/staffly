@@ -8,6 +8,8 @@ export const normalizedEmail = z.string().trim().toLowerCase().email().max(254)
 export const organizationIdParams = z.object({ organizationId: uuid })
 export const memberParams = organizationIdParams.extend({ memberId: uuid })
 export const memberListQuery = z.object({
+  directory: z.enum(['true', 'false']).optional(),
+  pointId: uuid.optional(),
   positionId: z.union([uuid, z.literal("unassigned")]).optional(),
   page: z.coerce.number().int().min(1).max(100_000).optional(),
   pageSize: z.coerce.number().int().min(1).max(50).optional(),

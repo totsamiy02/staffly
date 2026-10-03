@@ -56,6 +56,7 @@ enum OrganizationInviteType {
 enum SensitiveActionType {
   TRANSFER_OWNERSHIP
   DELETE_ORGANIZATION
+  ARCHIVE_LOCATION
 }
 
 enum WorkShiftStatus {
@@ -86,6 +87,8 @@ enum RequestSystemCode {
   ABSENCE
   SHIFT_CHANGE
   SHIFT_PROPOSAL
+  STAFFING
+  STAFFING_RESPONSE
   OTHER
 }
 
@@ -320,6 +323,12 @@ model RequestType {
 }
 
 model OrganizationRequest {
+  staffingRequestId String? @map("staffing_request_id") @db.Uuid
+  staffingRequest OrganizationRequest? @relation("StaffingResponses", fields: [organizationId, staffingRequestId], references: [organizationId, id], onDelete: Restrict)
+  staffingResponses OrganizationRequest[] @relation("StaffingResponses")
+  staffingPositionId String? @map("staffing_position_id") @db.Uuid
+  staffingPositionName String? @map("staffing_position_name") @db.VarChar(120)
+
   locationId String @map("location_id") @db.Uuid
   location OrganizationLocation @relation(fields: [organizationId, locationId], references: [organizationId, id], onDelete: Restrict)
   id                 String             @id @default(uuid()) @db.Uuid
@@ -359,6 +368,8 @@ model OrganizationRequest {
   @@index([createdByMemberId, status, createdAt])
   @@index([requestTypeId, createdAt])
   @@index([resolvedAt])
+  @@unique([organizationId, id])
+  @@unique([staffingRequestId, createdByMemberId])
   @@map("requests")
   @@index([organizationId, locationId])
 }
@@ -487,6 +498,7 @@ model OrganizationInvite {
 }
 
 model SensitiveActionToken {
+  targetLocationId String? @map("target_location_id") @db.Uuid
   id             String              @id @default(uuid()) @db.Uuid
   userId         String              @map("user_id") @db.Uuid
   organizationId String              @map("organization_id") @db.Uuid
@@ -613,6 +625,7 @@ enum DocumentVisibility {
 }
 
 model DocumentFolder {
+  visibility DocumentVisibility @default(ORGANIZATION)
   locationId String? @map("location_id") @db.Uuid
   location OrganizationLocation? @relation(fields: [organizationId, locationId], references: [organizationId, id], onDelete: Restrict)
   id String @id @default(uuid()) @db.Uuid
