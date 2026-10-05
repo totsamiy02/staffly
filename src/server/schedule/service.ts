@@ -90,6 +90,17 @@ function publicShift(shift: WorkShift & { member: { user: { email: string; first
 
 const shiftInclude = { member: { include: { user: { select: { email: true, firstName: true, lastName: true, middleName: true, avatarFileId: true } } } }, _count: { select: { adjustments: true } } } as const
 
+export async function listCancelledShifts(userId: string, organizationId: string, query: { page: number; limit: number; memberId?: string; order: 'asc' | 'desc' }) {
+  const actor = await getMembership(userId, organizationId)
+  requireOrganizationRole(actor.role, ['OWNER', 'ADMIN'])
+  const where = { organizationId, ...locationWhere(organizationId), status: 'CANCELLED' as const, ...(query.memberId ? { memberId: query.memberId } : {}) }
+  const [total, shifts] = await Promise.all([
+    prisma.workShift.count({ where }),
+    prisma.workShift.findMany({ where, include: shiftInclude, orderBy: [{ cancelledAt: query.order }, { id: query.order }], skip: (query.page - 1) * query.limit, take: query.limit }),
+  ])
+  return { timezone: actor.organization.timezone, shifts: shifts.map(publicShift), pagination: { page: query.page, limit: query.limit, total, pages: Math.ceil(total / query.limit) } }
+}
+
 export async function listSchedule(userId: string, organizationId: string, fromDate: string, toDate: string, mode?: 'current' | 'history') {
   const actor = await getMembership(userId, organizationId)
   const from = startOfZonedDate(fromDate, actor.organization.timezone)

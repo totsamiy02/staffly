@@ -24,7 +24,7 @@ export async function assertAbsencePeriod(tx: Prisma.TransactionClient, organiza
   if (overlap) throw new ApiError(409, 'ABSENCE_OVERLAP', `На ${dateText(overlap.startDate)}–${dateText(overlap.endDate)} уже зарегистрировано отсутствие. Сначала измените или отмените его.`)
 }
 export async function absenceShiftConflicts(tx: Prisma.TransactionClient | typeof prisma, organizationId: string, memberId: string, start: Date, end: Date, timezone: string) {
-  return tx.workShift.findMany({ where: { organizationId, memberId, status: 'SCHEDULED', scheduledEndAt: { gt: new Date() }, AND: [{ scheduledStartAt: { lt: startOfZonedDate(addCalendarDays(dateText(end), 1), timezone) } }, { scheduledEndAt: { gt: startOfZonedDate(dateText(start), timezone) } }] }, orderBy: { scheduledStartAt: 'asc' }, select: { id: true, scheduledStartAt: true, scheduledEndAt: true } })
+  return tx.workShift.findMany({ where: { organizationId, memberId, status: 'SCHEDULED', scheduledEndAt: { gt: new Date() }, AND: [{ scheduledStartAt: { lt: startOfZonedDate(addCalendarDays(dateText(end), 1), timezone) } }, { scheduledEndAt: { gt: startOfZonedDate(dateText(start), timezone) } }] }, orderBy: { scheduledStartAt: 'asc' }, select: { id: true, locationId: true, scheduledStartAt: true, scheduledEndAt: true } })
 }
 function conflictError(error: unknown): never {
   if (error instanceof ApiError) throw error

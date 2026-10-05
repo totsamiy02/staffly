@@ -8,10 +8,17 @@ import { ApiError } from '../api-error.ts'
 import { batchShiftBody, actualShiftBody, cancelShiftBody, historyPaginationQuery, memberWorkTimeParams, organizationParams, scheduleRangeQuery, shiftBody, shiftParams, statisticsQuery } from './schemas.ts'
 import { createShiftBatch, cancelShift, correctActualTime, createShift, getShift, listMyUpcomingShifts, listSchedule, listShiftNotifications, readShiftNotification, updateShift } from './service.ts'
 import { memberStatistics, myStatistics, organizationStatistics } from './statistics.ts'
+import { cancelledShiftsQuery } from './schemas.ts'
+import { listCancelledShifts } from './service.ts'
 
 const router = Router()
 const mutationLimiter = rateLimit({ windowMs: 60 * 1000, limit: 120, standardHeaders: 'draft-8', legacyHeaders: false, message: { code: 'TOO_MANY_REQUESTS', message: 'Слишком много изменений. Попробуйте через минуту.' } })
 router.use(requireAuth)
+
+router.get('/organizations/:organizationId/schedule/history', async (request, response) => {
+  const { organizationId } = parse(organizationParams, request.params)
+  response.json(await listCancelledShifts(auth(request).userId, organizationId, parse(cancelledShiftsQuery, request.query)))
+})
 
 router.get('/shift-notifications', async (request, response) => response.json({ notifications: await listShiftNotifications(auth(request).userId) }))
 router.post('/shift-notifications/:shiftId/read', async (request, response) => {

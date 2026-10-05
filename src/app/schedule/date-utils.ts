@@ -76,3 +76,10 @@ export function shiftTimeRange(startAt: string, endAt: string, timezone: string,
   if (start.date !== end.date || (referenceDate && start.date !== referenceDate)) return `${shortDate(start.date)}, ${start.time} → ${shortDate(end.date)}, ${end.time}`
   return `${start.time}–${end.time}`
 }
+
+export function shiftCoversDate(shift: WorkShift, day: string, timezone: string) {
+  const start = zonedDateAndTime(shift.scheduledStartAt, timezone)
+  const end = zonedDateAndTime(shift.scheduledEndAt, timezone)
+  const lastDay = end.time === '00:00' && end.date !== start.date ? addDays(end.date, -1) : end.date
+  return day >= start.date && day <= lastDay
+}

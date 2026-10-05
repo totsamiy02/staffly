@@ -1,5 +1,5 @@
 import { useLocation } from 'react-router-dom'
-import { postAuthJson as postJson } from './session-transport.ts'
+import { postAuthJson as postJson, requestWithSession } from './session-transport.ts'
 import { useQueryClient } from '@tanstack/react-query'
 /* oxlint-disable react/only-export-components -- The provider and its hook share one context. */
 import { createContext, useCallback, useContext, useEffect, useRef, useState, useMemo, type ReactNode } from 'react'
@@ -115,11 +115,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       headers: { ...(options.body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}),
     })
-    let response = await execute(tokenRef.current)
-    if (response.status === 401) {
-      const refreshed = await refresh()
-      if (refreshed) response = await execute(refreshed.accessToken)
-    }
+    const response = await requestWithSession(execute, () => tokenRef.current, refresh)
     return readJson<T>(response)
   }, [refresh])
 
@@ -130,25 +126,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       headers: { 'Content-Type': file.type, ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: file,
     })
-    let response = await execute(tokenRef.current)
-    if (response.status === 401) {
-      const refreshed = await refresh()
-      if (refreshed) response = await execute(refreshed.accessToken)
-    }
+    const response = await requestWithSession(execute, () => tokenRef.current, refresh)
     return readJson<T>(response)
   }, [refresh])
 
   const uploadFile = useCallback(async <T,>(path: string, file: File): Promise<T> => {
     const execute = (token: string | null) => fetch(`/api${path}`, { method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': file.type || ({ pdf: 'application/pdf', doc: 'application/msword', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', xls: 'application/vnd.ms-excel', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', ppt: 'application/vnd.ms-powerpoint', pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', csv: 'text/csv', txt: 'text/plain', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp' } as Record<string, string>)[file.name.split('.').at(-1)?.toLowerCase() ?? ''] || 'application/octet-stream', 'X-File-Name': encodeURIComponent(file.name), ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: file })
-    let response = await execute(tokenRef.current)
-    if (response.status === 401) { const refreshed = await refresh(); if (refreshed) response = await execute(refreshed.accessToken) }
+    const response = await requestWithSession(execute, () => tokenRef.current, refresh)
     return readJson<T>(response)
   }, [refresh])
 
   const downloadFile = useCallback(async (path: string, fileName: string, method: 'GET' | 'POST' = 'GET') => {
     const execute = (token: string | null) => fetch(`/api${path}`, { method, credentials: 'same-origin', headers: token ? { Authorization: `Bearer ${token}` } : {} })
-    let response = await execute(tokenRef.current)
-    if (response.status === 401) { const refreshed = await refresh(); if (refreshed) response = await execute(refreshed.accessToken) }
+    const response = await requestWithSession(execute, () => tokenRef.current, refresh)
     if (!response.ok) { await readJson(response); return }
     const url = URL.createObjectURL(await response.blob())
     const anchor = document.createElement('a'); anchor.href = url; anchor.download = fileName; anchor.click(); URL.revokeObjectURL(url)
@@ -156,8 +146,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const previewFile = useCallback(async (path: string, method: 'GET' | 'POST' = 'GET') => {
     const execute = (token: string | null) => fetch(`/api${path}`, { method, credentials: 'same-origin', headers: token ? { Authorization: `Bearer ${token}` } : {} })
-    let response = await execute(tokenRef.current)
-    if (response.status === 401) { const refreshed = await refresh(); if (refreshed) response = await execute(refreshed.accessToken) }
+    const response = await requestWithSession(execute, () => tokenRef.current, refresh)
     if (!response.ok) { await readJson(response); throw new Error('Не удалось открыть файл.') }
     return response.blob()
   }, [refresh])

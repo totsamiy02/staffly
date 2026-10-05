@@ -17,7 +17,7 @@ import { confirmOrganizationDeletion, confirmOwnershipTransfer, requestOrganizat
 import { updateProfileBody } from '../src/server/profile/schemas.ts'
 import { updateOrganizationBody } from '../src/server/organizations/schemas.ts'
 import { passwordValidationError } from '../src/app/auth/password-policy.ts'
-import { createShiftBatch, cancelShift, correctActualTime, createShift, getShift, listMyUpcomingShifts, listSchedule, listShiftNotifications, readShiftNotification, updateShift } from '../src/server/schedule/service.ts'
+import { createShiftBatch, cancelShift, correctActualTime, createShift, getShift, listMyUpcomingShifts, listSchedule, listCancelledShifts, listShiftNotifications, readShiftNotification, updateShift } from '../src/server/schedule/service.ts'
 import { memberStatistics, myStatistics, organizationStatistics } from '../src/server/schedule/statistics.ts'
 import { zonedDateTimeToUtc } from '../src/server/schedule/timezone.ts'
 import { calendarRange, moveMonth, shiftState, shiftTimeRange } from '../src/app/schedule/date-utils.ts'
@@ -1721,6 +1721,26 @@ async function locationFixture() {
 function atPoint<T>(f: { organizationId: string }, locationId: string, run: () => T) { return locationContext.run({ organizationId: f.organizationId, locationId }, run) }
 const pointShift = (memberId: string, date = '2060-05-02', startTime = '09:00', endTime = '18:00') => ({ memberId, startDate: date, endDate: date, startTime, endTime, breakMinutes: 0, description: null })
 describe('locations, teams and point authorization', { concurrency: false }, () => {
+  it('lists cancelled shifts across months with pagination, reasons and point permissions', async () => {
+    const f = await locationFixture()
+    const a = await atPoint(f, f.first.id, () => createShift(admin.id, f.organizationId, pointShift(f.employee.id, '2065-01-02')))
+    const b = await atPoint(f, f.first.id, () => createShift(admin.id, f.organizationId, pointShift(f.employee.id, '2065-06-02')))
+    await atPoint(f, f.first.id, () => cancelShift(admin.id, f.organizationId, a.id, 'Отмена первой смены'))
+    await atPoint(f, f.first.id, () => cancelShift(admin.id, f.organizationId, b.id, 'Отмена второй смены'))
+    const first = await atPoint(f, f.first.id, () => listCancelledShifts(admin.id, f.organizationId, { page: 1, limit: 1, order: 'asc', memberId: f.employee.id }))
+    const second = await atPoint(f, f.first.id, () => listCancelledShifts(admin.id, f.organizationId, { page: 2, limit: 1, order: 'asc' }))
+    assert.equal(first.pagination.total, 2)
+    assert.equal(first.pagination.pages, 2)
+    assert.equal(first.shifts[0].id, a.id)
+    assert.equal(second.shifts[0].id, b.id)
+    assert.equal(first.shifts[0].cancellationReason, 'Отмена первой смены')
+    const newest = await atPoint(f, f.first.id, () => listCancelledShifts(admin.id, f.organizationId, { page: 1, limit: 20, order: 'desc' }))
+    assert.equal(newest.shifts[0].id, b.id)
+    const other = await atPoint(f, f.second.id, () => listCancelledShifts(owner.id, f.organizationId, { page: 1, limit: 20, order: 'desc' }))
+    assert.equal(other.pagination.total, 0)
+    await expectCode(() => atPoint(f, f.second.id, () => listCancelledShifts(admin.id, f.organizationId, { page: 1, limit: 20, order: 'desc' })), 'INSUFFICIENT_PERMISSIONS')
+    await expectCode(() => atPoint(f, f.first.id, () => listCancelledShifts(member.id, f.organizationId, { page: 1, limit: 20, order: 'desc' })), 'INSUFFICIENT_PERMISSIONS')
+  })
   it('requires first-point data at creation and creates named teams atomically', async () => {
     assert.equal(createOrganizationBody.safeParse({ name: 'Кофейня', timezone: 'Europe/Moscow' }).success, false)
     const f = await locationFixture()

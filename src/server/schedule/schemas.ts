@@ -47,6 +47,11 @@ export const historyPaginationQuery = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
 })
 
+export const cancelledShiftsQuery = historyPaginationQuery.extend({
+  memberId: uuid.optional(),
+  order: z.enum(['asc', 'desc']).default('desc'),
+})
+
 export const statisticsQuery = z.object({
   historyOrder: z.enum(['asc', 'desc']).default('desc'),
   from: date.optional(),

@@ -1,5 +1,7 @@
 import { NavLink } from 'react-router-dom'
 import type { OrganizationSummary } from '../../../app/organizations/types.ts'
+import './schedule.scss'
+import './schedule-redesign.scss'
 
 export default function ScheduleTabs({ organization }: { organization: OrganizationSummary }) {
   const base = `/app/organizations/${organization.id}/schedule`

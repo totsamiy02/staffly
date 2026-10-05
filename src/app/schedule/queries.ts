@@ -3,6 +3,13 @@ import { useQuery } from '@tanstack/react-query'
 import { useAuth } from '../auth/auth-context.tsx'
 import type { EmployeeAbsence, MemberWorkTime, ShiftDetails, ShiftNotification, WorkShift, WorkTimeStatistics } from './types.ts'
 
+export function useCancelledShifts(organizationId: string, params: { page: number; order: 'asc' | 'desc'; memberId: string }) {
+  const { locationId, apiRequest } = useAuth()
+  const query = new URLSearchParams({ page: String(params.page), limit: '20', order: params.order })
+  if (params.memberId) query.set('memberId', params.memberId)
+  return useQuery({ ...liveQueryOptions, queryKey: ['schedule', organizationId, 'cancelled-list', params, locationId], queryFn: () => apiRequest<{ timezone: string; shifts: WorkShift[]; pagination: { page: number; total: number; pages: number } }>(`/organizations/${organizationId}/schedule/history?${query}`) })
+}
+
 export function useSchedule(organizationId: string, from: string, to: string, mode: 'current' | 'history' = 'current') {
   const { locationId, apiRequest } = useAuth()
   return useQuery({ ...liveQueryOptions, queryKey: ['schedule', organizationId, from, to, mode, locationId], queryFn: () => apiRequest<{ timezone: string; shifts: WorkShift[]; absences: EmployeeAbsence[] }>(`/organizations/${organizationId}/schedule?from=${from}&to=${to}&mode=${mode}`), placeholderData: (previous, previousQuery) => previousQuery?.queryKey.at(-1) === locationId ? previous : undefined })
