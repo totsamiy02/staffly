@@ -23,7 +23,7 @@ export default function DocumentsPage({ organization }: { organization: Organiza
   const toast = useToast()
   const [dialogBusy, setDialogBusy] = useState(false)
   const manager = (organization.organizationRole ?? organization.role) !== 'MEMBER', { apiRequest } = useAuth(), refresh = useDocumentRefresh()
-  const [params, setParams] = useSearchParams(), [scope, setScope] = useState(params.get('member') ? 'personal' : params.get('section') ?? 'workspace'), [search, setSearch] = useState(''), [debounced, setDebounced] = useState(''), [pointId, setPointId] = useState('all'), [sort, setSort] = useState('updated'), [highlight, setHighlight] = useState(''), [page, setPage] = useState(1), [dialog, setDialog] = useState<Dialog | null>(null)
+  const [params, setParams] = useSearchParams(), [scope, setScope] = useState(params.get('member') ? 'personal' : params.get('section') ?? 'workspace'), [search, setSearch] = useState(''), [debounced, setDebounced] = useState(''), [pointId, setPointId] = useState(params.get('pointId') ?? 'all'), [sort, setSort] = useState('updated'), [highlight, setHighlight] = useState(''), [page, setPage] = useState(1), [dialog, setDialog] = useState<Dialog | null>(null)
   const folderId = params.get('folder') ?? '', targetMemberId = params.get('member') ?? '', documentId = params.get('document') ?? ''
   const documents = useDocuments(organization.id, { scope, search: debounced, folderId: folderId || undefined, pointId, sort, targetMemberId: targetMemberId || undefined, page })
   const locations = useLocations(organization.id)

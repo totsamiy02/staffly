@@ -1,0 +1,56 @@
+.members-page {
+  .members-heading { display:flex; align-items:center; justify-content:space-between; gap:20px; margin-bottom:24px; h1 { margin:0; font-size:34px; letter-spacing:-1px; } p { margin:6px 0 0; color:#767b85; font-size:15px; } .app-primary { display:flex; align-items:center; gap:10px; white-space:nowrap; span { font-size:23px; font-weight:400; } } }
+  .members-toolbar { display:flex; align-items:flex-end; gap:12px; padding:0; background:none; border:0; border-radius:0; margin:0; label { min-width:0; flex:1; margin:0; >span { position:absolute; width:1px; height:1px; clip-path:inset(50%); overflow:hidden; } &:first-child { flex:2.5; } } input { height:44px; border-radius:8px; font-size:14px; padding:0 14px; width:100%; } .staffly-control { min-height:44px; border-radius:8px; } }
+  .members-count { font-size:13px; margin:18px 0 12px; }
+  .members-table { border-radius:10px; overflow:visible; }
+  .members-table-head,.member-row { display:grid; grid-template-columns:minmax(210px,1.65fr) minmax(140px,1.2fr) minmax(130px,1fr) minmax(115px,.8fr) 32px; gap:16px; padding:18px 20px; align-items:center; }
+  .members-table-head { color:#7a7f8b; font-size:12px; background:#f8f9fa; border-radius:10px 10px 0 0; padding-top:14px; padding-bottom:14px; border-bottom:1px solid #eceef1; }
+  .member-row { min-height:82px; border-color:#eceef1; &:last-child { border-radius:0 0 10px 10px; } &:hover { background:#fafbfc; } }
+  .member-summary { min-width:0; width:100%; }
+  .member-profile-trigger { width:100%; gap:12px; text-align:left; }
+  .member-avatar { width:40px; height:40px; flex:0 0 40px; .app-avatar { width:40px; height:40px; } }
+  .member-row__identity { strong { font-size:14px; } >span { font-size:12px; } }
+  .member-tags { margin:0; min-width:0; width:auto; }
+  .member-tags-group { gap:5px; flex-wrap:nowrap; min-width:0; .member-tag { min-width:0; flex:0 1 auto; } .member-tags-more { flex:0 0 auto; } }
+  .member-tag { max-width:100%; font-size:11px; line-height:1.3; padding:6px 8px; >span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } }
+  .member-empty { color:#8b9099; font-size:12px; }
+  .member-role-cell { min-width:0; .role-badge { max-width:100%; font-size:11px; } }
+  .member-status { display:flex; gap:8px; align-items:center; font-size:12px; .member-presence { position:static; width:8px; height:8px; border:0; flex:0 0 8px; } }
+  .member-more { width:32px; height:34px; border:0; background:transparent; border-radius:7px; &:hover { background:#eef0f2; } svg { width:18px; height:18px; } }
+  .member-actions-menu { width:250px; max-width:calc(100vw - 36px); padding:6px; border:1px solid #e5e7eb; border-radius:12px; box-shadow:0 12px 35px #1d25301a; }
+  .member-action-item { min-height:42px; padding:10px; gap:10px; font-size:13px; svg { width:18px; height:18px; } }
+  .members-pagination { display:flex; gap:12px; align-items:center; justify-content:flex-start; margin-top:18px; font-size:12px; .app-secondary { min-height:36px; } }
+  .members-page-size { margin-left:auto; white-space:nowrap; display:flex; align-items:center; gap:10px; .staffly-select { width:74px; } }
+}
+.members-dialog.document-dialog { width:min(460px,calc(100vw - 32px)); max-height:calc(100dvh - 40px); overflow-y:auto; overscroll-behavior:contain; padding:24px; border-radius:16px;
+  .member-profile-popover__heading span.online-text { color:#3f784b; }
+  >header { margin-bottom:20px; h2 { font-size:20px; letter-spacing:-.4px; } .app-eyebrow { display:none; } }
+  .member-positions-person,.member-profile-popover__heading { display:flex; align-items:center; gap:12px; padding:0 0 16px; margin:0 0 16px; border-bottom:1px solid #eceef1; .app-avatar { width:42px; height:42px; flex:0 0 42px; } >div { min-width:0; display:grid; gap:4px; } strong { font-size:14px; overflow-wrap:anywhere; } span { font-size:12px; color:#858995; overflow-wrap:anywhere; } }
+  .member-profile-popover__heading .app-avatar { width:64px; height:64px; flex-basis:64px; }
+  dl { margin:0; display:grid; gap:16px; >div { display:grid; grid-template-columns:105px minmax(0,1fr); gap:14px; font-size:13px; } dt { color:#858995; } dd { margin:0; overflow-wrap:anywhere; } }
+  dl+.app-secondary,dl+p+.app-secondary { display:flex; justify-content:space-between; align-items:center; width:100%; margin-top:22px; padding:14px; }
+  label { display:grid; gap:8px; font-size:13px; >span { font-size:13px; } }
+  input { width:100%; height:42px; border:1px solid #dfe2e7; border-radius:8px; background:#fafbfc; padding:0 12px; font:inherit; }
+  .member-dialog-hint,.member-role-description { font-size:13px; color:#808692; line-height:1.6; }
+  .member-role-description { padding:14px; background:#f6f7f8; border-radius:10px; }
+  section { margin-top:18px; h3 { font-size:13px; margin:0 0 8px; } }
+  .member-positions-selected { max-height:110px; overflow-y:auto; min-height:0; padding:0; background:none; gap:6px; button { font-size:12px; padding:7px 9px; border-radius:6px; max-width:100%; overflow-wrap:anywhere; } }
+  .member-positions-options { height:190px; max-height:26dvh; overflow-y:auto; overscroll-behavior:contain; margin-top:10px; border-radius:8px; button { min-height:42px; font-size:13px; padding:10px 12px; } p { font-size:13px; } }
+  footer { margin-top:22px; padding-top:16px; border-top:1px solid #eceef1; display:flex; flex-wrap:wrap; gap:10px; justify-content:flex-end; >div { display:flex; gap:10px; width:100%; >button { flex:1; } } >button { flex:1; } .member-positions-note { font-size:11px; width:100%; } }
+  .admin-card__columns { display:grid; grid-template-columns:1fr; gap:20px; margin-top:20px; form { display:grid; gap:12px; } }
+  .code-generator { border:1px solid #eceef1; border-radius:10px; padding:14px; gap:10px; min-width:0; .generated-code { font-size:23px; } small { line-height:1.5; } }
+  .active-invitations { margin-top:20px; max-height:220px; overflow-y:auto; overscroll-behavior:contain; h3 { font-size:13px; } }
+  .active-invitation { gap:10px; >div { min-width:0; } strong { font-size:12px; overflow-wrap:anywhere; } span { font-size:11px; } button { font-size:12px; flex-shrink:0; } }
+}
+@media(max-width:1150px) { .members-page { .members-table-head,.member-row { grid-template-columns:minmax(160px,1.5fr) minmax(100px,1fr) minmax(100px,1fr) 105px 28px; gap:10px; padding:14px; } .members-toolbar { flex-wrap:wrap; label:first-child { flex-basis:100%; } } } }
+@media(max-width:760px) { .members-page { .members-heading { align-items:flex-start; flex-direction:column; h1 { font-size:28px; } } .members-toolbar { label { flex:1 1 130px; } } .members-table-head { display:none; } .member-row { grid-template-columns:1fr 32px; gap:12px; padding:16px; } .member-summary { grid-column:1; } .member-actions-host { grid-column:2; grid-row:1; } [data-label] { grid-column:1/-1; display:flex; align-items:center; gap:10px; &::before { content:attr(data-label); flex:0 0 78px; color:#858995; font-size:12px; } } .members-pagination { flex-wrap:wrap; } .members-page-size { margin-left:0; } } }
+@media(prefers-reduced-motion:no-preference) { .members-page .member-row { transition:background .15s ease; } }
+.members-dialog.members-invite-dialog {
+  width:min(480px,calc(100vw - 32px));
+  .invite-intro { margin:-4px 0 20px; font-size:13px; color:#808692; line-height:1.6; }
+  .invite-methods { display:flex; padding:4px; gap:4px; background:#f3f4f6; border-radius:10px; margin-bottom:22px; button { flex:1; display:flex; align-items:center; justify-content:center; gap:8px; padding:11px; border:0; border-radius:7px; color:#818691; background:transparent; font:inherit; font-size:13px; cursor:pointer; &[aria-selected=true] { background:white; color:#17191d; box-shadow:0 1px 4px #18203012; } svg { width:17px; height:17px; } } }
+  .invite-panel { margin-top:20px; form { display:grid; gap:18px; } }
+  .code-generator { border:0; padding:0; background:none; display:grid; gap:12px; strong { font-size:14px; } p { margin:0; } .generated-code { width:100%; border:1px dashed #d7dbe1; background:#fafbfc; padding:16px; letter-spacing:4px; font-size:25px; border-radius:10px; } }
+  .active-invitations { border-top:1px solid #eceef1; padding-top:16px; }
+}
+.members-page .member-tags-more > div .member-tag > span { white-space:normal; overflow-wrap:anywhere; }

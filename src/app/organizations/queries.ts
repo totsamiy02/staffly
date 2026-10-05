@@ -49,19 +49,21 @@ export function useOrganizationMembers(organizationId: string | undefined, optio
   return useQuery({ ...liveQueryOptions, queryKey: ['organization-members', organizationId, options, locationId], queryFn: () => apiRequest<{ members: OrganizationMember[]; pagination?: MemberPagination }>(`/organizations/${organizationId}/members${suffix}`), enabled: Boolean(user && organizationId), placeholderData: (previous, previousQuery) => previousQuery?.queryKey.at(-1) === locationId ? previous : undefined })
 }
 
-export function useActiveOrganizationInvitations(organizationId: string | undefined, enabled = true) {
-  const { locationId, apiRequest, user } = useAuth()
-  return useQuery({ ...liveQueryOptions, queryKey: ['organization-invitations', organizationId, locationId], queryFn: () => apiRequest<{ invitations: ActiveOrganizationInvitation[] }>(`/organizations/${organizationId}/invitations`), enabled: Boolean(user && organizationId && enabled) })
+export function useActiveOrganizationInvitations(organizationId: string | undefined, enabled = true, pointId?: string) {
+  const { locationId: activeLocationId, apiRequest, user } = useAuth()
+  const locationId = pointId ?? activeLocationId
+  return useQuery({ ...liveQueryOptions, queryKey: ['organization-invitations', organizationId, locationId], queryFn: () => apiRequest<{ invitations: ActiveOrganizationInvitation[] }>(`/organizations/${organizationId}/invitations${locationId ? `?locationId=${locationId}` : ''}`), enabled: Boolean(user && organizationId && enabled) })
 }
 
-export function useNotificationHistory(options: { limit?: number; cursor?: string; unread?: boolean; organizationId?: string; category?: string } = {}) {
+export function useNotificationHistory(options: { limit?: number; cursor?: string; unread?: boolean; organizationId?: string; category?: string; locationId?: string | null } = {}) {
   const { apiRequest, user, locationId } = useAuth()
   const params = new URLSearchParams({ limit: String(options.limit ?? 20), unread: String(options.unread ?? false) })
-  if (options.organizationId && locationId) params.set('locationId', locationId)
+  const filterLocationId = options.locationId === undefined ? locationId : options.locationId
+  if (options.organizationId && filterLocationId) params.set('locationId', filterLocationId)
   if (options.cursor) params.set('cursor', options.cursor)
   if (options.organizationId) params.set('organizationId', options.organizationId)
   if (options.category) params.set('category', options.category)
-  return useQuery({ ...liveQueryOptions, queryKey: ['notifications', options, options.organizationId ? locationId : undefined], queryFn: () => apiRequest<import('./types.ts').NotificationPage>(`/notifications?${params}`), enabled: Boolean(user) })
+  return useQuery({ ...liveQueryOptions, queryKey: ['notifications', options, options.organizationId ? filterLocationId : undefined], queryFn: () => apiRequest<import('./types.ts').NotificationPage>(`/notifications?${params}`), enabled: Boolean(user) })
 }
 
 export function useNotificationActions(organizationId?: string) {

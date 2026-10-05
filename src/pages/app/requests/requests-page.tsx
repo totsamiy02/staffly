@@ -183,7 +183,7 @@ export default function RequestsPage({ organization }: { organization: Organizat
   const initialScope = params.get('tab')
   const [scope, setScope] = useState<'mine' | 'incoming' | 'history' | 'staffing'>(initialScope === 'staffing' ? 'staffing' : reviewer && (initialScope === 'incoming' || initialScope === 'history') ? initialScope : 'mine')
   const points = useLocations(organization.id)
-  const [pointId, setPointId] = useState(params.get('tab') === 'staffing' ? 'all' : organization.locationId ?? '')
+  const [pointId, setPointId] = useState(params.get('pointId') ?? (params.get('tab') === 'staffing' ? 'all' : organization.locationId ?? ''))
   const members = useOrganizationDirectory(organization.id, reviewer)
   const filterMembers = members.data?.members.filter(member => member.locations.some(point => pointId === 'all' || !pointId || point.locationId === pointId)) ?? []
   const [memberId, setMemberId] = useState('')

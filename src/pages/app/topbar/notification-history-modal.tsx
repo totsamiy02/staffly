@@ -5,12 +5,12 @@ import { useInvitationClock } from '../../../app/organizations/invitation-time.t
 import AnimatedOverlay from '../schedule/animated-overlay.tsx'
 import NotificationItem from './notification-item.tsx'
 
-export default function NotificationHistoryModal({ organizationId, onClose }: { organizationId?: string; onClose: () => void }) {
+export default function NotificationHistoryModal({ organizationId, locationId, onClose }: { organizationId?: string; locationId?: string | null; onClose: () => void }) {
   const [unread, setUnread] = useState(false)
   const [category, setCategory] = useState('')
   const [organizationFilter, setOrganizationFilter] = useState('')
   const [cursors, setCursors] = useState<Array<string | undefined>>([undefined])
-  const history = useNotificationHistory({ organizationId: organizationId ?? (organizationFilter || undefined), category: category || undefined, unread, cursor: cursors.at(-1) })
+  const history = useNotificationHistory({ organizationId: organizationId ?? (organizationFilter || undefined), locationId, category: category || undefined, unread, cursor: cursors.at(-1) })
   const organizations = useOrganizations()
   const actions = useNotificationActions(organizationId ?? (organizationFilter || undefined))
   const now = useInvitationClock()
