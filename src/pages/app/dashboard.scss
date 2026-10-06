@@ -42,3 +42,25 @@
 .dashboard-home .dashboard-point-label { color: #565660; }
 @media (prefers-reduced-motion: reduce) { .dashboard-home .dashboard-scope button { transition: none; } }
 .dashboard-home .dashboard-point-choices { display: grid; gap: 8px; a { position: relative; display: grid; gap: 5px; padding: 14px 36px 14px 14px; border: 1px solid #e8e9ec; border-radius: 8px; color: #222; text-decoration: none; &:hover { background: #f8f8f9; } strong { font-size: 13px; } small { font-size: 11px; color: #888; } svg { position: absolute; right: 14px; top: 18px; width: 16px; height: 16px; } } }
+
+// Point overview: shared shift rows in cards and their details dialog.
+.dashboard-home .location-overview__grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: stretch;
+  .location-today-card { padding: 16px; gap: 0; border-radius: 12px; box-shadow: 0 2px 5px #00000003; }
+  .location-today-card__heading { gap: 14px; margin-bottom: 16px; padding: 2px 4px; .location-mark { width: 46px; height: 46px; flex: 0 0 46px; border-radius: 11px; } }
+  .location-today-card__title { display: grid; gap: 5px; min-width: 0; strong { font-size: 16px; } }
+  .location-today-card__address { font-size: 12px; }
+  .location-today-card__metric { width: 100%; padding: 14px 22px; gap: 22px; border-radius: 10px; background: color-mix(in srgb, var(--point-bg) 60%, #fafafa); >strong { font-size: 44px; } >span { font-size: 15px; font-weight: 600; } small { font-size: 12px; font-weight: 400; color: #888; } }
+  .location-today-card__people { display: grid; width: 100%; gap: 6px; }
+  .location-today-card__more { padding: 10px 14px 0; font-size: 12px; color: #85858d; }
+  .location-today-empty { flex: 1; }
+}
+.location-today-person { display: flex; align-items: center; gap: 16px; min-width: 0; padding: 14px 18px; border: 1px solid #edeef1; border-radius: 10px; background: #fff; text-align: left; .app-avatar { width: 36px; height: 36px; flex: 0 0 36px; } }
+.location-today-person__name { display: grid; gap: 5px; min-width: 0; flex: 1; strong { font-size: 13px; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; } small { color: #888; font-size: 12px; } }
+.location-today-person__time { display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0; padding: 11px 14px; border-radius: 9px; background: #f5f5f6; font-size: 12px; color: #85858d; white-space: nowrap; svg { width: 16px; height: 16px; } }
+.location-today-empty { display: flex; align-items: center; justify-content: center; width: 100%; gap: 24px; min-height: 130px; padding: 24px 16px; background: #f6f7f8; border-radius: 10px; color: #252525; font-size: 15px; >svg { width: 38px; height: 38px; flex-shrink: 0; color: #888; } small { display: block; color: #888; font-size: 12px; margin-top: 7px; } }
+.request-modal.document-dialog.location-today-dialog { width: min(740px, calc(100vw - 32px)); padding: 18px; border-radius: 12px; >header { display: flex; align-items: center; gap: 18px; margin-bottom: 16px; .location-mark { width: 58px; height: 58px; flex: 0 0 58px; border-radius: 12px; } >div { min-width: 0; flex: 1; } h2 { font-size: 21px; } .app-eyebrow { font-size: 10px; overflow-wrap: anywhere; margin-bottom: 5px; } >button { align-self: flex-start; } } >footer { margin-top: 16px; display: flex; justify-content: flex-end; gap: 12px; } }
+.location-today-dialog__count { margin-top: 5px; color: #888; font-size: 12px; }
+.location-today-dialog__list { display: grid; gap: 8px; max-height: min(420px, 55dvh); overflow-y: auto; }
+@media(max-width:1000px) { .dashboard-home .location-overview__grid { grid-template-columns: 1fr; } }
+@media(max-width:540px) { .location-today-person { flex-wrap: wrap; gap: 10px; padding: 12px; } .location-today-person__name { strong { white-space: normal; overflow-wrap: anywhere; } } .location-today-person__time { margin-left: 46px; padding: 7px 10px; } .request-modal.document-dialog.location-today-dialog { >header { gap: 12px; h2 { font-size: 18px; } .location-mark { width: 44px; height: 44px; flex-basis: 44px; } } >footer { flex-wrap: wrap; >* { flex: 1 1 auto; text-align: center; } } } }

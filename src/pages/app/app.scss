@@ -216,6 +216,12 @@
 .app-modal__card > p:not(.app-eyebrow) { margin-top: 9px; color: #707070; font-size: 14px; }
 .app-modal__card > div { display: flex; justify-content: flex-end; gap: 8px; margin-top: 26px; }
 .settings-page { display: grid; gap: 18px; }
+.settings-page { align-content: start; }
+.settings-page > header { margin-bottom: 0; }
+.settings-page .staffly-segmented { margin: 0; }
+.settings-page .settings-card > header { margin-bottom: 0; }
+.settings-page > .planning-settings { margin-top: 0; }
+.settings-page .planning-settings > .staffly-segmented { margin: 0; }
 .settings-card { display: grid; grid-template-columns: minmax(200px, 1fr) minmax(280px, 1fr); align-items: center; gap: 30px; padding: 26px; border: 1px solid #dedede; border-radius: 16px; background: #fff; }
 .settings-card h2 { font-size: 19px; }
 .settings-card p { margin-top: 6px; color: #777; font-size: 13px; }
