@@ -1,0 +1,7 @@
+.staffly-segmented {
+ position:relative; display:flex; width:fit-content; max-width:100%; align-items:center; overflow-x:auto; gap:2px; padding:4px; margin:20px 0; border:1px solid #e6e7ea; border-radius:11px; background:#edeef1; isolation:isolate;
+ >button, >a { position:relative; flex:0 0 auto; z-index:1; display:flex; align-items:center; justify-content:center; min-height:36px; padding:9px 18px; border:0; border-radius:8px; background:transparent; color:#7a7e88; font:inherit; font-size:12px; font-weight:500; text-decoration:none; white-space:nowrap; cursor:pointer; transition:color .2s; strong { font-size:inherit; font-weight:inherit; } &:hover { color:#222; } &.active, &[aria-pressed=true], &[aria-selected=true] { color:#161616; font-weight:650; } &:focus-visible { outline:2px solid #747780; outline-offset:-2px; } }
+ &__indicator { position:absolute; z-index:0; top:0; left:0; border-radius:8px; background:#fff; box-shadow:0 1px 4px #00000012; pointer-events:none; transition:transform .23s ease,width .23s ease,height .23s ease,opacity .15s; }
+}
+@media(max-width:640px) { .staffly-segmented { width:100%; >button,>a { padding:9px 12px; font-size:11px; } } }
+@media(prefers-reduced-motion:reduce) { .staffly-segmented__indicator { transition:none; } }

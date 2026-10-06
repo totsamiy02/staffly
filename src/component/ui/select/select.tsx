@@ -1,5 +1,5 @@
 import { createPortal } from 'react-dom'
-import { Children, isValidElement, useEffect, useLayoutEffect, useId, useRef, useState, type SelectHTMLAttributes, type ReactNode, type ChangeEvent, type KeyboardEvent, type CSSProperties } from 'react'
+import { Children, isValidElement, useEffect, useLayoutEffect, useId, useRef, useState, useCallback, type SelectHTMLAttributes, type ReactNode, type ChangeEvent, type KeyboardEvent, type CSSProperties } from 'react'
 
 type Props = SelectHTMLAttributes<HTMLSelectElement> & { searchable?: boolean }
 type Option = { value: string; label: ReactNode; disabled: boolean; search: string }
@@ -29,17 +29,20 @@ export default function Select({ children, value, onChange, disabled, required, 
   const matches = options.map((option, index) => ({ ...option, index })).filter(option => search.trim().toLocaleLowerCase().split(/\s+/).every(term => option.search.toLocaleLowerCase().includes(term)))
   const available = matches.filter(option => !option.disabled)
   const selected = options.findIndex(option => option.value === String(value ?? ''))
-  function setOpenState(next: boolean) {
+  const setOpenState = useCallback((next: boolean) => {
+    if (next) document.dispatchEvent(new CustomEvent('staffly:popover-open', { detail: listId }))
     openRef.current = next
     setOpen(next)
     if (!next) setSearch('')
-  }
+  }, [listId])
   useEffect(() => {
     setLabel(host.current?.closest('label')?.querySelector(':scope > span')?.textContent ?? '')
     function outside(event: PointerEvent) { if (!host.current?.contains(event.target as Node) && !popup.current?.contains(event.target as Node)) setOpenState(false) }
+    const otherOpened = (event: Event) => { if ((event as CustomEvent<string>).detail !== listId) setOpenState(false) }
+    document.addEventListener('staffly:popover-open', otherOpened)
     document.addEventListener('pointerdown', outside)
-    return () => document.removeEventListener('pointerdown', outside)
-  }, [])
+    return () => { document.removeEventListener('pointerdown', outside); document.removeEventListener('staffly:popover-open', otherOpened) }
+  }, [listId, setOpenState])
   useEffect(() => { setInvalid(false) }, [value])
   useLayoutEffect(() => {
     if (!open) return

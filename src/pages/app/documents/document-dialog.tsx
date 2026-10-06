@@ -5,6 +5,7 @@ export default function DocumentDialog({ title, onClose, children, drawer = fals
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => { const previous = document.activeElement as HTMLElement | null; const original = document.body.style.overflow; document.body.style.overflow = 'hidden'; ref.current?.focus(); return () => { document.body.style.overflow = original; previous?.focus() } }, [])
   return <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title} className={`${viewer ? 'document-viewer' : drawer ? 'schedule-drawer document-drawer' : 'request-modal document-dialog'} ${className}`} onKeyDown={event => {
+    if (event.defaultPrevented) return
     if (event.key === 'Escape' && onEscape) { event.stopPropagation(); onEscape(); return }
     if (event.key !== 'Tab') return
     const items = ref.current?.querySelectorAll<HTMLElement>('button:not(:disabled), summary, a[href], input:not(:disabled):not([aria-hidden=true]), textarea:not(:disabled), [tabindex="0"]')

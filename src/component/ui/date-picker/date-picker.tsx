@@ -22,9 +22,11 @@ export default function DatePicker({ value, onChange, min, max, disabled, readOn
   useEffect(() => {
     setLabel(host.current?.closest('label')?.querySelector(':scope > span')?.textContent ?? '')
     function outside(event: PointerEvent) { if (!host.current?.contains(event.target as Node)) setOpen(false) }
+    const otherOpened = (event: Event) => { if ((event as CustomEvent<string>).detail !== panelId) setOpen(false) }
+    document.addEventListener('staffly:popover-open', otherOpened)
     document.addEventListener('pointerdown', outside)
-    return () => document.removeEventListener('pointerdown', outside)
-  }, [])
+    return () => { document.removeEventListener('pointerdown', outside); document.removeEventListener('staffly:popover-open', otherOpened) }
+  }, [panelId])
   useEffect(() => { setInvalid(false) }, [value])
   useEffect(() => {
     if (!open || !pendingFocus.current) return
@@ -34,6 +36,7 @@ export default function DatePicker({ value, onChange, min, max, disabled, readOn
 
   function openCalendar() {
     if (readOnly || disabled) return
+    document.dispatchEvent(new CustomEvent('staffly:popover-open', { detail: panelId }))
     let day = text || iso(new Date())
     if (min && day < String(min)) day = String(min)
     if (max && day > String(max)) day = String(max)

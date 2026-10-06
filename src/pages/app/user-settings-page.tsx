@@ -1,3 +1,4 @@
+import SegmentedNav from '../../component/ui/segmented-nav/segmented-nav.tsx'
 import PersonalDocuments from './documents/personal-documents.tsx'
 import { useToastFeedback } from '../../component/ui/toast/toast-context.ts'
 import { liveQueryOptions } from '../../app/live-query.ts'
@@ -105,7 +106,7 @@ export default function UserSettingsPage() {
   return <div className="app-page"><AppTopbar /><main className="account-settings-page">
     <Link className="app-back" to={returnTo}>{returnLabel}</Link>
     <header><p className="app-eyebrow">Личный профиль</p><h1>Настройки</h1>{section === 'profile' && <p>Данные профиля видят ваши коллеги в организациях Staffly.</p>}</header>
-    <nav className="account-settings-tabs" aria-label="Разделы настроек"><button className={section === 'profile' ? 'active' : ''} onClick={() => setSection('profile')}>Профиль</button><button className={section === 'security' ? 'active' : ''} onClick={() => setSection('security')}>Безопасность</button><button className={section === 'documents' ? 'active' : ''} onClick={() => setSection('documents')}>Документы</button></nav>
+    <SegmentedNav label="Разделы настроек"><button className={section === 'profile' ? 'active' : ''} onClick={() => setSection('profile')}>Профиль</button><button className={section === 'security' ? 'active' : ''} onClick={() => setSection('security')}>Безопасность</button><button className={section === 'documents' ? 'active' : ''} onClick={() => setSection('documents')}>Документы</button></SegmentedNav>
 
 
     {section === 'documents' && <PersonalDocuments organizationId={organizationId} />}
