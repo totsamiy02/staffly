@@ -18,12 +18,13 @@ export function usePendingInvitations() {
   })
 }
 
-export function useAccountNotifications(organizationId?: string) {
+export function useAccountNotifications(organizationId?: string, pointId?: string | null) {
   const { apiRequest, user, locationId } = useAuth()
+  const selectedLocationId = pointId === undefined ? locationId : pointId
   const params = new URLSearchParams({ unread: 'true', limit: '50' })
   if (organizationId) params.set('organizationId', organizationId)
-  if (organizationId && locationId) params.set('locationId', locationId)
-  return useQuery({ ...liveQueryOptions, queryKey: ['account-notifications', organizationId, locationId], queryFn: async () => {
+  if (organizationId && selectedLocationId) params.set('locationId', selectedLocationId)
+  return useQuery({ ...liveQueryOptions, queryKey: ['account-notifications', organizationId, selectedLocationId], queryFn: async () => {
     const page = await apiRequest<import('./types.ts').NotificationPage>(`/notifications?${params}`)
     return { notifications: page.notifications.filter(n => n.source === 'event').map(n => ({ ...n, id: n.id.replace('event:', ''), requestId: n.requestId ?? null, type: n.type as AccountNotification['type'] })) as AccountNotification[] }
   }, enabled: Boolean(user) })

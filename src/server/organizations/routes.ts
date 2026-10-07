@@ -32,7 +32,7 @@ function auth(request: Request) { return (request as AuthenticatedRequest).auth!
 
 router.get('/organizations', async (request, response) => response.json({ organizations: await listOrganizations(auth(request).userId) }))
 router.get('/notifications', async (request, response) => {
-  const options = parse(z.object({ limit: z.coerce.number().int().min(1).max(50).default(20), cursor: z.string().max(512).optional(), unread: z.enum(['true', 'false']).optional(), organizationId: z.string().uuid().optional(), locationId: z.string().uuid().optional(), category: z.enum(['SHIFT', 'REQUEST', 'ABSENCE', 'ROLE', 'ORGANIZATION', 'DOCUMENT']).optional() }), request.query)
+  const options = parse(z.object({ limit: z.coerce.number().int().min(1).max(50).default(20), cursor: z.string().max(512).optional(), unread: z.enum(['true', 'false']).optional(), organizationId: z.string().uuid().optional(), locationId: z.string().uuid().optional(), category: z.enum(['SHIFT', 'REQUEST', 'ABSENCE', 'ROLE', 'ORGANIZATION', 'DOCUMENT', 'EVENT']).optional() }), request.query)
   response.json(await listNotificationHistory(auth(request).userId, auth(request).email, { ...options, unread: options.unread === 'true' }))
 })
 router.post('/notifications/:id/read', async (request, response) => {

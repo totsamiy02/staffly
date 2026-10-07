@@ -13,8 +13,8 @@
 .requests-filters label { display: grid; min-width: 190px; gap: 7px; }
 .requests-filters .requests-search { flex: 1; min-width: 260px; }
 .requests-filters label > span { color: #6e6e6e; font-size: 11px; font-weight: 700; }
-.requests-filters input, .requests-filters select, .request-modal input, .request-modal select, .request-modal textarea, .request-review textarea { width: 100%; min-height: 44px; border: 1px solid #d5d5d5; border-radius: 10px; outline: 0; background: #fff; padding: 0 13px; color: #111; font: inherit; font-size: 12px; }
-.requests-filters input:focus, .requests-filters select:focus, .request-modal input:focus, .request-modal select:focus, .request-modal textarea:focus, .request-review textarea:focus { border-color: #777; box-shadow: 0 0 0 3px rgb(0 0 0 / 5%); }
+.requests-filters input, .requests-filters select, .request-modal input:where(:not([type=checkbox]):not([type=radio])), .request-modal select, .request-modal textarea, .request-review textarea { width: 100%; min-height: 44px; border: 1px solid #d5d5d5; border-radius: 10px; outline: 0; background: #fff; padding: 0 13px; color: #111; font: inherit; font-size: 12px; }
+.requests-filters input:focus, .requests-filters select:focus, .request-modal input:where(:not([type=checkbox]):not([type=radio])):focus, .request-modal select:focus, .request-modal textarea:focus, .request-review textarea:focus { border-color: #777; box-shadow: 0 0 0 3px rgb(0 0 0 / 5%); }
 .requests-list { overflow: hidden; border: 1px solid #dedede; border-radius: 16px; background: #fff; }
 .request-card { position: relative; display: grid; width: 100%; min-height: 82px; align-items: center; grid-template-columns: minmax(0, 1fr) auto 90px; gap: 18px; padding: 14px 20px; border-bottom: 1px solid #ededed; cursor: pointer; text-align: left; transition: background .16s; }
 .request-card:last-child { border-bottom: 0; }

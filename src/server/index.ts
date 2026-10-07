@@ -10,6 +10,8 @@ import scheduleRouter from './schedule/routes.ts'
 import storageRouter from './storage/routes.ts'
 import requestsRouter from './requests/routes.ts'
 import documentsRouter from './documents/routes.ts'
+import eventsRouter from './events/routes.ts'
+import { startEventNotifications } from './events/worker.ts'
 import { MAX_DOCUMENT_BYTES, documentMimeTypes } from './documents/file-validation.ts'
 import { appUrl } from './mail.ts'
 import { ApiError } from './api-error.ts'
@@ -20,6 +22,7 @@ app.disable('x-powered-by')
 app.use(helmet({ contentSecurityPolicy: { directives: { imgSrc: ["'self'", 'data:', 'blob:'], frameSrc: ["'self'", 'blob:'] } } }))
 app.use('/api/organizations/:organizationId/shifts/batch', express.json({ limit: '64kb' }))
 app.use('/api/organizations/:organizationId/documents/:documentId/assign', express.json({ limit: '64kb' }))
+app.use('/api/organizations/:organizationId/events', express.json({ limit: '64kb' }))
 app.use(express.json({ limit: '16kb' }))
 app.use(cookieParser())
 app.use('/api', (request, response, next) => {
@@ -63,9 +66,11 @@ app.use('/api', (_request, response, next) => { response.set('Cache-Control', 'n
 app.use('/api', (_request, response, next) => { response.set('Cache-Control', 'no-store'); next() }, scheduleRouter)
 app.use('/api', (_request, response, next) => { response.set('Cache-Control', 'no-store'); next() }, requestsRouter)
 app.use('/api', documentsRouter)
+app.use('/api', eventsRouter)
 app.use('/api', (_request, response) => response.status(404).json({ code: 'API_NOT_FOUND', message: 'Запрошенный адрес не найден.' }))
 app.use((error: unknown, request: express.Request, response: express.Response, _next: express.NextFunction) => {
   if (error && typeof error === 'object' && 'type' in error && error.type === 'entity.too.large') {
+    if (/\/organizations\/[0-9a-f-]+\/events(?:\/|$)/.test(request.path)) { response.status(413).json({ code: 'EVENT_BODY_TOO_LARGE', message: 'Данные события превышают допустимый размер.' }); return }
     if (/\/organizations\/[0-9a-f-]+\/documents$/.test(request.path)) { response.status(413).json({ code: 'DOCUMENT_TOO_LARGE', message: `Файл должен весить не больше ${Math.ceil(MAX_DOCUMENT_BYTES / 1024 / 1024)} МБ.` }); return }
     const attachment = /\/requests\/[0-9a-f-]+\/attachments$/.test(request.path)
     response.status(413).json({ code: attachment ? 'ATTACHMENT_TOO_LARGE' : 'IMAGE_TOO_LARGE', message: attachment ? 'Файл должен весить не больше 10 МБ.' : 'Изображение должно весить не больше 8 МБ.' })
@@ -85,6 +90,7 @@ app.use((error: unknown, request: express.Request, response: express.Response, _
 
 const port = Number(process.env.PORT || 3001)
 const stopStorageCleanup = startStorageCleanup()
+const stopEventNotifications = startEventNotifications()
 app.listen(port, () => console.log(`Staffly API: http://localhost:${port}`))
 
-process.on('SIGTERM', () => { stopStorageCleanup(); void prisma.$disconnect() })
+process.on('SIGTERM', () => { stopStorageCleanup(); stopEventNotifications(); void prisma.$disconnect() })

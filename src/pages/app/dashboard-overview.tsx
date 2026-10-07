@@ -4,13 +4,14 @@ import { useAuth } from '../../app/auth/auth-context.tsx'
 import type { OrganizationSummary } from '../../app/organizations/types.ts'
 import { useDashboardRecords, useDashboardSchedule } from './dashboard-queries.ts'
 import { addDays, calendarRange, formatMonth, moveMonth, shiftTimeRange, zonedDateAndTime } from '../../app/schedule/date-utils.ts'
-import { useLocations, useNotificationActions, useNotificationHistory } from '../../app/organizations/queries.ts'
+import { useLocations } from '../../app/organizations/queries.ts'
 import { useInvitationClock } from '../../app/organizations/invitation-time.ts'
 import Avatar from '../../component/ui/avatar/avatar.tsx'
-import NotificationItem from './topbar/notification-item.tsx'
-import NotificationHistoryModal from './topbar/notification-history-modal.tsx'
 import DocumentDialog from './documents/document-dialog.tsx'
 import AnimatedOverlay from './schedule/animated-overlay.tsx'
+import { useEvents } from '../../app/events/queries.ts'
+import { eventHref } from '../../app/events/types.ts'
+import { EventRowContent } from './events/event-elements.tsx'
 import './dashboard.scss'
 
 function DashboardIcon({ kind }: { kind: 'people' | 'calendar' | 'document' | 'request' | 'arrow' }) {
@@ -45,7 +46,6 @@ export default function DashboardOverview({ organization }: { organization: Orga
   const hour = Number(localNow.time.slice(0, 2))
   const [month, setMonth] = useState(today.slice(0, 7))
   const [selectedDay, setSelectedDay] = useState(today)
-  const [historyOpen, setHistoryOpen] = useState(false)
   const [scheduleDay, setScheduleDay] = useState<string | null>(null)
   const range = calendarRange(month)
   const calendar = useDashboardSchedule(organization.id, visiblePoints, range.from, range.to, locations.isSuccess)
@@ -53,10 +53,9 @@ export default function DashboardOverview({ organization }: { organization: Orga
   const manager = (organization.organizationRole ?? organization.role) === 'OWNER' || (selectedPoint ? selectedPoint.role === 'ADMIN' : points.some(point => point.role === 'ADMIN'))
   const scope = manager ? 'incoming' : 'mine'
   const { requests, pending, documents, members } = useDashboardRecords(organization.id, anchorId, pointId, manager)
-  const notifications = useNotificationHistory({ organizationId: organization.id, limit: 4, locationId: selectedPoint?.id ?? null })
-  const actions = useNotificationActions(organization.id)
+  const events = useEvents(organization.id, { pointId, pageSize: 3, tab: 'upcoming' })
   const base = `/app/organizations/${organization.id}`
-  const href = (module: string, params: Record<string, string> = {}) => `${base}/${module}?${new URLSearchParams({ location: anchorId ?? '', ...(['requests', 'documents', 'employees'].includes(module) ? { pointId } : {}), ...params })}`
+  const href = (module: string, params: Record<string, string> = {}) => `${base}/${module}?${new URLSearchParams({ location: anchorId ?? '', ...(['requests', 'documents', 'employees', 'events'].includes(module) ? { pointId } : {}), ...params })}`
   const dayHref = (day: string, locationId = anchorId ?? '') => href('schedule', { month: day.slice(0, 7), day, location: locationId })
   const dateLabel = (day: string) => new Date(`${day}T12:00:00Z`).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', timeZone: 'UTC' })
   const shifts = (upcoming.data?.shifts ?? []).filter(shift => shift.status !== 'CANCELLED').sort((a, b) => a.scheduledStartAt.localeCompare(b.scheduledStartAt))
@@ -78,10 +77,10 @@ export default function DashboardOverview({ organization }: { organization: Orga
         {([{ kind: 'people', value: members.isError ? '—' : members.isPending ? '…' : members.data?.pagination.total ?? 0, label: 'Сотрудники', note: selectedPoint ? 'в выбранной точке' : 'во всей организации', to: href('employees') }, { kind: 'calendar', value: upcoming.isError ? '—' : upcoming.isLoading ? '…' : todayShifts.length, label: 'Смены', note: 'на сегодня', to: selectedPoint ? dayHref(today) : '#dashboard-calendar' }, { kind: 'request', value: pending.isError ? '—' : pending.isPending ? '…' : pending.data?.pagination.total ?? 0, label: 'Заявки', note: manager ? 'на рассмотрении' : 'ожидают решения', to: href('requests', { tab: scope }) }, { kind: 'document', value: documents.isError ? '—' : documents.isPending ? '…' : documents.data?.pagination.total ?? 0, label: 'Документы', note: 'для ознакомления', to: href('documents', { section: 'acknowledgements' }) }] as const).map(item => <Link className="dashboard-metric" to={item.to} key={item.kind}><span className="dashboard-metric__icon"><DashboardIcon kind={item.kind} /></span><span><strong>{item.value}</strong><span>{item.label}</span><small>{item.note}</small></span></Link>)}
       </div>
       <div className="dashboard-panels">
+        <Panel title="Ближайшие события" className="dashboard-events" action={link(href('events'), 'Все события')}><QueryState loading={events.isLoading} error={events.isError} retry={events.refetch} empty={!events.data?.events.length ? 'Предстоящих событий пока нет.' : undefined}><div>{events.data?.events.map(event => <Link className="event-row" key={event.id} to={eventHref(event, anchorId, pointId)}><EventRowContent event={event} compact /></Link>)}</div></QueryState></Panel>
         <Panel title="Ближайшие смены" action={scheduleLink(today, 'Расписание')}><QueryState loading={upcoming.isLoading} error={upcoming.isError} retry={upcoming.refetch} empty={!nextShifts.length ? 'На ближайшие две недели смен нет.' : undefined}>{shiftRows(nextShifts, true)}</QueryState></Panel>
         <Panel title={manager ? 'Заявки на рассмотрении' : 'Мои заявки'} action={link(href('requests', { tab: scope }), 'Все заявки')}><QueryState loading={requests.isPending} error={requests.isError} retry={requests.refetch} empty={!requests.data?.requests.length ? 'Заявок пока нет.' : undefined}><div className="dashboard-requests">{requests.data?.requests.slice(0, 4).map(request => <Link key={request.id} to={href('requests', { tab: scope, request: request.id, location: request.locationId })}><Avatar className="app-avatar" url={request.creatorAvatarUrl} name={request.creatorName} /><span><strong>{request.creatorName}</strong><small>{request.typeNameSnapshot}</small>{!selectedPoint && <small>{request.locationName}</small>}</span><span className={`dashboard-status dashboard-status--${request.status.toLowerCase()}`}>{({ PENDING: 'На рассмотрении', APPROVED: 'Одобрена', REJECTED: 'Отклонена', CANCELLED: 'Отменена' })[request.status]}</span></Link>)}</div></QueryState></Panel>
         <Panel title="Мои документы" action={link(href('documents', { section: 'acknowledgements' }), 'Все документы')}><div className="dashboard-panel-caption">Требуют ознакомления <span>{documents.data?.pagination.total ?? '—'}</span></div><QueryState loading={documents.isPending} error={documents.isError} retry={documents.refetch} empty={!documents.data?.documents.length ? 'Всё готово. Нет документов, требующих ознакомления.' : undefined}><div className="dashboard-document-list">{documents.data?.documents.map(item => <Link key={item.id} to={href('documents', { section: 'acknowledgements', document: item.id, ...(item.locationId ? { location: item.locationId } : {}) })}><DashboardIcon kind="document" /><span><strong>{item.displayName}</strong><small>{item.locationName || 'Вся организация'}</small></span><DashboardIcon kind="arrow" /></Link>)}</div></QueryState></Panel>
-        <Panel title="Уведомления" action={<button className="dashboard-link" onClick={() => setHistoryOpen(true)}>Все уведомления<DashboardIcon kind="arrow" /></button>}><QueryState loading={notifications.isLoading} error={notifications.isError} retry={notifications.refetch} empty={!notifications.data?.notifications.length ? 'Новых событий пока нет.' : undefined}><div className="dashboard-notifications">{notifications.data?.notifications.map(item => <NotificationItem key={item.id} item={item} now={now} compact showOrganization={false} busy={actions.read.isPending || actions.invitation.isPending} onRead={(id, unread) => actions.read.mutate({ id, unread })} onInvite={(id, action) => actions.invitation.mutate({ id, action })} />)}</div></QueryState>{actions.error && <p className="form-inline-error">{actions.error.message}</p>}</Panel>
       </div>
     </div>
     <Panel title="Календарь" className="dashboard-calendar" action={scheduleLink(selectedDay, 'Открыть')}>
@@ -91,6 +90,5 @@ export default function DashboardOverview({ organization }: { organization: Orga
       <QueryState loading={calendar.isLoading || calendar.isPlaceholderData} error={calendar.isError} retry={calendar.refetch} empty={!dayShifts.length ? 'На этот день смены не назначены.' : undefined}>{shiftRows(dayShifts.slice(0, 5))}{dayShifts.length > 5 && scheduleLink(selectedDay, `Ещё ${dayShifts.length - 5} смен`)}</QueryState>
     </Panel>
     {scheduleDay && <AnimatedOverlay variant="modal" onClose={() => setScheduleDay(null)}>{close => <DocumentDialog title="Расписание точек" eyebrow={dateLabel(scheduleDay)} onClose={close}><div className="dashboard-point-choices">{visiblePoints.map(point => <Link key={point.id} to={dayHref(scheduleDay, point.id)}><strong>{point.name}</strong><small>{[point.city, point.address].filter(Boolean).join(', ')}</small><DashboardIcon kind="arrow" /></Link>)}</div></DocumentDialog>}</AnimatedOverlay>}
-    {historyOpen && <NotificationHistoryModal locationId={selectedPoint?.id ?? null} organizationId={organization.id} onClose={() => setHistoryOpen(false)} />}
   </div>
 }

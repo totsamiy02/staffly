@@ -35,7 +35,7 @@ export async function sendImportantShiftEmail(notificationId: string, shift: Shi
   await deliverShiftAssignment(email, shift.organizationId, organizationName, shift.scheduledStartAt, shift.scheduledEndAt, timezone, shift.id, type, shift.locationId)
 }
 
-type HistoryRow = { requestSystemCode: string | null; locationId: string | null; locationName: string | null; actionable: boolean; documentId: string | null; absenceId: string | null; id: string; source: 'event' | 'invite'; type: string; title: string; message: string; createdAt: Date; readAt: Date | null; organizationId: string; organizationName: string; logoFileId: string | null; timezone: string; role: string | null; requestId: string | null; shiftId: string | null; shiftStartAt: Date | null; state: string | null; expiresAt: Date | null; inviter: string | null }
+type HistoryRow = { eventId: string | null; eventLocationIds: string[]; requestSystemCode: string | null; locationId: string | null; locationName: string | null; actionable: boolean; documentId: string | null; absenceId: string | null; id: string; source: 'event' | 'invite'; type: string; title: string; message: string; createdAt: Date; readAt: Date | null; organizationId: string; organizationName: string; logoFileId: string | null; timezone: string; role: string | null; requestId: string | null; shiftId: string | null; shiftStartAt: Date | null; state: string | null; expiresAt: Date | null; inviter: string | null }
 
 export function decodeNotificationCursor(cursor: string | undefined) {
   if (!cursor) return null
@@ -53,21 +53,23 @@ export async function listNotificationHistory(userId: string, email: string, opt
   const historySource = Prisma.sql`
     WITH history AS (
       SELECT 'event:' || n.id AS id, 'event'::text AS source, n.type::text AS type, n.title, n.message,
-        n.created_at AS "createdAt", n.read_at AS "readAt", o.id AS "organizationId", o.name AS "organizationName", o.logo_file_id AS "logoFileId", COALESCE(l.timezone, o.timezone) AS timezone,
-        CASE WHEN m.role = 'OWNER' THEN 'OWNER' ELSE COALESCE(lm.role::text, 'MEMBER') END AS role, n.request_id AS "requestId", n.shift_id AS "shiftId", n.absence_id AS "absenceId", s.scheduled_start_at AS "shiftStartAt", COALESCE(CASE WHEN n.document_id IS NOT NULL THEN CASE WHEN da.cancelled_at IS NOT NULL OR d.deleted_at IS NOT NULL THEN 'CANCELLED' WHEN da.acknowledged_at IS NOT NULL THEN 'ACKNOWLEDGED' ELSE 'REQUIRED' END END, r.status::text) AS state,
+        n.event_id AS "eventId", ARRAY(SELECT el.location_id::text FROM event_locations el WHERE el.event_id = n.event_id) AS "eventLocationIds", n.created_at AS "createdAt", n.read_at AS "readAt", o.id AS "organizationId", o.name AS "organizationName", o.logo_file_id AS "logoFileId", COALESCE(l.timezone, o.timezone) AS timezone,
+        CASE WHEN m.role = 'OWNER' THEN 'OWNER' ELSE COALESCE(lm.role::text, 'MEMBER') END AS role, n.request_id AS "requestId", n.shift_id AS "shiftId", n.absence_id AS "absenceId", s.scheduled_start_at AS "shiftStartAt", COALESCE(CASE WHEN e.cancelled_at IS NOT NULL THEN 'CANCELLED' END, CASE WHEN n.document_id IS NOT NULL THEN CASE WHEN da.cancelled_at IS NOT NULL OR d.deleted_at IS NOT NULL THEN 'CANCELLED' WHEN da.acknowledged_at IS NOT NULL THEN 'ACKNOWLEDGED' ELSE 'REQUIRED' END END, r.status::text) AS state,
         n.document_id AS "documentId", (da.id IS NOT NULL AND da.acknowledged_at IS NULL AND da.cancelled_at IS NULL AND d.deleted_at IS NULL) AS actionable,
-        r.system_code_snapshot::text AS "requestSystemCode", NULL::timestamptz AS "expiresAt", NULL::text AS inviter, l.id AS "locationId", l.name AS "locationName"
+        r.system_code_snapshot::text AS "requestSystemCode", NULL::timestamptz AS "expiresAt", NULL::text AS inviter, l.id AS "locationId", CASE WHEN e.shared THEN 'Вся организация' WHEN e.id IS NOT NULL THEN (SELECT string_agg(eloc.name, ', ' ORDER BY eloc.created_at) FROM event_locations el JOIN organization_locations eloc ON eloc.id = el.location_id WHERE el.event_id = e.id) ELSE l.name END AS "locationName"
       FROM account_notifications n JOIN organizations o ON o.id = n.organization_id AND o.deleted_at IS NULL
       LEFT JOIN organization_members m ON m.organization_id = o.id AND m.user_id = ${userId}::uuid AND m.left_at IS NULL
       LEFT JOIN documents d ON d.id = n.document_id LEFT JOIN document_acknowledgements da ON da.document_id = d.id AND da.member_id = m.id
       LEFT JOIN requests r ON r.id = n.request_id LEFT JOIN work_shifts s ON s.id = n.shift_id
+      LEFT JOIN organization_events e ON e.id = n.event_id AND e.organization_id = o.id
       LEFT JOIN employee_absences a ON a.id = n.absence_id
-      LEFT JOIN organization_locations l ON l.id = COALESCE(CASE WHEN a.id IS NOT NULL AND m.role <> 'OWNER' THEN
+      LEFT JOIN organization_locations l ON l.id = COALESCE(CASE WHEN e.id IS NOT NULL AND NOT e.shared THEN (SELECT el.location_id FROM event_locations el JOIN organization_locations eloc ON eloc.id = el.location_id WHERE el.event_id = e.id AND (eloc.archived_at IS NULL OR m.role = 'OWNER') ORDER BY (el.location_id = ${options.locationId ?? null}::uuid) DESC NULLS LAST, eloc.created_at LIMIT 1) END, CASE WHEN a.id IS NOT NULL AND m.role <> 'OWNER' THEN
         (SELECT alm.location_id FROM location_members alm JOIN location_members emp ON emp.location_id = alm.location_id AND emp.member_id = a.member_id AND emp.left_at IS NULL JOIN organization_locations al ON al.id = alm.location_id AND al.archived_at IS NULL
          WHERE alm.member_id = m.id AND alm.left_at IS NULL AND alm.role = 'ADMIN' ORDER BY (alm.location_id = ${options.locationId ?? null}::uuid) DESC NULLS LAST, alm.joined_at ASC LIMIT 1)
         END, d.location_id, r.location_id, s.location_id)
       LEFT JOIN location_members lm ON lm.member_id = m.id AND lm.location_id = l.id AND lm.left_at IS NULL
       WHERE n.user_id = ${userId}::uuid AND m.id IS NOT NULL AND n.hidden_at IS NULL
+      AND (n.event_id IS NULL OR (e.id IS NOT NULL AND (m.role = 'OWNER' OR EXISTS (SELECT 1 FROM event_recipients er WHERE er.event_id = e.id AND er.member_id = m.id AND er.removed_at IS NULL) OR EXISTS (SELECT 1 FROM location_members em JOIN organization_locations eml ON eml.id = em.location_id WHERE em.member_id = m.id AND em.left_at IS NULL AND em.role = 'ADMIN' AND eml.archived_at IS NULL AND (e.shared OR EXISTS (SELECT 1 FROM event_locations el WHERE el.event_id = e.id AND el.location_id = em.location_id))))))
       AND (n.document_id IS NULL OR ((d.location_id IS NULL OR lm.member_id IS NOT NULL OR m.role = 'OWNER') AND d.organization_id = o.id AND ((m.role = 'OWNER' OR lm.role = 'ADMIN') OR (d.deleted_at IS NULL AND (d.visibility = 'ORGANIZATION' OR (d.visibility = 'ADMINS' AND (lm.role = 'ADMIN' OR d.location_id IS NULL AND m.role = 'ADMIN')) OR (d.visibility = 'PRIVATE_MEMBER' AND d.target_member_id = m.id))))))
       AND (n.document_id IS NULL OR m.role = 'OWNER' OR lm.role = 'ADMIN' OR (d.location_id IS NULL AND m.role = 'ADMIN') OR NOT EXISTS (WITH RECURSIVE parents AS (SELECT id, parent_id, visibility FROM document_folders WHERE id = d.folder_id UNION ALL SELECT f.id, f.parent_id, f.visibility FROM document_folders f JOIN parents p ON f.id = p.parent_id) SELECT 1 FROM parents WHERE visibility = 'ADMINS'))
       AND (r.id IS NULL OR n.absence_id IS NOT NULL OR r.system_code_snapshot = 'STAFFING' OR r.created_by_member_id = m.id OR m.role = 'OWNER' OR lm.role = 'ADMIN')
@@ -75,7 +77,7 @@ export async function listNotificationHistory(userId: string, email: string, opt
       ${options.unread ? Prisma.sql`AND n.read_at IS NULL` : Prisma.empty}
       UNION ALL
       SELECT 'invite:' || i.id, 'invite', 'ORGANIZATION_INVITATION', 'Приглашение в организацию', o.name,
-        i.created_at, i.read_at, o.id, o.name, o.logo_file_id, COALESCE(il.timezone, o.timezone), m.role::text, NULL::uuid, NULL::uuid, NULL::uuid, NULL::timestamptz,
+        NULL::uuid, ARRAY[]::text[], i.created_at, i.read_at, o.id, o.name, o.logo_file_id, COALESCE(il.timezone, o.timezone), m.role::text, NULL::uuid, NULL::uuid, NULL::uuid, NULL::timestamptz,
         CASE WHEN i.accepted_at IS NOT NULL THEN 'ACCEPTED' WHEN i.rejected_at IS NOT NULL THEN 'REJECTED' WHEN i.expires_at <= NOW() AND (i.revoked_at IS NULL OR i.revoked_at >= i.expires_at) THEN 'EXPIRED' WHEN i.revoked_at IS NOT NULL THEN 'REVOKED' ELSE 'ACTIVE' END,
         NULL::uuid, false, NULL::text, i.expires_at, COALESCE(NULLIF(trim(concat_ws(' ', u.last_name, u.first_name, u.middle_name)), ''), u.email), il.id, il.name
       FROM organization_invites i JOIN organizations o ON o.id = i.organization_id AND o.deleted_at IS NULL JOIN users u ON u.id = i.invited_by_user_id
@@ -85,7 +87,7 @@ export async function listNotificationHistory(userId: string, email: string, opt
     )`
   const rows = await prisma.$queryRaw<HistoryRow[]>(Prisma.sql`${historySource} SELECT * FROM history
     WHERE (${options.organizationId ?? null}::uuid IS NULL OR "organizationId" = ${options.organizationId ?? null}::uuid)
-    AND (${options.locationId ?? null}::uuid IS NULL OR "locationId" = ${options.locationId ?? null}::uuid OR "locationId" IS NULL OR "requestSystemCode" = 'STAFFING')
+    AND (${options.locationId ?? null}::uuid IS NULL OR "locationId" = ${options.locationId ?? null}::uuid OR ("eventId" IS NULL AND "locationId" IS NULL) OR ("eventId" IS NOT NULL AND cardinality("eventLocationIds") = 0) OR ${options.locationId ?? null}::text = ANY("eventLocationIds") OR "requestSystemCode" = 'STAFFING')
     AND (${options.category ?? null}::text IS NULL OR type LIKE ${options.category ? options.category + '_%' : null})
     ${cursor ? Prisma.sql`AND ("createdAt", id) < (${cursor.date}, ${cursor.id})` : Prisma.empty}
     ORDER BY "createdAt" DESC, id DESC LIMIT ${options.limit + 1}
@@ -96,8 +98,8 @@ export async function listNotificationHistory(userId: string, email: string, opt
     const organizationPath = `/app/organizations/${row.organizationId}`
     const month = row.shiftStartAt ? new Intl.DateTimeFormat('en-CA', { timeZone: row.timezone, year: 'numeric', month: '2-digit' }).formatToParts(row.shiftStartAt) : []
     const monthText = `${month.find(part => part.type === 'year')?.value}-${month.find(part => part.type === 'month')?.value}`
-    const href = row.role ? row.documentId ? `${organizationPath}/documents?document=${row.documentId}` : row.absenceId ? `${organizationPath}/schedule?absences=1&absence=${row.absenceId}` : row.shiftId ? `${organizationPath}/schedule?view=mine&month=${monthText}&shift=${row.shiftId}` : row.requestId ? `${organizationPath}/requests?tab=${row.requestSystemCode === 'STAFFING' ? 'staffing' : row.type === 'REQUEST_CREATED' && row.role !== 'MEMBER' ? 'incoming' : 'mine'}&request=${row.requestId}` : organizationPath : row.source === 'invite' && row.state === 'ACTIVE' ? `/app#invitation-${row.id.split(':')[1]}` : null
-    return { locationId: row.locationId, locationName: row.locationName, requestId: row.requestId, actionable: row.actionable, documentId: row.documentId, id: row.id, source: row.source, type: row.type, title: row.title, message: row.message, createdAt: row.createdAt, readAt: row.readAt, state: row.state, expiresAt: row.expiresAt, inviter: row.inviter, organization: { id: row.organizationId, name: row.organizationName, logoUrl: mediaUrl(row.logoFileId) },
+    const href = row.role ? row.eventId ? `${organizationPath}/events?event=${row.eventId}` : row.documentId ? `${organizationPath}/documents?document=${row.documentId}` : row.absenceId ? `${organizationPath}/schedule?absences=1&absence=${row.absenceId}` : row.shiftId ? `${organizationPath}/schedule?view=mine&month=${monthText}&shift=${row.shiftId}` : row.requestId ? `${organizationPath}/requests?tab=${row.requestSystemCode === 'STAFFING' ? 'staffing' : row.type === 'REQUEST_CREATED' && row.role !== 'MEMBER' ? 'incoming' : 'mine'}&request=${row.requestId}` : organizationPath : row.source === 'invite' && row.state === 'ACTIVE' ? `/app#invitation-${row.id.split(':')[1]}` : null
+    return { eventId: row.eventId, locationId: row.locationId, locationName: row.locationName, requestId: row.requestId, actionable: row.actionable, documentId: row.documentId, id: row.id, source: row.source, type: row.type, title: row.title, message: row.message, createdAt: row.createdAt, readAt: row.readAt, state: row.state, expiresAt: row.expiresAt, inviter: row.inviter, organization: { id: row.organizationId, name: row.organizationName, logoUrl: mediaUrl(row.logoFileId) },
       href: href && row.locationId && row.role ? `${href}${href.includes('?') ? '&' : '?'}location=${row.locationId}` : href }
   })
   const last = page.at(-1)
@@ -105,7 +107,7 @@ export async function listNotificationHistory(userId: string, email: string, opt
     count(*) FILTER (WHERE "readAt" IS NULL) AS unread,
     count(*) FILTER (WHERE actionable) AS actionable,
     count(*) FILTER (WHERE "readAt" IS NULL) AS pending
-    FROM history WHERE (${options.organizationId ?? null}::uuid IS NULL OR "organizationId" = ${options.organizationId ?? null}::uuid) AND (${options.locationId ?? null}::uuid IS NULL OR "locationId" = ${options.locationId ?? null}::uuid OR "locationId" IS NULL OR "requestSystemCode" = 'STAFFING')`)
+    FROM history WHERE (${options.organizationId ?? null}::uuid IS NULL OR "organizationId" = ${options.organizationId ?? null}::uuid) AND (${options.locationId ?? null}::uuid IS NULL OR "locationId" = ${options.locationId ?? null}::uuid OR ("eventId" IS NULL AND "locationId" IS NULL) OR ("eventId" IS NOT NULL AND cardinality("eventLocationIds") = 0) OR ${options.locationId ?? null}::text = ANY("eventLocationIds") OR "requestSystemCode" = 'STAFFING')`)
 
   return { notifications, unreadCount: Number(counts.unread), actionableCount: Number(counts.actionable), pendingCount: Number(counts.pending), nextCursor: hasMore && last ? Buffer.from(JSON.stringify({ date: last.createdAt.toISOString(), id: last.id })).toString('base64url') : null }
 }

@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import logo from '../../assets/images/logo/staffly-logo.svg'
 import { useAuth } from '../../app/auth/auth-context.tsx'
 import InvitationCenter from './topbar/invitation-center.tsx'
-import RequestAlerts from './topbar/request-alerts.tsx'
+import NotificationAlerts from './topbar/notification-alerts.tsx'
 import ProfileMenu from './topbar/profile-menu.tsx'
 import type { OrganizationSummary } from '../../app/organizations/types.ts'
 
@@ -42,5 +42,5 @@ export default function AppTopbar({ organization, notificationOrganizationId }: 
       <InvitationCenter key={organizationId ?? 'global'} organizationId={organizationId} onHistoryChange={setHistoryOpen} open={openPanel === 'notifications'} onToggle={() => setOpenPanel((current) => current === 'notifications' ? null : 'notifications')} onClose={() => setOpenPanel(null)} />
       <ProfileMenu user={user} organization={organization} open={openPanel === 'profile'} busy={logoutBusy} onToggle={() => setOpenPanel((current) => current === 'profile' ? null : 'profile')} onClose={() => setOpenPanel(null)} onLogout={() => void signOut()} />
     </div>}
-  </div><RequestAlerts key={organizationId ?? 'global'} organizationId={organizationId} suppressed={openPanel === 'notifications' || historyOpen} /></header>
+  </div><NotificationAlerts key={organizationId ?? 'global'} organizationId={organizationId} suppressed={openPanel === 'notifications' || historyOpen} /></header>
 }

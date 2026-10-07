@@ -6,9 +6,10 @@ export type PendingInvitation = { id: string; organization: { id: string; name: 
 export type OrganizationMember = { locations?: Array<{ locationId: string; role: 'ADMIN' | 'MEMBER' }>; teams?: Array<{ id: string; name: string; locationId: string }>; positions?: Array<{ id: string; name: string }>; id: string; userId: string; email: string; displayName: string; firstName: string | null; lastName: string | null; middleName: string | null; phone: string | null; bio: string | null; avatarUrl: string | null; lastSeenAt: string | null; online: boolean; role: OrganizationRole; joinedAt: string }
 export type MemberPagination = { page: number; pageSize: number; total: number; pages: number }
 export type ActiveOrganizationInvitation = { code: string | null; id: string; type: 'EMAIL' | 'CODE'; invitedEmail: string | null; expiresAt: string; createdAt: string }
-export type AccountNotification = { href?: string | null; locationId?: string | null; id: string; type: 'ABSENCE_REPORTED' | 'ABSENCE_CHANGED' | 'ABSENCE_CANCELLED' | 'ROLE_CHANGED' | 'REQUEST_CREATED' | 'REQUEST_APPROVED' | 'REQUEST_REJECTED' | 'REQUEST_CANCELLED'; requestId: string | null; title: string; message: string; createdAt: string; organization: { id: string; name: string; logoUrl: string | null } }
+export type AccountNotification = { eventId?: string | null; href?: string | null; locationId?: string | null; id: string; type: 'ABSENCE_REPORTED' | 'ABSENCE_CHANGED' | 'ABSENCE_CANCELLED' | 'ROLE_CHANGED' | 'REQUEST_CREATED' | 'REQUEST_APPROVED' | 'REQUEST_REJECTED' | 'REQUEST_CANCELLED' | 'EVENT_PUBLISHED' | 'EVENT_CHANGED' | 'EVENT_CANCELLED' | 'EVENT_STARTED'; requestId: string | null; title: string; message: string; createdAt: string; organization: { id: string; name: string; logoUrl: string | null } }
 
 export type HistoryNotification = {
+  eventId?: string | null
   requestId?: string | null
   locationId?: string | null
   locationName?: string | null
