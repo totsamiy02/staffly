@@ -81,6 +81,9 @@ enum AccountNotificationType {
   EVENT_CHANGED
   EVENT_CANCELLED
   EVENT_STARTED
+  SHIFT_OFFER_CREATED
+  SHIFT_OFFER_APPROVAL
+  SHIFT_OFFER_RESULT
 }
 
 enum RequestSystemCode {
@@ -152,6 +155,10 @@ model Organization {
   documentFolders      DocumentFolder[]
   events               OrganizationEvent[]
 
+  shiftTransferMode    ShiftOfferMode         @default(DISABLED) @map("shift_transfer_mode")
+  shiftSwapMode        ShiftOfferMode         @default(DISABLED) @map("shift_swap_mode")
+  shiftOffers          ShiftOffer[]
+
   @@index([createdByUserId])
   @@index([deletedAt])
   @@map("organizations")
@@ -217,6 +224,10 @@ model AccountNotification {
   request      OrganizationRequest? @relation(fields: [requestId], references: [id], onDelete: Cascade)
   shift        WorkShift?           @relation(fields: [shiftId], references: [id], onDelete: SetNull)
 
+  shiftOfferId          String?                 @map("shift_offer_id") @db.Uuid
+  shiftOfferDeliveryKey String?                 @unique @map("shift_offer_delivery_key") @db.VarChar(200)
+  shiftOffer            ShiftOffer?             @relation(fields: [organizationId, shiftOfferId], references: [organizationId, id], onDelete: Cascade)
+
   @@index([eventId])
   @@index([documentId])
   @@index([absenceId])
@@ -264,6 +275,11 @@ model OrganizationMember {
   documentAcknowledgements DocumentAcknowledgement[] @relation("AcknowledgementRecipient")
   assignedAcknowledgements DocumentAcknowledgement[] @relation("AcknowledgementAssigner")
 
+  initiatedShiftOffers     ShiftOffer[]              @relation("OfferInitiator")
+  receivedShiftOffers      ShiftOffer[]              @relation("OfferRecipient")
+  acceptedShiftOffers      ShiftOffer[]              @relation("OfferAcceptor")
+  reviewedShiftOffers      ShiftOffer[]              @relation("OfferReviewer")
+
   @@unique([organizationId, userId])
   @@unique([organizationId, id])
   @@index([organizationId])
@@ -306,12 +322,17 @@ model WorkShift {
   changeRequests    OrganizationRequest[]
   notifications     AccountNotification[]
 
+  sourceOffers         ShiftOffer[]           @relation("OfferSource")
+  targetOffers         ShiftOffer[]           @relation("OfferTarget")
+  offerReservation     ShiftOfferReservation?
+
   @@index([organizationId, scheduledStartAt])
   @@index([organizationId, scheduledEndAt])
   @@index([organizationId, memberId, scheduledStartAt])
   @@index([memberId, scheduledStartAt])
   @@map("work_shifts")
   @@index([organizationId, locationId])
+  @@unique([organizationId, id])
 }
 
 model RequestType {
@@ -472,6 +493,9 @@ model WorkShiftAdjustment {
 
   shift           WorkShift          @relation(fields: [shiftId], references: [id], onDelete: Cascade)
   changedByMember OrganizationMember @relation("ShiftAdjustmentAuthor", fields: [changedByMemberId], references: [id], onDelete: Restrict)
+
+  kind                 String   @default("ACTUAL") @db.VarChar(20)
+  assignmentChange     Json?    @map("assignment_change")
 
   @@index([shiftId, createdAt])
   @@index([changedByMemberId])
@@ -744,6 +768,8 @@ model OrganizationLocation {
   eventLocations EventLocation[]
   transfersFrom LocationTransfer[] @relation("TransferFrom")
   transfersTo LocationTransfer[] @relation("TransferTo")
+
+  shiftOffers        ShiftOffer[]
   @@unique([organizationId, id])
   @@index([organizationId, archivedAt])
   @@map("organization_locations")
@@ -883,4 +909,77 @@ model EventChange {
   member OrganizationMember @relation(fields: [organizationId, memberId], references: [organizationId, id], onDelete: Restrict)
   @@unique([eventId, revision])
   @@map("event_changes")
+}
+
+enum ShiftOfferMode {
+  DISABLED
+  AUTO
+  APPROVAL
+}
+
+enum ShiftOfferKind {
+  TRANSFER
+  SWAP
+}
+
+enum ShiftOfferStatus {
+  PENDING
+  AWAITING_APPROVAL
+  COMPLETED
+  REJECTED
+  CANCELLED
+  EXPIRED
+  INVALID
+}
+
+model ShiftOfferReservation {
+  shiftId        String     @id @map("shift_id") @db.Uuid
+  organizationId String     @map("organization_id") @db.Uuid
+  offerId        String     @map("offer_id") @db.Uuid
+  shift          WorkShift  @relation(fields: [organizationId, shiftId], references: [organizationId, id], onDelete: Cascade)
+  offer          ShiftOffer @relation(fields: [organizationId, offerId], references: [organizationId, id], onDelete: Cascade)
+
+  @@unique([organizationId, shiftId])
+  @@index([offerId])
+  @@map("shift_offer_reservations")
+}
+
+model ShiftOffer {
+  id                 String                  @id @default(uuid()) @db.Uuid
+  organizationId     String                  @map("organization_id") @db.Uuid
+  locationId         String                  @map("location_id") @db.Uuid
+  initiatorMemberId  String                  @map("initiator_member_id") @db.Uuid
+  recipientMemberId  String?                 @map("recipient_member_id") @db.Uuid
+  sourceShiftId      String                  @map("source_shift_id") @db.Uuid
+  targetShiftId      String?                 @map("target_shift_id") @db.Uuid
+  kind               ShiftOfferKind
+  mode               ShiftOfferMode
+  status             ShiftOfferStatus        @default(PENDING)
+  sourceSnapshot     Json                    @map("source_snapshot")
+  targetSnapshot     Json?                   @map("target_snapshot")
+  comment            String?                 @db.VarChar(500)
+  resolutionReason   String?                 @map("resolution_reason") @db.VarChar(500)
+  acceptedByMemberId String?                 @map("accepted_by_member_id") @db.Uuid
+  acceptedAt         DateTime?               @map("accepted_at") @db.Timestamptz(3)
+  reviewedByMemberId String?                 @map("reviewed_by_member_id") @db.Uuid
+  reviewedAt         DateTime?               @map("reviewed_at") @db.Timestamptz(3)
+  createdAt          DateTime                @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime                @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  closedAt           DateTime?               @map("closed_at") @db.Timestamptz(3)
+  organization       Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  location           OrganizationLocation    @relation(fields: [organizationId, locationId], references: [organizationId, id], onDelete: Restrict)
+  initiator          OrganizationMember      @relation("OfferInitiator", fields: [organizationId, initiatorMemberId], references: [organizationId, id], onDelete: Restrict)
+  recipient          OrganizationMember?     @relation("OfferRecipient", fields: [organizationId, recipientMemberId], references: [organizationId, id], onDelete: Restrict)
+  acceptedBy         OrganizationMember?     @relation("OfferAcceptor", fields: [organizationId, acceptedByMemberId], references: [organizationId, id], onDelete: Restrict)
+  reviewedBy         OrganizationMember?     @relation("OfferReviewer", fields: [organizationId, reviewedByMemberId], references: [organizationId, id], onDelete: Restrict)
+  sourceShift        WorkShift               @relation("OfferSource", fields: [organizationId, sourceShiftId], references: [organizationId, id], onDelete: Cascade)
+  targetShift        WorkShift?              @relation("OfferTarget", fields: [organizationId, targetShiftId], references: [organizationId, id], onDelete: Cascade)
+  reservations       ShiftOfferReservation[]
+  notifications      AccountNotification[]
+
+  @@unique([organizationId, id])
+  @@index([organizationId, locationId, status, createdAt])
+  @@index([initiatorMemberId, createdAt])
+  @@index([recipientMemberId, status])
+  @@map("shift_offers")
 }

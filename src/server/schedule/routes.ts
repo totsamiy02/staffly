@@ -1,3 +1,4 @@
+import { offerBody, offerModesBody, offerListQuery, offerActionBody, getOfferModes, saveOfferModes, offerCandidates, createOffer, listOffers, getOffer, actOnOffer } from './offer-service.ts'
 import { reportSickness, listAbsences, changeAbsence, absenceReportBody, absenceEditBody, absenceCancelBody, absenceListQuery } from './absence-service.ts'
 import { planningData, savePosition, saveTemplate, assignPositions, saveWorkload, positionBody, templateBody, assignmentBody, workloadBody } from './planning.ts'
 import { Router, type Request } from 'express'
@@ -14,6 +15,35 @@ import { listCancelledShifts } from './service.ts'
 const router = Router()
 const mutationLimiter = rateLimit({ windowMs: 60 * 1000, limit: 120, standardHeaders: 'draft-8', legacyHeaders: false, message: { code: 'TOO_MANY_REQUESTS', message: 'Слишком много изменений. Попробуйте через минуту.' } })
 router.use(requireAuth)
+
+router.get('/organizations/:organizationId/schedule/offer-settings', async (request, response) => {
+  const { organizationId } = parse(organizationParams, request.params)
+  response.json(await getOfferModes(auth(request).userId, organizationId))
+})
+router.put('/organizations/:organizationId/schedule/offer-settings', mutationLimiter, async (request, response) => {
+  const { organizationId } = parse(organizationParams, request.params)
+  response.json(await saveOfferModes(auth(request).userId, organizationId, parse(offerModesBody, request.body)))
+})
+router.get('/organizations/:organizationId/schedule/offer-candidates/:shiftId', async (request, response) => {
+  const { organizationId, shiftId } = parse(shiftParams, request.params)
+  response.json(await offerCandidates(auth(request).userId, organizationId, shiftId))
+})
+router.get('/organizations/:organizationId/schedule/offers', async (request, response) => {
+  const { organizationId } = parse(organizationParams, request.params)
+  response.json(await listOffers(auth(request).userId, organizationId, parse(offerListQuery, request.query)))
+})
+router.post('/organizations/:organizationId/schedule/offers', mutationLimiter, async (request, response) => {
+  const { organizationId } = parse(organizationParams, request.params)
+  response.status(201).json({ offer: await createOffer(auth(request).userId, organizationId, parse(offerBody, request.body)) })
+})
+router.get('/organizations/:organizationId/schedule/offers/:offerId', async (request, response) => {
+  const { organizationId, offerId } = parse(organizationParams.extend({ offerId: z.string().uuid() }), request.params)
+  response.json({ offer: await getOffer(auth(request).userId, organizationId, offerId) })
+})
+router.post('/organizations/:organizationId/schedule/offers/:offerId/action', mutationLimiter, async (request, response) => {
+  const { organizationId, offerId } = parse(organizationParams.extend({ offerId: z.string().uuid() }), request.params)
+  response.json({ offer: await actOnOffer(auth(request).userId, organizationId, offerId, parse(offerActionBody, request.body).action) })
+})
 
 router.get('/organizations/:organizationId/schedule/history', async (request, response) => {
   const { organizationId } = parse(organizationParams, request.params)

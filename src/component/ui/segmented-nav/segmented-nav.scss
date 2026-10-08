@@ -5,3 +5,11 @@
 }
 @media(max-width:640px) { .staffly-segmented { width:100%; >button,>a { padding:9px 12px; font-size:11px; } } }
 @media(prefers-reduced-motion:reduce) { .staffly-segmented__indicator { transition:none; } }
+.staffly-segmented--underline {
+ scrollbar-width:none;
+ &::-webkit-scrollbar { display:none; }
+ width:100%; gap:22px; padding:0; margin:0; border:0; border-bottom:1px solid #e6e7ea; border-radius:0; background:transparent;
+ >button, >a { min-height:42px; padding:10px 2px; border-radius:0; font-size:13px; }
+ .staffly-segmented__indicator { top:auto; bottom:0; height:2px !important; border-radius:0; background:#151515; box-shadow:none; }
+}
+@media(max-width:480px) { .staffly-segmented--underline { gap:16px; >button, >a { padding:10px 2px; font-size:12px; } } }

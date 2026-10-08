@@ -53,6 +53,10 @@ input[type=time]::-webkit-calendar-picker-indicator { display: none; }
 .staffly-select__person { display: flex; align-items: center; gap: 10px; white-space: normal; }
 .staffly-select__person > span { display: grid; }
 .staffly-select__person small { color: #727780; font-size: 11px; }
+.staffly-select__person { min-width:0; }
+.staffly-select__person > .media-avatar { display:grid; place-items:center; width:30px; height:30px; flex:0 0 30px; border-radius:50%; background:#f0f1f3; color:#555; font-size:12px; }
+.staffly-select__person > span:not(.media-avatar) { min-width:0; gap:2px; }
+.staffly-select__options .staffly-select__person strong, .staffly-select__options .staffly-select__person small { white-space:normal; overflow-wrap:anywhere; }
 .staffly-select__empty { padding: 12px; color: #727780; font-size: 13px; }
 .auth input:disabled { color: #a4a4ab !important; background-color: #292929 !important; }
 .auth input[readonly] { color: #dedee3 !important; }

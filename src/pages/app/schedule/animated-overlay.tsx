@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 
 type Props = {
   variant: 'modal' | 'drawer'
@@ -10,11 +10,14 @@ type Props = {
 
 export default function AnimatedOverlay({ variant, className = '', dismissible = true, onClose, children }: Props) {
   const [closing, setClosing] = useState(false)
+  const closeTimer = useRef<number | null>(null)
   const requestClose = useCallback(() => {
     if (closing || !dismissible) return
     setClosing(true)
-    window.setTimeout(onClose, 180)
+    closeTimer.current = window.setTimeout(() => { closeTimer.current = null; onClose() }, 180)
   }, [closing, dismissible, onClose])
+
+  useEffect(() => () => { if (closeTimer.current !== null) window.clearTimeout(closeTimer.current) }, [])
 
   useEffect(() => {
     function escape(event: KeyboardEvent) { if (event.key === 'Escape') requestClose() }

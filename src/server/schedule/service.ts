@@ -62,11 +62,12 @@ export async function assertNoApprovedAbsence(organizationId: string, memberId: 
   if (absence && !acknowledge) throw new ApiError(409, 'EMPLOYEE_ABSENT', `Сотрудник отсутствует ${dateText(absence.startDate)}–${dateText(absence.endDate)}: ${absenceLabels[absence.type] ?? 'Отсутствие'}. Подтвердите назначение смены несмотря на отсутствие.`, { absenceId: absence.id })
 }
 
-function publicShift(shift: WorkShift & { member: { user: { email: string; firstName: string | null; lastName: string | null; middleName: string | null; avatarFileId: string | null } }; _count?: { adjustments: number } }) {
+function publicShift(shift: WorkShift & { member: { user: { email: string; firstName: string | null; lastName: string | null; middleName: string | null; avatarFileId: string | null } }; _count?: { adjustments: number }; offerReservation?: { offer: { id: string; kind: string; status: string } } | null }) {
   const effectiveStartAt = shift.actualStartAt ?? shift.scheduledStartAt
   const effectiveEndAt = shift.actualEndAt ?? shift.scheduledEndAt
   return {
     id: shift.id,
+    activeOffer: shift.offerReservation?.offer ?? null,
     locationId: shift.locationId,
     positionId: shift.positionId,
     positionName: shift.positionNameSnapshot,
@@ -88,7 +89,7 @@ function publicShift(shift: WorkShift & { member: { user: { email: string; first
   }
 }
 
-const shiftInclude = { member: { include: { user: { select: { email: true, firstName: true, lastName: true, middleName: true, avatarFileId: true } } } }, _count: { select: { adjustments: true } } } as const
+const shiftInclude = { offerReservation: { select: { offer: { select: { id: true, kind: true, status: true } } } }, member: { include: { user: { select: { email: true, firstName: true, lastName: true, middleName: true, avatarFileId: true } } } }, _count: { select: { adjustments: true } } } as const
 
 export async function listCancelledShifts(userId: string, organizationId: string, query: { page: number; limit: number; memberId?: string; order: 'asc' | 'desc' }) {
   const actor = await getMembership(userId, organizationId)

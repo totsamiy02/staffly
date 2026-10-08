@@ -61,7 +61,6 @@
 .schedule-legend i.active { background: #48a15d; box-shadow: 0 0 0 3px rgb(72 161 93 / 14%); }
 .schedule-legend i.mine { background: #7657d6; }
 .schedule-legend small { margin-left: auto; color: #999; }
-.schedule-my-shifts-button { min-width: 130px; }
 
 .schedule-drawer-backdrop { position: fixed; z-index: 30; display: flex; justify-content: flex-end; inset: 0; background: rgb(0 0 0 / 32%); backdrop-filter: blur(2px); animation: schedule-fade-in .2s ease both; }
 .schedule-drawer { position: relative; width: min(100%, 500px); height: 100%; overflow-y: auto; overscroll-behavior: contain; scroll-behavior: smooth; padding: 28px; background: #f7f7f7; box-shadow: -20px 0 60px rgb(0 0 0 / 15%); }
@@ -192,32 +191,6 @@
 .shift-audit__list dl > div { display: grid; grid-template-columns: 45px 1fr; gap: 8px; }
 .shift-audit__list dt { color: #888; font-size: 9px; }
 .shift-audit__list dd { font-size: 10px; }
-.my-shifts-list { display: grid; gap: 8px; margin-top: 16px; }
-.my-shifts-period { display: grid; grid-template-columns: 36px minmax(0, 1fr) 36px; gap: 8px; align-items: center; margin-top: 20px; }
-.my-shifts-period strong { text-align: center; font-size: 14px; text-transform: capitalize; }
-.my-shifts-period button { height: 36px; border: 1px solid #ddd; border-radius: 9px; background: #fff; cursor: pointer; font-size: 23px; }
-.my-shifts-period button:hover { background: #eee; }
-.my-shifts-summary { display: grid; grid-template-columns: 1.2fr 1fr; gap: 16px; margin-top: 16px; padding: 16px; border: 1px solid #e0dce8; border-radius: 12px; background: #f6f3fb; }
-.my-shifts-summary > div { display: grid; align-content: center; gap: 4px; }
-.my-shifts-summary span, .my-shifts-summary small { color: #777; font-size: 10px; }
-.my-shifts-summary strong { font-size: 15px; }
-.my-shifts-summary > div:first-child strong { color: #544274; font-size: 24px; }
-.my-shifts-note { margin-top: 10px; color: #777; font-size: 10px; line-height: 1.6; }
-.my-shift-row { display: grid; width: 100%; gap: 10px; padding: 14px; border: 1px solid #ddd; border-left: 3px solid #8d80b0; border-radius: 12px; background: #fff; cursor: pointer; text-align: left; }
-.my-shift-row:hover { border-color: #a99bc2; background: #fcfaff; }
-.my-shift-row--cancelled { border-left-style: dashed; border-left-color: #aaa; background: #f3f3f3; }
-.my-shift-row__heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 5px; }
-.my-shift-row__heading > strong { font-size: 12px; }
-.shift-state-label { padding: 3px 6px; border: 1px solid #ddd; border-radius: 5px; color: #666; background: #f6f6f6; font-size: 9px; }
-.shift-state-label--future { border-color: #d4dcee; background: #f3f6fc; color: #53678d; }
-.shift-state-label--active { border-color: #b9d5bd; background: #f0f7f1; color: #3d7348; }
-.my-shift-row__times { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.my-shift-row__times > span { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
-.my-shift-row__times small { color: #888; font-size: 10px; }
-.my-shift-row__times strong, .my-shift-row__times b { font-size: 12px; }
-.my-shift-row__times b { flex-shrink: 0; color: #666; font-weight: 600; }
-.my-shift-row__times--actual { padding-top: 9px; border-top: 1px solid #eee; }
-.my-shift-row__break { color: #888; font-size: 10px; line-height: 1.5; }
 
 @keyframes schedule-fade-in { from { opacity: 0; } }
 @keyframes schedule-fade-out { to { opacity: 0; } }
@@ -285,7 +258,6 @@
 
 .employee-picker .staffly-select__person { min-width: 0; flex: 1; }
 .employee-picker .staffly-select__person > span:last-child { min-width: 0; }
-.my-shift-row:focus-visible, .my-shifts-period button:focus-visible { outline: 2px solid #79658f; outline-offset: 2px; }
 
 .planning-settings { display: grid; gap: 24px; margin-top: 24px; padding: 24px; border: 1px solid #ddd; border-radius: 16px; background: #fff; }
 .planning-settings h2 { font-size: 22px; }
@@ -333,7 +305,6 @@
 .planning-items .app-secondary { flex-shrink: 0; font-size: 12px; }
 .planning-feedback { margin-bottom: 16px; padding: 12px 16px; border: 1px solid #cddfcd; border-radius: 10px; background: #f3f8f3; color: #36623a !important; }
 .schedule-heading > div:first-child { flex: 1; }
-.schedule-heading .schedule-my-shifts-button { flex-shrink: 0; }
 .schedule-drawer__add { display: flex; align-items: center; justify-content: center; text-align: center; }
 @media (max-width: 640px) {
   .planning-settings { padding: 0; }

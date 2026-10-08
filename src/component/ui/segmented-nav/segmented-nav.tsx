@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, useState, type ReactNode, type CSSProperties }
 import './segmented-nav.scss'
 
 /** Shared navigation for existing buttons and router links; selection stays with the caller. */
-export default function SegmentedNav({ children, label }: { children: ReactNode; label: string }) {
+export default function SegmentedNav({ children, label, variant = 'segmented' }: { children: ReactNode; label: string; variant?: 'segmented' | 'underline' }) {
   const ref = useRef<HTMLElement>(null)
   const [indicator, setIndicator] = useState<CSSProperties>({ opacity: 0 })
   useLayoutEffect(() => {
@@ -19,5 +19,5 @@ export default function SegmentedNav({ children, label }: { children: ReactNode;
     Array.from(nav.children).forEach(element => observer.observe(element))
     return () => observer.disconnect()
   }, [children])
-  return <nav ref={ref} className="staffly-segmented" aria-label={label}><span className="staffly-segmented__indicator" style={indicator} aria-hidden="true" />{children}</nav>
+  return <nav ref={ref} className={`staffly-segmented${variant === 'underline' ? ' staffly-segmented--underline' : ''}`} aria-label={label}><span className="staffly-segmented__indicator" style={indicator} aria-hidden="true" />{children}</nav>
 }

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { liveQueryOptions } from '../live-query.ts'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '../auth/auth-context.tsx'
-import type { AccountNotification, ActiveOrganizationInvitation, MemberPagination, OrganizationMember, OrganizationRole, OrganizationSummary, PendingInvitation } from './types.ts'
+import type { ActiveOrganizationInvitation, MemberPagination, OrganizationMember, OrganizationRole, OrganizationSummary, PendingInvitation } from './types.ts'
 
 export function useOrganizations() {
   const { apiRequest, user } = useAuth()
@@ -16,18 +16,6 @@ export function usePendingInvitations() {
     queryFn: () => apiRequest<{ invitations: PendingInvitation[] }>('/invitations'),
     enabled: Boolean(user),
   })
-}
-
-export function useAccountNotifications(organizationId?: string, pointId?: string | null) {
-  const { apiRequest, user, locationId } = useAuth()
-  const selectedLocationId = pointId === undefined ? locationId : pointId
-  const params = new URLSearchParams({ unread: 'true', limit: '50' })
-  if (organizationId) params.set('organizationId', organizationId)
-  if (organizationId && selectedLocationId) params.set('locationId', selectedLocationId)
-  return useQuery({ ...liveQueryOptions, queryKey: ['account-notifications', organizationId, selectedLocationId], queryFn: async () => {
-    const page = await apiRequest<import('./types.ts').NotificationPage>(`/notifications?${params}`)
-    return { notifications: page.notifications.filter(n => n.source === 'event').map(n => ({ ...n, id: n.id.replace('event:', ''), requestId: n.requestId ?? null, type: n.type as AccountNotification['type'] })) as AccountNotification[] }
-  }, enabled: Boolean(user) })
 }
 
 export function useOrganization(organizationId: string | undefined) {
@@ -71,7 +59,7 @@ export function useNotificationActions(organizationId?: string) {
   const [removingId, setRemovingId] = useState<string | null>(null)
   const { apiRequest } = useAuth()
   const client = useQueryClient()
-  const refresh = () => Promise.all(['notifications', 'invitations', 'organizations', 'account-notifications', 'shift-notifications'].map(key => client.invalidateQueries({ queryKey: [key] })))
+  const refresh = () => Promise.all(['notifications', 'invitations', 'organizations'].map(key => client.invalidateQueries({ queryKey: [key] })))
   const read = useMutation({ mutationFn: ({ id, unread = false }: { id: string; unread?: boolean }) => apiRequest(`/notifications/${id}/read`, { method: 'POST', body: { unread, organizationId } }), onSuccess: refresh })
   const invitation = useMutation({ mutationFn: ({ id, action }: { id: string; action: 'accept' | 'reject' }) => apiRequest(`/invitations/${id.replace('invite:', '')}/${action}`, { method: 'POST', body: {} }), onSuccess: refresh })
   const readAll = useMutation({ mutationFn: () => apiRequest('/notifications/read-all', { method: 'POST', body: { organizationId } }), onSuccess: refresh })

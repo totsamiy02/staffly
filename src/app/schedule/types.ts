@@ -1,6 +1,7 @@
 import type { OrganizationRole } from '../organizations/types.ts'
 
 export type WorkShift = { positionId?: string | null; positionName?: string | null;
+  activeOffer?: { id: string; kind: 'TRANSFER' | 'SWAP'; status: 'PENDING' | 'AWAITING_APPROVAL' } | null
   id: string
   memberId: string
   memberName: string
@@ -26,6 +27,8 @@ export type ShiftDetails = WorkShift & {
   adjustments: Array<{
     id: string
     changedByName: string
+    kind?: string
+    assignmentChange?: { previousMemberName: string; newMemberName: string; initiatorMemberId: string; initiatorMemberName?: string; acceptedByMemberId: string; acceptedByMemberName?: string; reviewedByMemberId: string | null; reviewedByMemberName?: string | null } | null
     previousStartAt: string
     previousEndAt: string
     previousBreakMinutes: number
