@@ -158,6 +158,7 @@ model Organization {
   shiftTransferMode    ShiftOfferMode         @default(DISABLED) @map("shift_transfer_mode")
   shiftSwapMode        ShiftOfferMode         @default(DISABLED) @map("shift_swap_mode")
   shiftOffers          ShiftOffer[]
+  reportTemplates      ReportTemplate[]
 
   @@index([createdByUserId])
   @@index([deletedAt])
@@ -241,6 +242,8 @@ model AccountNotification {
 }
 
 model OrganizationMember {
+  personnelNumber String? @map("personnel_number") @db.VarChar(32)
+  reportTemplates ReportTemplate[]
   id             String           @id @default(uuid()) @db.Uuid
   organizationId String           @map("organization_id") @db.Uuid
   userId         String           @map("user_id") @db.Uuid
@@ -281,12 +284,27 @@ model OrganizationMember {
   reviewedShiftOffers      ShiftOffer[]              @relation("OfferReviewer")
 
   @@unique([organizationId, userId])
+  @@unique([organizationId, personnelNumber])
   @@unique([organizationId, id])
   @@index([organizationId])
   @@index([userId])
   @@index([organizationId, role])
   @@index([organizationId, leftAt])
   @@map("organization_members")
+}
+
+model ReportTemplate {
+  id String @id @default(uuid()) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  createdByMemberId String @map("created_by_member_id") @db.Uuid
+  name String @db.VarChar(80)
+  config Json
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy OrganizationMember @relation(fields: [organizationId, createdByMemberId], references: [organizationId, id], onDelete: Cascade)
+  @@index([organizationId])
+  @@map("report_templates")
 }
 
 model WorkShift {

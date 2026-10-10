@@ -116,9 +116,16 @@ describe('shift transfer and swap lifecycle', { concurrency: false }, () => {
   it('waits for point approval and rejects self-approval and other-point administrators', async () => {
     await modes('APPROVAL'); const s = await shift(); const o = await create(s.id)
     await assert.rejects(action(o.id, 'decline', 'admin'), code('OFFER_NOT_ACCEPTED'))
-    await action(o.id, 'accept'); assert.equal((await offerRow(o.id)).status, 'AWAITING_APPROVAL')
+    assert.equal(await notices(o.id, 'SHIFT_OFFER_APPROVAL'), 0)
+    await action(o.id, 'accept'); await action(o.id, 'accept'); assert.equal((await offerRow(o.id)).status, 'AWAITING_APPROVAL')
     assert.equal((await current(s.id)).memberId, accounts.alice.memberId)
     assert.equal(await notices(o.id, 'SHIFT_OFFER_APPROVAL'), 2)
+    const approvalNotices = await prisma.accountNotification.findMany({ where: { shiftOfferId: o.id, type: 'SHIFT_OFFER_APPROVAL' }, select: { userId: true } })
+    assert.deepEqual(approvalNotices.map(notice => notice.userId).sort(), [accounts.owner.id, accounts.admin.id].sort())
+    for (const label of ['owner', 'admin']) {
+      const history = await scope(() => listNotificationHistory(accounts[label].id, accounts[label].email, { organizationId: orgId, locationId: point, category: 'SHIFT', limit: 50 }))
+      assert.ok(history.notifications.some(notice => notice.shiftOfferId === o.id && notice.href?.includes(`offer=${o.id}`) && notice.href.includes(`location=${point}`)))
+    }
     await assert.rejects(action(o.id, 'approve', 'alice'), code('INSUFFICIENT_PERMISSIONS'))
     await assert.rejects(action(o.id, 'approve', 'bob'), code('INSUFFICIENT_PERMISSIONS'))
     await assert.rejects(action(o.id, 'approve', 'other'), code('OFFER_NOT_FOUND'))
@@ -134,10 +141,25 @@ describe('shift transfer and swap lifecycle', { concurrency: false }, () => {
   })
   it('approves a mutual swap and records the independent owner', async () => {
     await modes('AUTO', 'APPROVAL'); const a = await shift(), b = await shift('bob', '2038-10-13')
-    const o = await create(a.id, { kind: 'SWAP', targetShiftId: b.id }); await action(o.id, 'accept')
+    const o = await create(a.id, { kind: 'SWAP', targetShiftId: b.id }); await action(o.id, 'accept'); await action(o.id, 'accept')
+    assert.equal((await offerRow(o.id)).status, 'AWAITING_APPROVAL')
+    assert.equal(await notices(o.id, 'SHIFT_OFFER_APPROVAL'), 2)
     assert.equal((await current(a.id)).memberId, accounts.alice.memberId)
     await action(o.id, 'approve', 'owner')
     assert.equal((await current(a.id)).memberId, accounts.bob.memberId); assert.equal((await current(b.id)).memberId, accounts.alice.memberId)
+  })
+  it('refuses acceptance when both managers participate and no independent reviewer exists', async () => {
+    await modes('APPROVAL')
+    await prisma.memberPosition.create({ data: { memberId: accounts.owner.memberId, positionId: position } })
+    try {
+      const s = await shift('owner'), o = await create(s.id, { recipientMemberId: accounts.admin.memberId }, 'owner')
+      await assert.rejects(action(o.id, 'accept', 'admin'), code('NO_REVIEWER'))
+      assert.equal((await offerRow(o.id)).status, 'PENDING')
+      assert.equal((await current(s.id)).memberId, accounts.owner.memberId)
+      assert.equal(await notices(o.id, 'SHIFT_OFFER_APPROVAL'), 0)
+      await action(o.id, 'cancel', 'owner')
+      assert.equal(await prisma.shiftOfferReservation.count({ where: { offerId: o.id } }), 0)
+    } finally { await prisma.memberPosition.deleteMany({ where: { memberId: accounts.owner.memberId, positionId: position } }) }
   })
   it('releases both reservations on refusal and initiator cancellation', async () => {
     const a = await shift(), b = await shift('bob', '2038-10-13')

@@ -10,6 +10,7 @@ import ScheduleTabs from './schedule-tabs.tsx'
 import WorkTimePanel from './work-time-panel.tsx'
 import AnimatedOverlay from './animated-overlay.tsx'
 import { useOrganizationMembers } from '../../../app/organizations/queries.ts'
+import ReportDialog from './report-dialog.tsx'
 
 const months = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь']
 const columns: Array<{ key: 'name' | 'workedMinutes' | 'workedShifts' | 'averageMinutes' | 'plannedMinutes' | 'plannedShifts'; label: string }> = [
@@ -27,6 +28,8 @@ export default function StatisticsPage({ organization }: { organization: Organiz
   const [selectedShift, setSelectedShift] = useState<string | null>(null)
   const [historyPage, setHistoryPage] = useState(1)
   const [auditPage, setAuditPage] = useState(1)
+  const [reportOpen, setReportOpen] = useState(false)
+  const [reportBusy, setReportBusy] = useState(false)
   const from = allTime ? undefined : `${month}-01`
   const to = allTime ? undefined : `${moveMonth(month, 1)}-01`
   const params = { from, to, memberState, sort, direction }
@@ -44,7 +47,8 @@ export default function StatisticsPage({ organization }: { organization: Organiz
   }
 
   if (organization.role === 'MEMBER') return <div className="schedule-state">Общая статистика доступна владельцу и администраторам.</div>
-  return <section className="schedule-page schedule-redesign"><header className="schedule-heading"><div><h1>Статистика смен</h1><p>Завершённые смены считаются автоматически, будущие показаны отдельно.</p></div></header><ScheduleTabs organization={organization} />
+  return <section className="schedule-page schedule-redesign"><header className="schedule-heading"><div><h1>Статистика смен</h1><p>Завершённые смены считаются автоматически, будущие показаны отдельно.</p></div><button type="button" className="app-primary" onClick={() => setReportOpen(true)}>Выгрузить Excel</button></header><ScheduleTabs organization={organization} />
+    {reportOpen && <AnimatedOverlay variant="modal" dismissible={!reportBusy} onClose={() => setReportOpen(false)}>{close => <ReportDialog organization={organization} month={allTime ? initialMonth : month} onClose={close} onBusy={setReportBusy} />}</AnimatedOverlay>}
     <div className="statistics-member-picker"><EmployeePicker label="Найти сотрудника" members={pickerMembers} value="" onChange={(id) => { setSelectedMember(id || null); setHistoryPage(1) }} emptyLabel="Поиск по имени или почте" required={false} disabled={organizationMembers.isLoading} /><small>Выберите сотрудника или нажмите его строку для просмотра часов. Общая сводка не меняется.</small></div>
     <div className="statistics-filters"><div className="statistics-period"><button className={allTime ? '' : 'active'} onClick={() => setAllTime(false)}>Месяц</button><button className={allTime ? 'active' : ''} onClick={() => setAllTime(true)}>За всё время</button></div>{!allTime && <><Select aria-label="Месяц" value={monthNumber} onChange={(event) => setMonth(`${year}-${String(event.target.value).padStart(2, '0')}`)}>{months.map((label, index) => <option value={index + 1} key={label}>{label}</option>)}</Select><Select aria-label="Год" value={year} onChange={(event) => setMonth(`${event.target.value}-${String(monthNumber).padStart(2, '0')}`)}>{years.map((value) => <option value={value} key={value}>{value}</option>)}</Select></>}<Select aria-label="Состав сотрудников" value={memberState} onChange={(event) => setMemberState(event.target.value as typeof memberState)}><option value="active">Активные</option><option value="all">Все</option><option value="former">Бывшие</option></Select></div>
     {statistics.isLoading ? <div className="schedule-state"><span className="app-spinner" />Считаем рабочее время…</div> : statistics.isError ? <div className="schedule-state"><strong>Не удалось загрузить статистику</strong><button className="app-secondary" onClick={() => void statistics.refetch()}>Повторить</button></div> : <>

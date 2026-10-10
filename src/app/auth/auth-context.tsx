@@ -17,7 +17,7 @@ type AuthContextValue = {
   apiRequest: <T>(path: string, options?: ApiOptions) => Promise<T>
   uploadImage: <T>(path: string, file: File) => Promise<T>
   uploadFile: <T>(path: string, file: File) => Promise<T>
-  downloadFile: (path: string, fileName: string, method?: 'GET' | 'POST') => Promise<void>
+  downloadFile: (path: string, fileName: string, method?: 'GET' | 'POST', body?: unknown) => Promise<void>
   previewFile: (path: string, method?: 'GET' | 'POST') => Promise<Blob>
 }
 
@@ -136,8 +136,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return readJson<T>(response)
   }, [refresh])
 
-  const downloadFile = useCallback(async (path: string, fileName: string, method: 'GET' | 'POST' = 'GET') => {
-    const execute = (token: string | null) => fetch(`/api${path}`, { method, credentials: 'same-origin', headers: token ? { Authorization: `Bearer ${token}` } : {} })
+  const downloadFile = useCallback(async (path: string, fileName: string, method: 'GET' | 'POST' = 'GET', body?: unknown) => {
+    const execute = (token: string | null) => fetch(`/api${path}`, { method, credentials: 'same-origin', headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}) }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) })
     const response = await requestWithSession(execute, () => tokenRef.current, refresh)
     if (!response.ok) { await readJson(response); return }
     const url = URL.createObjectURL(await response.blob())
@@ -184,7 +184,7 @@ export function useAuth() {
     apiRequest: <T,>(path: string, options?: ApiOptions) => context.apiRequest<T>(scopePath(path), options),
     uploadFile: <T,>(path: string, file: File) => context.uploadFile<T>(scopePath(path), file),
     uploadImage: <T,>(path: string, file: File) => context.uploadImage<T>(scopePath(path), file),
-    downloadFile: (path: string, name: string, method?: 'GET' | 'POST') => context.downloadFile(scopePath(path), name, method),
+    downloadFile: (path: string, name: string, method?: 'GET' | 'POST', body?: unknown) => context.downloadFile(scopePath(path), name, method, body),
     previewFile: (path: string, method?: 'GET' | 'POST') => context.previewFile(scopePath(path), method),
   }
   }, [context, locationId, organizationId])

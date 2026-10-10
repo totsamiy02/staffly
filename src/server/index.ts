@@ -7,6 +7,7 @@ import { selectLocation } from './organizations/location-context.ts'
 import organizationRouter from './organizations/routes.ts'
 import profileRouter from './profile/routes.ts'
 import scheduleRouter from './schedule/routes.ts'
+import reportRouter from './schedule/report-routes.ts'
 import storageRouter from './storage/routes.ts'
 import requestsRouter from './requests/routes.ts'
 import documentsRouter from './documents/routes.ts'
@@ -23,6 +24,7 @@ app.use(helmet({ contentSecurityPolicy: { directives: { imgSrc: ["'self'", 'data
 app.use('/api/organizations/:organizationId/shifts/batch', express.json({ limit: '64kb' }))
 app.use('/api/organizations/:organizationId/documents/:documentId/assign', express.json({ limit: '64kb' }))
 app.use('/api/organizations/:organizationId/events', express.json({ limit: '64kb' }))
+app.use('/api/organizations/:organizationId/statistics/reports', express.json({ limit: '128kb' }))
 app.use(express.json({ limit: '16kb' }))
 app.use(cookieParser())
 app.use('/api', (request, response, next) => {
@@ -64,6 +66,7 @@ app.use('/api/auth', (_request, response, next) => { response.set('Cache-Control
 app.use('/api', (_request, response, next) => { response.set('Cache-Control', 'no-store'); next() }, profileRouter)
 app.use('/api', (_request, response, next) => { response.set('Cache-Control', 'no-store'); next() }, organizationRouter)
 app.use('/api', (_request, response, next) => { response.set('Cache-Control', 'no-store'); next() }, scheduleRouter)
+app.use('/api', (_request, response, next) => { response.set('Cache-Control', 'no-store'); next() }, reportRouter)
 app.use('/api', (_request, response, next) => { response.set('Cache-Control', 'no-store'); next() }, requestsRouter)
 app.use('/api', documentsRouter)
 app.use('/api', eventsRouter)
