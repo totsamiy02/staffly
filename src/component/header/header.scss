@@ -91,3 +91,7 @@
   .header__profile-trigger > svg { display: none; }
   .header__avatar { width: 40px; height: 40px; }
 }
+
+.header__guide-link { align-self: center; margin-right: 8px; color: #777; font-size: 13px; &:hover { color: #111; } }
+@media (max-width: 520px) { .header__guide-link { margin-right: 0; font-size: 11px; } .header__buttons { gap: 8px; } }
+@media (max-width: 520px) { .header__guide-link { display: none; } }

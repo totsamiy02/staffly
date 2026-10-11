@@ -709,3 +709,6 @@
 
 .member-row__identity strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .members-toolbar > label { min-width: 0; }
+
+.workspace-location-banner .workspace-guide-link { display: inline-flex; align-items: center; flex-shrink: 0; gap: 5px; margin-left: auto; color: #777; font-size: 11px; svg { width: 14px; height: 14px; } &:hover { color: #111; } }
+@media (max-width: 520px) { .workspace-location-banner .workspace-guide-link { span { display: none; } } }

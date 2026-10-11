@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react'
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import Header from './component/header/header.tsx'
 import Hero from './component/hero/hero.tsx'
@@ -20,6 +21,8 @@ import OrganizationLayout from './pages/app/organization-layout.tsx'
 import UserSettingsPage from './pages/app/user-settings-page.tsx'
 import StatusPage from './pages/error/status-page.tsx'
 
+const GuidePage = lazy(() => import('./pages/guide/guide-page.tsx'))
+
 function HomePage() {
   return (
     <main>
@@ -34,7 +37,8 @@ function App() {
   const pathname = useLocation().pathname
   const isAuthPage = ['/auth', '/verify-email', '/forgot-password', '/reset-password'].includes(pathname)
   const isAppPage = pathname === '/app' || pathname.startsWith('/app/')
-  const hidePublicFrame = isAuthPage || isAppPage
+  const isGuidePage = pathname === '/guide' || pathname.startsWith('/guide/')
+  const hidePublicFrame = isAuthPage || isAppPage || isGuidePage
 
   return (
     <>
@@ -42,6 +46,10 @@ function App() {
 
       <Routes>
         <Route path="/" element={<HomePage />} />
+        <Route path="/guide" element={<Suspense fallback={<main className="app-loading" aria-label="Загрузка справочника"><span /></main>}><GuidePage /></Suspense>} />
+        <Route path="/guide/category/:categoryId" element={<Suspense fallback={<main className="app-loading" aria-label="Загрузка справочника"><span /></main>}><GuidePage /></Suspense>} />
+        <Route path="/guide/:slug" element={<Suspense fallback={<main className="app-loading" aria-label="Загрузка справочника"><span /></main>}><GuidePage /></Suspense>} />
+        <Route path="/guide/*" element={<Suspense fallback={<main className="app-loading" aria-label="Загрузка справочника"><span /></main>}><GuidePage /></Suspense>} />
         <Route path="/auth" element={<AuthPage />} />
         <Route path="/verify-email" element={<VerifyEmailPage />} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />

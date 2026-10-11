@@ -38,12 +38,13 @@ function Header() {
             </button>
             {profileOpen && <div className="header__profile-menu">
               <div><Avatar url={user.avatarUrl} name={user.displayName} className="header__profile-menu-avatar" eager /><p><strong>{user.displayName}</strong><small>{user.email}</small></p></div>
-              <nav><Link to="/app" onClick={() => setProfileOpen(false)}>Мои организации</Link><Link to="/app/settings" onClick={() => setProfileOpen(false)}>Настройки профиля</Link></nav>
+              <nav><Link to="/app" onClick={() => setProfileOpen(false)}>Мои организации</Link><Link to="/guide" onClick={() => setProfileOpen(false)}>Справочник</Link><Link to="/app/settings" onClick={() => setProfileOpen(false)}>Настройки профиля</Link></nav>
               <button type="button" onClick={() => { setProfileOpen(false); void logout() }}>Выйти из аккаунта</button>
             </div>}
           </div>
         ) : (
           <div className="header__buttons">
+            <Link className="header__guide-link" to="/guide">Справочник</Link>
             <Link className="button button--white" to="/auth?mode=login">Вход</Link>
             <Link className="button button--black" to="/auth?mode=register">Регистрация</Link>
           </div>

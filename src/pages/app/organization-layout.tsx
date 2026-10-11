@@ -15,6 +15,7 @@ import DocumentsPage from './documents/documents-page.tsx'
 import RequestsPage from './requests/requests-page.tsx'
 import EventsPage from './events/events-page.tsx'
 import ModuleErrorBoundary from './module-error-boundary.tsx'
+import GuideIcon from '../guide/guide-icon.tsx'
 import Avatar from '../../component/ui/avatar/avatar.tsx'
 import { useDocuments } from '../../app/documents/queries.ts'
 import './app.scss'
@@ -90,6 +91,7 @@ export default function OrganizationLayout() {
   const organization = query.data.organization
   const organizationPath = `/app/organizations/${organization.id}`
   const currentSegment = location.pathname.slice(organizationPath.length).split('/').filter(Boolean)[0] ?? ''
+  const helpCategory = ({ employees: 'team', schedule: 'schedule', requests: 'requests', events: 'events', documents: 'documents', settings: 'organization' } as Record<string, string>)[currentSegment] ?? 'start'
   const currentSection = navigation.find(([path]) => path === currentSegment)?.[1] ?? 'Неизвестный раздел'
   const points = locations.data?.locations ?? (organization.location ? [organization.location] : [])
   const locationAddress = [organization.location?.city, organization.location?.address].filter(Boolean).join(' · ')
@@ -117,9 +119,9 @@ export default function OrganizationLayout() {
       </div>
       <button className="workspace-sidebar__collapse" type="button" aria-label={sidebarCollapsed ? 'Развернуть меню' : 'Свернуть меню'} onClick={toggleSidebar}><CollapseIcon collapsed={sidebarCollapsed} /><span>{sidebarCollapsed ? 'Развернуть' : 'Свернуть'}</span></button>
       <nav aria-label="Разделы организации">{navigation.map(([path, label]) => <NavLink end title={sidebarCollapsed ? label : undefined} to={`${path ? `${organizationPath}/${path}` : organizationPath}?location=${organization.locationId}`} key={label}><NavigationIcon section={path} /><span>{label}</span>{path === 'documents' && <DocumentNavBadge organizationId={organization.id} />}</NavLink>)}</nav>
-      <div className="workspace-sidebar__footer"><NavLink className="workspace-sidebar__back" title={sidebarCollapsed ? 'Все организации' : undefined} to="/app"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m10 6-6 6 6 6M4 12h16" /></svg><span>Все организации</span></NavLink></div>
+      <div className="workspace-sidebar__footer"><Link className="workspace-sidebar__back" title={sidebarCollapsed ? 'Справочник' : undefined} to="/guide"><GuideIcon /><span>Справочник</span></Link><NavLink className="workspace-sidebar__back" title={sidebarCollapsed ? 'Все организации' : undefined} to="/app"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m10 6-6 6 6 6M4 12h16" /></svg><span>Все организации</span></NavLink></div>
     </aside>
-    <main ref={contentRef} className="workspace-content" key={currentSegment ? organization.locationId : organization.id}>{currentSegment && <div className="workspace-location-banner" data-tone={locationTone(organization.locationId ?? '')}><NavigationIcon section="location" /><strong title={organization.location?.name}>{organization.location?.name}</strong>{locationAddress && <span title={locationAddress}>{locationAddress}</span>}</div>}
+    <main ref={contentRef} className="workspace-content" key={currentSegment ? organization.locationId : organization.id}>{currentSegment && <div className="workspace-location-banner" data-tone={locationTone(organization.locationId ?? '')}><NavigationIcon section="location" /><strong title={organization.location?.name}>{organization.location?.name}</strong>{locationAddress && <span title={locationAddress}>{locationAddress}</span>}<Link className="workspace-guide-link" to={`/guide/category/${helpCategory}`}><GuideIcon name="help" /><span>Помощь по разделу</span></Link></div>}
       <Routes>
         <Route index element={module(<OrganizationDashboard organization={organization} />)} />
         <Route path="employees" element={module(<OrganizationMembers organization={organization} />)} />

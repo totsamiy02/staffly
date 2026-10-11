@@ -15,6 +15,7 @@ const footerLinks = [
     links: [
       { label: 'О сервисе', href: '/#about' },
       { label: 'Возможности', href: '/#benefits' },
+      { label: 'Справочник', href: '/guide' },
       { label: 'Тарифы', href: '/#pricing' },
       { label: 'Начало страницы', href: '/#top' },
     ],
