@@ -1,3 +1,4 @@
+import { canAccess } from '../../../app/access/catalog.ts'
 import Avatar from '../../../component/ui/avatar/avatar.tsx'
 import EmployeePicker from './employee-picker.tsx'
 import Select from '../../../component/ui/select/select.tsx'
@@ -33,7 +34,7 @@ export default function StatisticsPage({ organization }: { organization: Organiz
   const from = allTime ? undefined : `${month}-01`
   const to = allTime ? undefined : `${moveMonth(month, 1)}-01`
   const params = { from, to, memberState, sort, direction }
-  const statistics = useWorkTimeStatistics(organization.id, params, organization.role !== 'MEMBER')
+  const statistics = useWorkTimeStatistics(organization.id, params, canAccess(organization, 'statistics.view'))
   const organizationMembers = useOrganizationMembers(organization.id)
   const pickerMembers = [...(organizationMembers.data?.members ?? []), ...(statistics.data?.members ?? []).filter(item => !organizationMembers.data?.members.some(member => member.id === item.memberId)).map(item => ({ id: item.memberId, displayName: item.name, email: '', avatarUrl: item.avatarUrl }))]
   const detail = useMemberWorkTime(organization.id, selectedMember, { ...params, page: historyPage })
@@ -46,8 +47,9 @@ export default function StatisticsPage({ organization }: { organization: Organiz
     else { setSort(key); setDirection(key === 'name' ? 'asc' : 'desc') }
   }
 
-  if (organization.role === 'MEMBER') return <div className="schedule-state">Общая статистика доступна владельцу и администраторам.</div>
-  return <section className="schedule-page schedule-redesign"><header className="schedule-heading"><div><h1>Статистика смен</h1><p>Завершённые смены считаются автоматически, будущие показаны отдельно.</p></div><button type="button" className="app-primary" onClick={() => setReportOpen(true)}>Выгрузить Excel</button></header><ScheduleTabs organization={organization} />
+  if (!canAccess(organization,'statistics.view') && (canAccess(organization,'reports.preview') || canAccess(organization,'reports.export'))) return <section className="schedule-page"><header className="schedule-heading"><h1>Отчёты</h1><button className="app-primary" onClick={()=>setReportOpen(true)}>Сформировать отчёт</button></header><ScheduleTabs organization={organization}/>{reportOpen && <AnimatedOverlay variant="modal" dismissible={!reportBusy} onClose={()=>setReportOpen(false)}>{close=><ReportDialog organization={organization} month={month} onClose={close} onBusy={setReportBusy}/>}</AnimatedOverlay>}</section>
+  if (!canAccess(organization, 'statistics.view')) return <div className="schedule-state">Общая статистика доступна владельцу и администраторам.</div>
+  return <section className="schedule-page schedule-redesign"><header className="schedule-heading"><div><h1>Статистика смен</h1><p>Завершённые смены считаются автоматически, будущие показаны отдельно.</p></div>{(canAccess(organization, 'reports.preview') || canAccess(organization, 'reports.export')) && <button type="button" className="app-primary" onClick={() => setReportOpen(true)}>Выгрузить Excel</button>}</header><ScheduleTabs organization={organization} />
     {reportOpen && <AnimatedOverlay variant="modal" dismissible={!reportBusy} onClose={() => setReportOpen(false)}>{close => <ReportDialog organization={organization} month={allTime ? initialMonth : month} onClose={close} onBusy={setReportBusy} />}</AnimatedOverlay>}
     <div className="statistics-member-picker"><EmployeePicker label="Найти сотрудника" members={pickerMembers} value="" onChange={(id) => { setSelectedMember(id || null); setHistoryPage(1) }} emptyLabel="Поиск по имени или почте" required={false} disabled={organizationMembers.isLoading} /><small>Выберите сотрудника или нажмите его строку для просмотра часов. Общая сводка не меняется.</small></div>
     <div className="statistics-filters"><div className="statistics-period"><button className={allTime ? '' : 'active'} onClick={() => setAllTime(false)}>Месяц</button><button className={allTime ? 'active' : ''} onClick={() => setAllTime(true)}>За всё время</button></div>{!allTime && <><Select aria-label="Месяц" value={monthNumber} onChange={(event) => setMonth(`${year}-${String(event.target.value).padStart(2, '0')}`)}>{months.map((label, index) => <option value={index + 1} key={label}>{label}</option>)}</Select><Select aria-label="Год" value={year} onChange={(event) => setMonth(`${event.target.value}-${String(monthNumber).padStart(2, '0')}`)}>{years.map((value) => <option value={value} key={value}>{value}</option>)}</Select></>}<Select aria-label="Состав сотрудников" value={memberState} onChange={(event) => setMemberState(event.target.value as typeof memberState)}><option value="active">Активные</option><option value="all">Все</option><option value="former">Бывшие</option></Select></div>

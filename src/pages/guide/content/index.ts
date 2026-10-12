@@ -7,10 +7,11 @@ import { eventArticles } from './events.ts'
 import { teamArticles } from './team.ts'
 import { organizationArticles } from './organization.ts'
 import { accountArticles } from './account.ts'
+import { accessArticles } from './access.ts'
 import type { GuideArticle } from './types.ts'
 export { guideCategories, guideCollections, guideCollectionFor, audienceLabels } from './categories.ts'
 export type { GuideArticle, GuideCategoryId, GuideExampleId } from './types.ts'
-export const guideArticles: GuideArticle[] = [...startArticles, ...scheduleArticles, ...timeArticles, ...requestArticles, ...documentArticles, ...eventArticles, ...teamArticles, ...organizationArticles, ...accountArticles]
+export const guideArticles: GuideArticle[] = [...startArticles, ...scheduleArticles, ...timeArticles, ...requestArticles, ...documentArticles, ...eventArticles, ...teamArticles, ...organizationArticles, ...accessArticles, ...accountArticles]
 export const guideArticleBySlug = new Map(guideArticles.map(item => [item.slug, item]))
 export const featuredSlugs = ['welcome', 'first-day']
 export const popularSlugs = ['transfer-shift', 'submit-request', 'roles', 'excel-report']

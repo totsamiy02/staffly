@@ -1,3 +1,5 @@
+import { locationsFor, hasPermission } from '../organizations/access.ts'
+import type { Permission } from '../../app/access/catalog.ts'
 import ExcelJS from 'exceljs'
 import { prisma } from '../db.ts'
 import { ApiError } from '../api-error.ts'
@@ -10,10 +12,10 @@ import { mediaUrl } from '../storage/image-service.ts'
 const MAX_ROWS = 25000
 const fail = (message: string) => new ApiError(403, 'INSUFFICIENT_PERMISSIONS', message)
 type DB = Prisma.TransactionClient
-export async function reportAccess(userId: string, organizationId: string, db: DB = prisma) {
+export async function reportAccess(userId: string, organizationId: string, db: DB = prisma, permission: Permission = 'reports.preview') {
   const actor = await getMembership(userId, organizationId, db)
-  if (actor.organizationRole === 'MEMBER' || (actor.organizationRole !== 'OWNER' && !actor.managedLocationIds.length)) throw fail('Отчёты доступны владельцу и управляющим точек.')
-  const locations = await db.organizationLocation.findMany({ where: { organizationId, ...(actor.organizationRole === 'OWNER' ? {} : { id: { in: actor.managedLocationIds }, archivedAt: null }) }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] })
+  if (!actor.owner && !locationsFor(actor, permission).length) throw fail('Отчёты доступны владельцу и управляющим точек.')
+  const locations = await db.organizationLocation.findMany({ where: { organizationId, ...(actor.organizationRole === 'OWNER' ? {} : { id: { in: locationsFor(actor, permission) }, archivedAt: null }) }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] })
   return { actor, locations }
 }
 function selectedLocations(access: Awaited<ReturnType<typeof reportAccess>>, ids: string[]) {
@@ -35,7 +37,7 @@ const nameOf = (user: { lastName: string | null; firstName: string | null; middl
 export async function reportOptions(userId: string, organizationId: string) {
   const { actor, locations } = await reportAccess(userId, organizationId)
   const templates = await prisma.reportTemplate.findMany({ where: { organizationId }, orderBy: [{ name: 'asc' }, { id: 'asc' }] })
-  return { locations: locations.map(({ id, name, timezone, archivedAt }) => ({ id, name, timezone, archivedAt })), templates: templates.map(template => ({ id: template.id, name: template.name, config: template.config as ReportConfig, canManage: actor.organizationRole === 'OWNER' || template.createdByMemberId === actor.id })) }
+  return { locations: locations.map(({ id, name, timezone, archivedAt }) => ({ id, name, timezone, archivedAt })), templates: templates.map(template => ({ id: template.id, name: template.name, config: template.config as ReportConfig, canManage: (actor.owner || locationsFor(actor,'reports.templates').length>0) && (actor.owner || template.createdByMemberId===actor.id || locationsFor(actor,'reports.templates.all').length>0) })) }
 }
 export async function reportMembers(userId: string, organizationId: string, input: ReportInput) {
   const access = await reportAccess(userId, organizationId)
@@ -47,7 +49,7 @@ export async function reportMembers(userId: string, organizationId: string, inpu
 }
 export async function saveReportTemplate(userId: string, organizationId: string, id: string | null, input: { name: string; config: ReportConfig }) {
   return prisma.$transaction(async db => {
-    const { actor } = await reportAccess(userId, organizationId, db)
+    const { actor } = await reportAccess(userId, organizationId, db, 'reports.templates')
     if (id) await editableTemplate(db, organizationId, id, actor)
     else if (await db.reportTemplate.count({ where: { organizationId } }) >= 100) throw new ApiError(400, 'REPORT_LIMIT', 'Можно сохранить не более 100 настроек.')
     const data = { name: input.name, config: input.config as unknown as Prisma.InputJsonValue }
@@ -57,18 +59,18 @@ export async function saveReportTemplate(userId: string, organizationId: string,
 async function editableTemplate(db: DB, organizationId: string, id: string, actor: Awaited<ReturnType<typeof getMembership>>) {
   const template = await db.reportTemplate.findFirst({ where: { id, organizationId } })
   if (!template) throw new ApiError(404, 'TEMPLATE_NOT_FOUND', 'Настройка не найдена.')
-  if (actor.organizationRole !== 'OWNER' && template.createdByMemberId !== actor.id) throw fail('Можно изменять и удалять только собственные настройки.')
+  if (!locationsFor(actor, 'reports.templates.all').length && !actor.owner && template.createdByMemberId !== actor.id) throw fail('Можно изменять и удалять только собственные настройки.')
   return template
 }
 export async function deleteReportTemplate(userId: string, organizationId: string, id: string) {
-  await prisma.$transaction(async db => { const { actor } = await reportAccess(userId, organizationId, db); await editableTemplate(db, organizationId, id, actor); await db.reportTemplate.delete({ where: { id } }) })
+  await prisma.$transaction(async db => { const { actor } = await reportAccess(userId, organizationId, db, 'reports.templates'); await editableTemplate(db, organizationId, id, actor); await db.reportTemplate.delete({ where: { id } }) })
 }
 export async function updatePersonnelNumber(userId: string, organizationId: string, memberId: string, personnelNumber: string | null) {
   try {
     await prisma.$transaction(async db => {
-      const { actor } = await reportAccess(userId, organizationId, db)
+      const { actor } = await reportAccess(userId, organizationId, db, 'members.personnel.edit')
       const member = await db.organizationMember.findFirst({ where: { organizationId, id: memberId }, include: { locationMemberships: true, locationTransfers: true } })
-      if (!member || (actor.organizationRole !== 'OWNER' && !member.locationMemberships.some(item => !item.leftAt && actor.managedLocationIds.includes(item.locationId)) && !member.locationTransfers.some(item => item.temporary && item.startAt <= new Date() && item.endAt && item.endAt > new Date() && actor.managedLocationIds.includes(item.toLocationId)))) throw fail('Сотрудник вне управляемой области.')
+      if (!member || (actor.organizationRole !== 'OWNER' && !member.locationMemberships.some(item => !item.leftAt && locationsFor(actor, 'members.personnel.edit').includes(item.locationId)) && !member.locationTransfers.some(item => item.temporary && item.startAt <= new Date() && item.endAt && item.endAt > new Date() && locationsFor(actor, 'members.personnel.edit').includes(item.toLocationId)))) throw fail('Сотрудник вне управляемой области.')
       await db.organizationMember.update({ where: { id: memberId }, data: { personnelNumber } })
     })
   } catch (error) { if (error && typeof error === 'object' && 'code' in error && error.code === 'P2002') throw new ApiError(409, 'PERSONNEL_NUMBER_EXISTS', 'Этот табельный номер уже используется в организации, включая бывших сотрудников.'); throw error }
@@ -77,9 +79,9 @@ type Cell = string | number | Date | null
 type Row = Record<string, Cell>
 export type BuiltReport = { generatedAt: Date; metrics: ReportPreview['metrics']; warnings: ReportPreview['warnings']; rows: Record<ReportSheet, Row[]>; config: ReportConfig }
 // Repeatable read gives all sheets one database snapshot within this operation.
-export async function buildReport(userId: string, organizationId: string, input: ReportInput, now = new Date()): Promise<BuiltReport> {
+export async function buildReport(userId: string, organizationId: string, input: ReportInput, now = new Date(), permission: Permission = 'reports.preview'): Promise<BuiltReport> {
   return prisma.$transaction(async db => {
-    const access = await reportAccess(userId, organizationId, db), locations = selectedLocations(access, input.locationIds)
+    const access = await reportAccess(userId, organizationId, db, permission), locations = selectedLocations(access, input.locationIds)
     const scopeError = reportScopeError(input.config, locations.length)
     if (scopeError) throw new ApiError(400, 'REPORT_LOCATION_REQUIRED', scopeError)
     const organization = await db.organization.findUniqueOrThrow({ where: { id: organizationId } })
@@ -109,7 +111,8 @@ export async function buildReport(userId: string, organizationId: string, input:
     const identity = (id: string) => {
       const member = memberMap.get(id)!, name = nameOf(member.user)
       const sameName = (nameCounts.get(name) ?? 0) > 1
-      return { memberId: id, personnelNumber: member.personnelNumber, name: sameName ? `${name} (${member.personnelNumber ? `таб. ${member.personnelNumber}` : member.user.email})` : name }
+      const number = locations.every(l=>hasPermission(access.actor,'members.personnel.view',l.id)) ? member.personnelNumber : null
+      return { memberId:id,personnelNumber:number,name:sameName ? `${name} (${number ? `таб. ${number}` : id.slice(0,8)})` : name }
     }
     for (const shift of shifts) {
       const scopeKey = `${shift.memberId}:${shift.locationId}`
@@ -136,7 +139,8 @@ export async function buildReport(userId: string, organizationId: string, input:
         const scopeKey = `${absence.memberId}:${location.id}`
         if (!totals.has(scopeKey)) totals.set(scopeKey, { memberId: absence.memberId, locationId: location.id, minutes: 0, shifts: 0, locations: new Set([locationLabel(location.id)]), positions: new Set() })
       }
-      rows.absences.push({ locations: relevant.map(location => locationLabel(location.id)).join('; '), id: absence.id, ...identity(absence.memberId), type: ({ VACATION: 'Отпуск', SICK: 'Больничный', SICK_LEAVE: 'Больничный', DAY_OFF: 'Отгул', ABSENCE: 'Отсутствие' } as Record<string, string>)[absence.type] ?? 'Отсутствие', start: new Date(start), end: new Date(end), overlapStart: new Date(overlapStart), overlapEnd: new Date(overlapEnd), days: (Date.parse(overlapEnd) - Date.parse(overlapStart)) / 86400000 + 1, source: absence.sourceRequestId ? 'Одобренная заявка' : 'Зарегистрированное отсутствие', comment: absence.comment })
+      const details = relevant.every(l=>hasPermission(access.actor,'absences.details',l.id))
+      rows.absences.push({ locations: relevant.map(location => locationLabel(location.id)).join('; '), id: absence.id, ...identity(absence.memberId), type: details ? ({ VACATION: 'Отпуск', SICK: 'Больничный', SICK_LEAVE: 'Больничный', DAY_OFF: 'Отгул', ABSENCE: 'Отсутствие' } as Record<string, string>)[absence.type] ?? 'Отсутствие' : 'Отсутствие', start: new Date(start), end: new Date(end), overlapStart: new Date(overlapStart), overlapEnd: new Date(overlapEnd), days: (Date.parse(overlapEnd) - Date.parse(overlapStart)) / 86400000 + 1, source: absence.sourceRequestId ? 'Одобренная заявка' : 'Зарегистрированное отсутствие', comment: details ? absence.comment : null })
     }
     const warnings: BuiltReport['warnings'] = { missingNumber: [], incompleteName: [] }
     for (const aggregate of totals.values()) {

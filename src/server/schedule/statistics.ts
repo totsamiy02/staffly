@@ -1,9 +1,10 @@
+import { hasPermission, requirePermission } from '../organizations/access.ts'
 import { locationWhere, scopedLocationId } from '../organizations/location-context.ts'
 import { mediaUrl } from '../storage/image-service.ts'
 import { Prisma } from '../../generated/prisma/client.ts'
 import { prisma } from '../db.ts'
 import { ApiError } from '../api-error.ts'
-import { getMembership, requireOrganizationRole } from '../organizations/permissions.ts'
+import { getMembership } from '../organizations/permissions.ts'
 import { countedMinutes } from './service.ts'
 import { startOfZonedDate } from './timezone.ts'
 
@@ -91,7 +92,7 @@ function present(row: Row) {
 
 export async function organizationStatistics(userId: string, organizationId: string, options: StatisticsOptions) {
   const actor = await getMembership(userId, organizationId)
-  requireOrganizationRole(actor.role, ['OWNER', 'ADMIN'])
+  requirePermission(actor, 'statistics.view')
   const rows = (await aggregate(organizationId, actor.organization.timezone, options)).map(present)
   rows.sort((left, right) => {
     const a = left[options.sort]
@@ -117,7 +118,8 @@ async function memberRows(userId: string, organizationId: string, memberId: stri
   const actor = await getMembership(userId, organizationId)
   const target = await prisma.organizationMember.findFirst({ where: { id: memberId, organizationId }, include: { user: true } })
   if (!target || target.user.deletedAt) throw new ApiError(404, 'MEMBER_NOT_FOUND', 'Сотрудник не найден.')
-  if (actor.role === 'MEMBER' && actor.id !== target.id) throw new ApiError(403, 'INSUFFICIENT_PERMISSIONS', 'Можно просматривать только своё рабочее время.')
+  if (!hasPermission(actor, 'statistics.view') && actor.id !== target.id) throw new ApiError(403, 'INSUFFICIENT_PERMISSIONS', 'Можно просматривать только своё рабочее время.')
+  requirePermission(actor, actor.id === target.id ? 'statistics.own' : 'statistics.view')
   const period = (await aggregate(organizationId, actor.organization.timezone, { ...options, memberState: 'all' }, memberId))[0]
   const allTime = (await aggregate(organizationId, actor.organization.timezone, { memberState: 'all' }, memberId))[0]
   const from = options.from ? startOfZonedDate(options.from, actor.organization.timezone) : undefined

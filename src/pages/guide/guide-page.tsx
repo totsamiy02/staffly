@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, NavLink, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import logo from '../../assets/images/logo/staffly-logo.svg'
+import HeaderFrame from '../../component/header/header-frame.tsx'
 import { guideArticles, guideArticleBySlug, guideCategories, guideCollections, guideCollectionFor, audienceLabels, guideHref, readingMinutes, searchGuide, guidePlural } from './content/index.ts'
 import type { GuideArticle, GuideExampleId } from './content/index.ts'
 import GuideExample from './guide-examples.tsx'
@@ -138,7 +138,7 @@ export default function GuidePage() {
     return () => cancelAnimationFrame(frame)
   }, [location.pathname, location.hash])
   return <div className="guide-page"><a className="guide-skip" href="#guide-content">К содержимому</a>
-    <header className="app-topbar"><div className="app-topbar__inner"><Link className="app-topbar__logo" to="/" aria-label="На главную Staffly"><img src={logo} alt="Staffly" /></Link><Link className="app-secondary" to="/app">К работе<GuideIcon name="arrow" /></Link></div></header>
+    <HeaderFrame><Link className="app-secondary" to="/app">К работе<GuideIcon name="arrow" /></Link></HeaderFrame>
     {!home && <nav className="guide-topic-nav" aria-label="Темы справочника">{guideCollections.map(item => <NavLink key={item.id} className={activeCollection?.id === item.id ? 'is-current' : ''} to={`/guide/category/${item.id}`}>{item.title}</NavLink>)}</nav>}
     <main ref={main} tabIndex={-1} id="guide-content" className={`guide-main${article ? ' guide-main--article' : ''}`} key={location.pathname}>{home || categoryId ? <GuideCatalog categoryId={categoryId} /> : article ? <GuideArticleView key={article.slug} article={article} /> : <GuideNotFound />}</main>
     <footer className="guide-footer"><span>Staffly · Справочник для всех команд</span><span>Примеры вымышлены</span></footer>

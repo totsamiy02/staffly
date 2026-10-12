@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import logo from '../../assets/images/logo/staffly-logo.svg'
+import { useNavigate } from 'react-router-dom'
+import HeaderFrame from '../../component/header/header-frame.tsx'
 import { useAuth } from '../../app/auth/auth-context.tsx'
 import InvitationCenter from './topbar/invitation-center.tsx'
 import NotificationAlerts from './topbar/notification-alerts.tsx'
@@ -36,11 +36,10 @@ export default function AppTopbar({ organization, notificationOrganizationId }: 
     try { await logout(); navigate('/', { replace: true }) } finally { setLogoutBusy(false) }
   }
 
-  return <header className={`app-topbar${organization ? ' app-topbar--workspace' : ''}`}><div className="app-topbar__inner">
-    <Link to="/" className="app-topbar__logo" aria-label="На главную Staffly"><img src={logo} alt="Staffly" /></Link>
+  return <HeaderFrame variant={organization ? 'workspace' : 'app'} afterContent={<NotificationAlerts key={organizationId ?? 'global'} organizationId={organizationId} suppressed={openPanel === 'notifications' || historyOpen} />}>
     {user && <div className="app-topbar__controls" ref={controlsRef}>
       <InvitationCenter key={organizationId ?? 'global'} organizationId={organizationId} onHistoryChange={setHistoryOpen} open={openPanel === 'notifications'} onToggle={() => setOpenPanel((current) => current === 'notifications' ? null : 'notifications')} onClose={() => setOpenPanel(null)} />
       <ProfileMenu user={user} organization={organization} open={openPanel === 'profile'} busy={logoutBusy} onToggle={() => setOpenPanel((current) => current === 'profile' ? null : 'profile')} onClose={() => setOpenPanel(null)} onLogout={() => void signOut()} />
     </div>}
-  </div><NotificationAlerts key={organizationId ?? 'global'} organizationId={organizationId} suppressed={openPanel === 'notifications' || historyOpen} /></header>
+  </HeaderFrame>
 }

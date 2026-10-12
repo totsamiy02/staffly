@@ -1,3 +1,4 @@
+import { hasPermission, requirePermission, permissionRecipients } from '../organizations/access.ts'
 import { z } from 'zod'
 import type { Prisma, ShiftOffer, WorkShift } from '../../generated/prisma/client.ts'
 import { prisma } from '../db.ts'
@@ -110,14 +111,14 @@ async function reconcile(tx: Prisma.TransactionClient, organizationId: string, l
   }
 }
 async function managers(tx: Prisma.TransactionClient, organizationId: string, locationId: string) {
-  return tx.organizationMember.findMany({ where: { organizationId, leftAt: null, user: { deletedAt: null }, OR: [{ role: 'OWNER' }, { locationMemberships: { some: { locationId, role: 'ADMIN', leftAt: null } } }] } })
+  return permissionRecipients(tx, organizationId, 'offers.approve', locationId)
 }
-function canManage(actor: Awaited<ReturnType<typeof getMembership>>, locationId: string) { return actor.organizationRole === 'OWNER' || actor.managedLocationIds.includes(locationId) }
+function canManage(actor: Awaited<ReturnType<typeof getMembership>>, locationId: string) { return hasPermission(actor, 'offers.approve', locationId) }
 function publicOffer(offer: Prisma.ShiftOfferGetPayload<{ include: typeof include }>, actor: Awaited<ReturnType<typeof getMembership>>) {
   const person = (member: typeof offer.initiator | null) => member ? { id: member.id, name: name(member.user), avatarUrl: mediaUrl(member.user.avatarFileId) } : null
   const current = isActive(offer)
   const mine = offer.initiatorMemberId === actor.id
-  return { id: offer.id, kind: offer.kind, mode: offer.mode, status: offer.status, comment: offer.comment, resolutionReason: offer.resolutionReason, createdAt: offer.createdAt, acceptedAt: offer.acceptedAt, reviewedAt: offer.reviewedAt, closedAt: offer.closedAt, location: { id: offer.location.id, name: offer.location.name }, source: normalizeSnapshot(offer.sourceSnapshot), target: normalizeSnapshot(offer.targetSnapshot), initiator: person(offer.initiator)!, recipient: person(offer.recipient), acceptedBy: person(offer.acceptedBy), reviewedBy: person(offer.reviewedBy), canCancel: current && mine, canAccept: offer.status === 'PENDING' && !mine && (!offer.recipientMemberId || offer.recipientMemberId === actor.id), canReject: offer.status === 'PENDING' && offer.recipientMemberId === actor.id, canApprove: offer.status === 'AWAITING_APPROVAL' && canManage(actor, offer.locationId) && actor.id !== offer.initiatorMemberId && actor.id !== offer.acceptedByMemberId }
+  return { id: offer.id, kind: offer.kind, mode: offer.mode, status: offer.status, comment: offer.comment, resolutionReason: offer.resolutionReason, createdAt: offer.createdAt, acceptedAt: offer.acceptedAt, reviewedAt: offer.reviewedAt, closedAt: offer.closedAt, location: { id: offer.location.id, name: offer.location.name }, source: normalizeSnapshot(offer.sourceSnapshot), target: normalizeSnapshot(offer.targetSnapshot), initiator: person(offer.initiator)!, recipient: person(offer.recipient), acceptedBy: person(offer.acceptedBy), reviewedBy: person(offer.reviewedBy), canCancel: current && mine, canAccept: hasPermission(actor, 'offers.accept', offer.locationId) && offer.status === 'PENDING' && !mine && (!offer.recipientMemberId || offer.recipientMemberId === actor.id), canReject: offer.status === 'PENDING' && offer.recipientMemberId === actor.id, canApprove: offer.status === 'AWAITING_APPROVAL' && canManage(actor, offer.locationId) && actor.id !== offer.initiatorMemberId && actor.id !== offer.acceptedByMemberId }
 }
 async function visible(tx: Prisma.TransactionClient, actor: Awaited<ReturnType<typeof getMembership>>, offer: ShiftOffer) {
   if (actor.locationId !== offer.locationId) return false
@@ -138,7 +139,7 @@ export async function getOfferModes(userId: string, organizationId: string) {
 export async function saveOfferModes(userId: string, organizationId: string, input: z.infer<typeof offerModesBody>) {
   return transaction(organizationId, async tx => {
     const actor = await getMembership(userId, organizationId, tx)
-    if (actor.organizationRole !== 'OWNER') throw new ApiError(403, 'INSUFFICIENT_PERMISSIONS', 'Настройки передачи и обмена меняет владелец.')
+    requirePermission(actor, 'offers.settings', null)
     await tx.organization.update({ where: { id: organizationId }, data: { shiftTransferMode: input.transferMode, shiftSwapMode: input.swapMode } })
     const offers = await tx.shiftOffer.findMany({ where: { organizationId, status: { in: [...active] } } })
     for (const offer of offers) if (offer.mode !== (offer.kind === 'TRANSFER' ? input.transferMode : input.swapMode)) await closeOffer(tx, offer, 'INVALID', 'Владелец изменил режим передачи или обмена. Создайте новое предложение.')
@@ -173,6 +174,7 @@ export async function offerCandidates(userId: string, organizationId: string, so
 export async function createOffer(userId: string, organizationId: string, input: z.infer<typeof offerBody>) {
   return transaction(organizationId, async tx => {
     const actor = await getMembership(userId, organizationId, tx)
+    requirePermission(actor, input.kind === 'TRANSFER' ? 'offers.transfer' : 'offers.swap')
     const selectedMode = mode(actor.organization, input.kind)
     if (selectedMode === 'DISABLED') throw new ApiError(403, 'OFFERS_DISABLED', 'Этот способ передачи смен выключен владельцем.')
     await reconcile(tx, organizationId, actor.locationId)
@@ -265,6 +267,12 @@ export async function actOnOffer(userId: string, organizationId: string, offerId
       if (offer.status === 'COMPLETED' && (action === 'accept' && offer.acceptedByMemberId === actor.id || action === 'approve' && offer.reviewedByMemberId === actor.id) || offer.status === 'CANCELLED' && action === 'cancel' || offer.status === 'REJECTED' && ['reject', 'decline'].includes(action)) return { id: offer.id }
       fail('OFFER_CLOSED', offer.resolutionReason ?? 'Предложение уже закрыто. Обновите список.')
     }
+    if (['accept','approve'].includes(action)) {
+      const initiator = await tx.organizationMember.findUniqueOrThrow({where:{id:offer.initiatorMemberId}})
+      const currentInitiator = await getMembership(initiator.userId,organizationId,tx)
+      requirePermission(currentInitiator,offer.kind==='SWAP' ? 'offers.swap' : 'offers.transfer',offer.locationId)
+      if (offer.acceptedByMemberId) {const accepter=await tx.organizationMember.findUniqueOrThrow({where:{id:offer.acceptedByMemberId}});requirePermission(await getMembership(accepter.userId,organizationId,tx),'offers.accept',offer.locationId)}
+    }
     let source: WorkShift, target: WorkShift | null
     try { ({ source, target } = await validateOffer(tx, offer)) }
     catch (error) {
@@ -278,6 +286,8 @@ export async function actOnOffer(userId: string, organizationId: string, offerId
     } else if (action === 'accept') {
       if (offer.status === 'AWAITING_APPROVAL' && offer.acceptedByMemberId === actor.id) return { id: offer.id }
       if (offer.status !== 'PENDING') fail('OFFER_TAKEN', 'Предложение уже принял другой сотрудник.')
+      if (!await tx.locationMember.findFirst({where:{memberId:actor.id,locationId:offer.locationId,leftAt:null}}) && !actor.owner) throw new ApiError(409,'MEMBER_NOT_IN_LOCATION','Сотрудник больше не состоит в точке.')
+      requirePermission(actor, 'offers.accept', offer.locationId)
       await eligible(tx, source, actor.id, [source.id, ...(target ? [target.id] : [])])
       if (offer.mode === 'APPROVAL') {
         const reviewers = (await managers(tx, organizationId, offer.locationId)).filter(m => m.id !== offer.initiatorMemberId && m.id !== actor.id)

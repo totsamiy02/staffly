@@ -2,11 +2,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '../auth/auth-context.tsx'
 import { liveQueryOptions } from '../live-query.ts'
 import { eventPath, type EventFormInput, type EventMember, type EventPage, type StaffEvent } from './types.ts'
-export function useEvents(organizationId: string, options: Record<string, string | number | undefined> = {}) {
+export function useEvents(organizationId: string, options: Record<string, string | number | undefined> = {}, enabled = true) {
   const { apiRequest, locationId } = useAuth()
   const params = new URLSearchParams()
   Object.entries(options).forEach(([key, value]) => { if (value !== undefined && value !== '') params.set(key, String(value)) })
-  return useQuery({ ...liveQueryOptions, queryKey: ['events', organizationId, options, locationId], queryFn: () => apiRequest<EventPage>(`${eventPath(organizationId)}?${params}`) })
+  return useQuery({ ...liveQueryOptions, enabled, queryKey: ['events', organizationId, options, locationId], queryFn: () => apiRequest<EventPage>(`${eventPath(organizationId)}?${params}`) })
 }
 export function useEvent(organizationId: string, eventId: string | null) {
   const { apiRequest, locationId } = useAuth()

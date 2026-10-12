@@ -1,5 +1,5 @@
 import './header.scss'
-import logo from '../../assets/images/logo/staffly-logo.svg'
+import HeaderFrame from './header-frame.tsx'
 import { Link } from 'react-router-dom'
 import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../../app/auth/auth-context.tsx'
@@ -23,12 +23,7 @@ function Header() {
   }, [])
 
   return (
-    <header className="header" id="top">
-      <div className="container header__container">
-        <a className="header__logo" href="/" aria-label="Staffly — главная">
-          <img src={logo} alt="Staffly" />
-        </a>
-
+    <HeaderFrame variant="public" id="top">
         {loading ? null : user ? (
           <div className="header__profile" ref={profileRef}>
             <button className="header__profile-trigger" type="button" aria-expanded={profileOpen} aria-label="Открыть меню профиля" onClick={() => setProfileOpen((value) => !value)}>
@@ -38,19 +33,17 @@ function Header() {
             </button>
             {profileOpen && <div className="header__profile-menu">
               <div><Avatar url={user.avatarUrl} name={user.displayName} className="header__profile-menu-avatar" eager /><p><strong>{user.displayName}</strong><small>{user.email}</small></p></div>
-              <nav><Link to="/app" onClick={() => setProfileOpen(false)}>Мои организации</Link><Link to="/guide" onClick={() => setProfileOpen(false)}>Справочник</Link><Link to="/app/settings" onClick={() => setProfileOpen(false)}>Настройки профиля</Link></nav>
+              <nav><Link to="/app" onClick={() => setProfileOpen(false)}>Мои организации</Link><Link to="/app/settings" onClick={() => setProfileOpen(false)}>Настройки профиля</Link></nav>
               <button type="button" onClick={() => { setProfileOpen(false); void logout() }}>Выйти из аккаунта</button>
             </div>}
           </div>
         ) : (
           <div className="header__buttons">
-            <Link className="header__guide-link" to="/guide">Справочник</Link>
             <Link className="button button--white" to="/auth?mode=login">Вход</Link>
             <Link className="button button--black" to="/auth?mode=register">Регистрация</Link>
           </div>
         )}
-      </div>
-    </header>
+    </HeaderFrame>
   )
 }
 

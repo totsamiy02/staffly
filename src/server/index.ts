@@ -1,9 +1,11 @@
 import express from 'express'
+import { ZodError } from 'zod'
 import cookieParser from 'cookie-parser'
 import helmet from 'helmet'
 import { prisma } from './db.ts'
 import authRouter, { requireAuth } from './auth.ts'
 import { selectLocation } from './organizations/location-context.ts'
+import accessRouter from './organizations/access-routes.ts'
 import organizationRouter from './organizations/routes.ts'
 import profileRouter from './profile/routes.ts'
 import scheduleRouter from './schedule/routes.ts'
@@ -61,6 +63,7 @@ if (process.env.NODE_ENV !== 'production') app.get('/api/database-status', async
 })
 
 app.use('/api/organizations/:organizationId', requireAuth, selectLocation)
+app.use('/api', (_q,s,next)=>{s.set('Cache-Control','no-store');next()}, accessRouter)
 app.use('/api', storageRouter)
 app.use('/api/auth', (_request, response, next) => { response.set('Cache-Control', 'no-store'); next() }, authRouter)
 app.use('/api', (_request, response, next) => { response.set('Cache-Control', 'no-store'); next() }, profileRouter)
@@ -79,6 +82,7 @@ app.use((error: unknown, request: express.Request, response: express.Response, _
     response.status(413).json({ code: attachment ? 'ATTACHMENT_TOO_LARGE' : 'IMAGE_TOO_LARGE', message: attachment ? 'Файл должен весить не больше 10 МБ.' : 'Изображение должно весить не больше 8 МБ.' })
     return
   }
+  if (error instanceof ZodError) { response.status(400).json({code:'VALIDATION_ERROR',message:error.issues[0]?.message ?? 'Проверьте данные.'}); return }
   if (error instanceof ApiError) {
     response.status(error.status).json({ code: error.code, message: error.message, ...(error.details ? { errors: error.details } : {}) })
     return

@@ -7,7 +7,7 @@ export const guideCategories: { id: GuideCategoryId; title: string; description:
   { id: 'documents', title: 'Документы', description: 'Библиотека, папки, редакции и ознакомление', icon: 'file' },
   { id: 'events', title: 'События', description: 'Встречи, получатели и календарь команды', icon: 'event' },
   { id: 'team', title: 'Команда и приглашения', description: 'Сотрудники, должности и права доступа', icon: 'users' },
-  { id: 'organization', title: 'Организация и настройки', description: 'Точки, правила расписания и владение', icon: 'settings' },
+  { id: 'organization', title: 'Организация и настройки', description: 'Точки, собственные роли, разрешения и владение', icon: 'settings' },
   { id: 'account', title: 'Профиль и уведомления', description: 'Личные данные, безопасность и сообщения', icon: 'bell' },
 ]
 export const audienceLabels = { everyone: 'Всем пользователям', manager: 'Руководителю', owner: 'Владельцу' } as const
@@ -18,6 +18,6 @@ export const guideCollections: { id: string; title: string; description: string;
   { id: 'shifts', title: 'Смены и рабочее время', description: 'Расписание, передача смен, учёт часов и отчёты.', icon: 'calendar', categories: ['schedule', 'time'], shortcuts: ['calendar', 'transfer-shift', 'work-time'] },
   { id: 'requests', title: 'Заявки и отсутствия', description: 'Отгулы, отпуск, болезнь и согласование обращений.', icon: 'message', categories: ['requests'], shortcuts: ['submit-request', 'review-requests', 'absences'] },
   { id: 'knowledge', title: 'Документы и события', description: 'Рабочие материалы, ознакомления и встречи команды.', icon: 'file', categories: ['documents', 'events'], shortcuts: ['document-library', 'acknowledgements', 'events-overview'] },
-  { id: 'management', title: 'Команда и настройки', description: 'Сотрудники, точки, роли и правила работы организации.', icon: 'users', categories: ['team', 'organization'], shortcuts: ['invite-employees', 'roles', 'locations'] },
+  { id: 'management', title: 'Команда и настройки', description: 'Сотрудники, точки, свои роли и разграничение доступа.', icon: 'users', categories: ['team', 'organization'], shortcuts: ['invite-employees', 'custom-roles', 'member-access'] },
 ]
 export const guideCollectionFor = (category: GuideCategoryId) => guideCollections.find(item => item.categories.includes(category))!

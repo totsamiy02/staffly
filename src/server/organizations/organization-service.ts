@@ -1,3 +1,4 @@
+import { hasPermission, requirePermission, ensureAccessRoles, locationsFor } from './access.ts'
 import { locationMemberWhere, scopedLocationId } from './location-context.ts'
 import { listNotificationHistory } from './notification-service.ts'
 import { onlineSessions } from '../profile/presence.ts'
@@ -15,6 +16,7 @@ export type UpdateOrganizationInput = Pick<CreateOrganizationInput, 'name' | 'de
 export async function createOrganization(userId: string, input: CreateOrganizationInput) {
   return prisma.$transaction(async (tx) => {
     const organization = await tx.organization.create({ data: { name: input.name, description: input.description, timezone: input.timezone, createdByUserId: userId } })
+    await ensureAccessRoles(tx, organization.id)
     const owner = await tx.organizationMember.create({ data: { organizationId: organization.id, userId, role: 'OWNER' } })
     const locationInputs = [input.firstLocation ?? { name: 'Основная точка', city: '', address: '', timezone: input.timezone }, ...(input.locations ?? [])]
     const locations = []
@@ -61,6 +63,7 @@ export async function getOrganization(userId: string, organizationId: string) {
     description: membership.organization.description,
     timezone: membership.organization.timezone,
     role: membership.role,
+    owner: membership.owner, permissions: membership.permissions, organizationPermissions: membership.organizationPermissions, permissionLocations: membership.permissionLocations, roleName: membership.roleName,
     organizationRole: membership.organizationRole,
     viewerMemberId: membership.id,
     assignedToLocation: !!membership.assignedLocationId,
@@ -78,31 +81,44 @@ export async function getOrganization(userId: string, organizationId: string) {
 
 export async function updateOrganization(userId: string, organizationId: string, input: UpdateOrganizationInput) {
   const membership = await getMembership(userId, organizationId)
-  if (membership.organizationRole !== 'OWNER') throw new ApiError(403, 'INSUFFICIENT_PERMISSIONS', 'Недостаточно прав для изменения организации.')
+  requirePermission(membership, 'organization.edit', null)
   return prisma.organization.update({ where: { id: organizationId }, data: input })
 }
 
+export function memberFieldVisible(viewer: Awaited<ReturnType<typeof getMembership>>, member: { role: string; accessConfigured: boolean; accessRoleId: string | null; accessAssignments: Array<{locationId:string}>; locationMemberships:Array<{locationId:string}> }, key: 'members.contacts' | 'members.personnel.view') {
+  if (viewer.owner) return true
+  if (!scopedLocationId(viewer.organizationId) && !viewer.accessConfigured) return hasPermission(viewer,key)
+  if (member.role === 'OWNER' || member.accessRoleId) return locationsFor(viewer,key).length > 0
+  return member.locationMemberships.some(l=>hasPermission(viewer,key,l.locationId)) || member.accessConfigured && member.accessAssignments.some(a=>hasPermission(viewer,key,a.locationId))
+}
+
 export async function listMembers(userId: string, organizationId: string) {
-  await getMembership(userId, organizationId)
+  const viewer = await getMembership(userId, organizationId)
+  requirePermission(viewer, 'members.view')
   const members = await prisma.organizationMember.findMany({
     where: { organizationId, ...locationMemberWhere(organizationId), leftAt: null, organization: { deletedAt: null }, user: { deletedAt: null } },
-    include: { locationMemberships: { where: { leftAt: null }, select: { locationId: true, role: true } }, teamMemberships: { include: { team: { select: { id: true, name: true, locationId: true } } } }, positions: { where: { position: { isActive: true } }, include: { position: { select: { id: true, name: true } } } }, user: { select: { id: true, email: true, firstName: true, lastName: true, middleName: true, phone: true, bio: true, lastSeenAt: true, avatarFileId: true, sessions: { where: onlineSessions(), select: { id: true }, take: 1 } } } },
+    include: { accessRole: true, accessAssignments: { include: { role: true } }, locationMemberships: { where: { leftAt: null }, select: { locationId: true, role: true } }, teamMemberships: { include: { team: { select: { id: true, name: true, locationId: true } } } }, positions: { where: { position: { isActive: true } }, include: { position: { select: { id: true, name: true } } } }, user: { select: { id: true, email: true, firstName: true, lastName: true, middleName: true, phone: true, bio: true, lastSeenAt: true, avatarFileId: true, sessions: { where: onlineSessions(), select: { id: true }, take: 1 } } } },
     orderBy: [{ role: 'asc' }, { joinedAt: 'asc' }],
   })
   return members.map((member) => {
-    const displayName = [member.user.lastName, member.user.firstName, member.user.middleName].filter(Boolean).join(' ') || member.user.email.split('@')[0]
-    return { positions: member.positions.map(item => item.position), id: member.id, personnelNumber: member.personnelNumber, userId: member.userId, email: member.user.email, displayName, firstName: member.user.firstName, lastName: member.user.lastName, middleName: member.user.middleName, phone: member.user.phone, bio: member.user.bio, avatarUrl: mediaUrl(member.user.avatarFileId), lastSeenAt: member.user.lastSeenAt, online: member.user.sessions.length > 0, role: member.role === 'OWNER' ? 'OWNER' : scopedLocationId(organizationId) ? member.locationMemberships.find(m => m.locationId === scopedLocationId(organizationId))?.role ?? 'MEMBER' : member.role, locations: member.locationMemberships, teams: member.teamMemberships.map(m => m.team), joinedAt: member.joinedAt }
+    const displayName = [member.user.lastName, member.user.firstName, member.user.middleName].filter(Boolean).join(' ') || (memberFieldVisible(viewer,member,'members.contacts') ? member.user.email.split('@')[0] : 'Участник организации')
+    return { positions: member.positions.map(item => item.position), id: member.id, accessRoleName: member.accessRole?.name ?? null, accessAssignments: (member.accessConfigured ? member.accessAssignments : []).map(a => ({ locationId: a.locationId, roleId: a.roleId, roleName: a.role.name })), personnelNumber: memberFieldVisible(viewer, member, 'members.personnel.view') ? member.personnelNumber : null, userId: member.userId, email: memberFieldVisible(viewer, member, 'members.contacts') ? member.user.email : '', displayName, firstName: member.user.firstName, lastName: member.user.lastName, middleName: member.user.middleName, phone: memberFieldVisible(viewer, member, 'members.contacts') ? member.user.phone : null, bio: member.user.bio, avatarUrl: mediaUrl(member.user.avatarFileId), lastSeenAt: member.user.lastSeenAt, online: member.user.sessions.length > 0, role: member.role === 'OWNER' ? 'OWNER' : scopedLocationId(organizationId) ? member.locationMemberships.find(m => m.locationId === scopedLocationId(organizationId))?.role ?? 'MEMBER' : member.role, locations: member.locationMemberships, teams: member.teamMemberships.map(m => m.team), joinedAt: member.joinedAt }
   })
 }
 
-export async function listMembersPage(userId: string, organizationId: string, options: { directory?: string; pointId?: string; page?: number; pageSize?: number; role?: OrganizationRole; search?: string; positionId?: string }) {
-  await getMembership(userId, organizationId)
+export async function listMembersPage(userId: string, organizationId: string, options: { directory?: string; pointId?: string; page?: number; pageSize?: number; role?: OrganizationRole; accessRoleId?:string; search?: string; positionId?: string }) {
+  const viewer = await getMembership(userId, organizationId)
+  requirePermission(viewer, 'members.view')
   const page = options.page ?? 1
   const pageSize = options.pageSize ?? 20
+  const readable = locationsFor(viewer,'members.view')
+  if(options.pointId && !viewer.owner && !readable.includes(options.pointId)) requirePermission(viewer,'members.view',options.pointId)
+  const accessRole=options.accessRoleId ? (await ensureAccessRoles(prisma,organizationId)).find(r=>r.id===options.accessRoleId) : undefined
   const terms = options.search?.trim().split(/\s+/).filter(Boolean) ?? []
   const where: Prisma.OrganizationMemberWhereInput = {
     organizationId,
-    ...(options.directory === 'true' ? { locationMemberships: { some: { leftAt: null, location: { archivedAt: null }, ...(options.pointId ? { locationId: options.pointId } : {}) } } } : locationMemberWhere(organizationId)),
+    ...(options.directory === 'true' ? viewer.owner && !options.pointId ? {} : {OR:[{locationMemberships:{some:{leftAt:null,location:{archivedAt:null},locationId:options.pointId ?? {in:readable}}}},{accessAssignments:{some:{locationId:options.pointId ?? {in:readable}}}},{accessRoleId:{not:null}}]} : locationMemberWhere(organizationId)),
+    ...(options.accessRoleId ? {AND:[{OR:[{accessRoleId:options.accessRoleId},{accessAssignments:{some:{roleId:options.accessRoleId}}},...(accessRole?.systemCode==='OWNER' ? [{role:'OWNER' as const}] : accessRole?.systemCode ? [{accessConfigured:false,locationMemberships:{some:{leftAt:null,role:accessRole.systemCode as 'ADMIN'|'MEMBER'}}}] : [])]}]} : {}),
     leftAt: null,
     organization: { deletedAt: null },
     user: { deletedAt: null },
@@ -119,7 +135,7 @@ export async function listMembersPage(userId: string, organizationId: string, op
     prisma.organizationMember.count({ where }),
     prisma.organizationMember.findMany({
       where,
-      include: { locationMemberships: { where: { leftAt: null }, select: { locationId: true, role: true } }, teamMemberships: { include: { team: { select: { id: true, name: true, locationId: true } } } }, positions: { where: { position: { isActive: true } }, include: { position: { select: { id: true, name: true } } } }, user: { select: { id: true, email: true, firstName: true, lastName: true, middleName: true, phone: true, bio: true, lastSeenAt: true, avatarFileId: true, sessions: { where: onlineSessions(), select: { id: true }, take: 1 } } } },
+      include: { accessRole: true, accessAssignments: { include: { role: true } }, locationMemberships: { where: { leftAt: null }, select: { locationId: true, role: true } }, teamMemberships: { include: { team: { select: { id: true, name: true, locationId: true } } } }, positions: { where: { position: { isActive: true } }, include: { position: { select: { id: true, name: true } } } }, user: { select: { id: true, email: true, firstName: true, lastName: true, middleName: true, phone: true, bio: true, lastSeenAt: true, avatarFileId: true, sessions: { where: onlineSessions(), select: { id: true }, take: 1 } } } },
       orderBy: [{ role: 'asc' }, { user: { lastName: 'asc' } }, { user: { firstName: 'asc' } }, { user: { email: 'asc' } }],
       skip: (page - 1) * pageSize,
       take: pageSize,
@@ -127,8 +143,8 @@ export async function listMembersPage(userId: string, organizationId: string, op
   ])
   return {
     members: members.map((member) => {
-      const displayName = [member.user.lastName, member.user.firstName, member.user.middleName].filter(Boolean).join(' ') || member.user.email.split('@')[0]
-      return { positions: member.positions.map(item => item.position), id: member.id, personnelNumber: member.personnelNumber, userId: member.userId, email: member.user.email, displayName, firstName: member.user.firstName, lastName: member.user.lastName, middleName: member.user.middleName, phone: member.user.phone, bio: member.user.bio, avatarUrl: mediaUrl(member.user.avatarFileId), lastSeenAt: member.user.lastSeenAt, online: member.user.sessions.length > 0, role: member.role, locations: member.locationMemberships, teams: member.teamMemberships.map(m => m.team), joinedAt: member.joinedAt }
+      const displayName = [member.user.lastName, member.user.firstName, member.user.middleName].filter(Boolean).join(' ') || (memberFieldVisible(viewer,member,'members.contacts') ? member.user.email.split('@')[0] : 'Участник организации')
+      return { positions: member.positions.map(item => item.position), id: member.id, accessRoleName: member.accessRole?.name ?? null, accessAssignments: (member.accessConfigured ? member.accessAssignments : []).map(a => ({ locationId: a.locationId, roleId: a.roleId, roleName: a.role.name })), personnelNumber: memberFieldVisible(viewer, member, 'members.personnel.view') ? member.personnelNumber : null, userId: member.userId, email: memberFieldVisible(viewer, member, 'members.contacts') ? member.user.email : '', displayName, firstName: member.user.firstName, lastName: member.user.lastName, middleName: member.user.middleName, phone: memberFieldVisible(viewer, member, 'members.contacts') ? member.user.phone : null, bio: member.user.bio, avatarUrl: mediaUrl(member.user.avatarFileId), lastSeenAt: member.user.lastSeenAt, online: member.user.sessions.length > 0, role: member.role, locations: member.locationMemberships, teams: member.teamMemberships.map(m => m.team), joinedAt: member.joinedAt }
     }),
     pagination: { page, pageSize, total, pages: Math.max(1, Math.ceil(total / pageSize)) },
   }
@@ -150,7 +166,9 @@ export async function changeMemberRole(actorUserId: string, organizationId: stri
     if (!currentTarget) throw new ApiError(404, 'MEMBER_NOT_FOUND', 'Участник не найден.')
     assertCanChangeRole(currentActor.role, currentTarget.role)
     await tx.locationMember.updateMany({ where: { organizationId, memberId: target.id, leftAt: null }, data: { role: nextRole } })
-    const updated = await tx.organizationMember.update({ where: { id: target.id }, data: { role: nextRole } })
+    const roles = await ensureAccessRoles(tx,organizationId), assignedRole = roles.find(r=>r.systemCode===nextRole)!
+    await tx.accessAssignment.updateMany({where:{organizationId,memberId:target.id},data:{roleId:assignedRole.id}})
+    const updated = await tx.organizationMember.update({ where: { id: target.id }, data: { role: nextRole,accessRoleId:null,accessConfigured:false } })
     if (nextRole === 'MEMBER') await tx.documentAcknowledgement.updateMany({ where: { memberId: target.id, acknowledgedAt: null, cancelledAt: null, document: { organizationId, OR: [{ visibility: 'ADMINS' }, { visibility: 'PRIVATE_MEMBER', targetMemberId: { not: target.id } }] } }, data: { cancelledAt: new Date() } })
     await tx.accountNotification.create({ data: { userId: target.userId, organizationId, type: 'ROLE_CHANGED', title: 'Роль изменена', message: `В организации «${actor.organization.name}» вам назначена роль «${roleName}».` } })
     return updated
@@ -176,7 +194,9 @@ export async function removeMember(actorUserId: string, organizationId: string, 
   const actor = await getMembership(actorUserId, organizationId)
   const target = await prisma.organizationMember.findFirst({ where: { id: memberId, organizationId, leftAt: null } })
   if (!target) throw new ApiError(404, 'MEMBER_NOT_FOUND', 'Участник не найден.')
-  assertCanRemoveMember(actor.role, target.role)
+  if (target.role==='OWNER') throw new ApiError(403,'INSUFFICIENT_PERMISSIONS','Владельца нельзя исключить.')
+  if (!actor.accessConfigured && !scopedLocationId(organizationId) && actor.organizationRole==='ADMIN') assertCanRemoveMember(actor.role,target.role)
+  else requirePermission(actor,'members.exclude',null)
   const now = new Date()
   await prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId}, 1))::text`

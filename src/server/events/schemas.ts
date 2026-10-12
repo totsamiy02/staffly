@@ -7,12 +7,13 @@ export const eventBody = z.object({
   startDate: date, startTime: time, endDate: date.nullable().optional(), endTime: time.nullable().optional(),
   place: optionalText(300), meetingUrl: optionalText(2048).refine(value => !value || /^https?:\/\//i.test(value) && z.url().safeParse(value).success, 'Используйте ссылку http или https'),
   shared: z.boolean(), locationIds: z.array(z.uuid()).max(50).default([]),
+  audienceAccessRoleIds: z.array(z.uuid()).max(100).default([]),
   audienceMode: z.enum(['ALL', 'ROLES', 'SELECTED']), audienceRoles: z.array(z.enum(['ADMIN', 'MEMBER'])).max(2).default([]), memberIds: z.array(z.uuid()).max(1000).default([]),
   refreshRecipients: z.boolean().default(false), revision: z.number().int().positive().optional(),
 }).superRefine((data, ctx) => {
   if (data.shared && data.locationIds.length || !data.shared && !data.locationIds.length) ctx.addIssue({ code: 'custom', path: ['locationIds'], message: 'Выберите точки или всю организацию' })
   if (Boolean(data.endDate) !== Boolean(data.endTime)) ctx.addIssue({ code: 'custom', path: ['endTime'], message: 'Укажите дату и время окончания' })
-  if (data.audienceMode === 'ROLES' && !data.audienceRoles.length) ctx.addIssue({ code: 'custom', path: ['audienceRoles'], message: 'Выберите роли' })
+  if (data.audienceMode === 'ROLES' && !data.audienceRoles.length && !data.audienceAccessRoleIds.length) ctx.addIssue({ code: 'custom', path: ['audienceRoles'], message: 'Выберите роли' })
   if (data.audienceMode === 'SELECTED' && !data.memberIds.length) ctx.addIssue({ code: 'custom', path: ['memberIds'], message: 'Выберите сотрудников' })
 })
 export const eventParams = z.object({ organizationId: z.uuid(), eventId: z.uuid().optional() })

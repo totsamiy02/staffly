@@ -1,3 +1,5 @@
+import { ensureAccessRoles, hasPermission, requirePermission } from './access.ts'
+import type { Permission } from '../../app/access/catalog.ts'
 import { claimSensitiveToken, createSensitiveToken } from './sensitive-action-service.ts'
 import { date } from '../schedule/schemas.ts'
 import { zonedDateTimeToUtc } from '../schedule/timezone.ts'
@@ -20,28 +22,27 @@ async function lock(tx: Prisma.TransactionClient, organizationId: string) {
   await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId}, 1))::text`
 }
 async function actorIn(tx: Prisma.TransactionClient, userId: string, organizationId: string) {
-  const actor = await tx.organizationMember.findUnique({ where: { organizationId_userId: { organizationId, userId } }, include: { organization: true } })
-  if (!actor || actor.leftAt || actor.organization.deletedAt) throw new ApiError(404, 'ORGANIZATION_NOT_FOUND', 'Организация не найдена.')
-  return actor
+  return getMembership(userId, organizationId, tx)
 }
-export async function requireLocationManager(tx: Prisma.TransactionClient | typeof prisma, userId: string, organizationId: string, locationId: string) {
+export async function requireLocationManager(tx: Prisma.TransactionClient | typeof prisma, userId: string, organizationId: string, locationId: string, permission: Permission = 'schedule.edit') {
   const location = await tx.organizationLocation.findFirst({ where: { id: locationId, organizationId, archivedAt: null } })
-  const actor = await tx.organizationMember.findUnique({ where: { organizationId_userId: { organizationId, userId } }, include: { organization: true } })
-  if (!location || !actor || actor.leftAt || actor.organization.deletedAt) throw new ApiError(404, 'LOCATION_NOT_FOUND', 'Точка не найдена.')
-  const membership = await tx.locationMember.findUnique({ where: { locationId_memberId: { locationId, memberId: actor.id } } })
-  if (actor.role !== 'OWNER' && (!membership || membership.leftAt || membership.role !== 'ADMIN')) throw new ApiError(403, 'INSUFFICIENT_PERMISSIONS', 'Нужны права администратора этой точки или владельца.')
+  if (!location) throw new ApiError(404, 'LOCATION_NOT_FOUND', 'Точка не найдена.')
+  const actor = await getMembership(userId, organizationId, tx)
+  requirePermission(actor, permission, locationId)
   return actor
 }
+
 export async function listLocations(userId: string, organizationId: string) {
   const actor = await getMembership(userId, organizationId)
   const locations = await prisma.organizationLocation.findMany({ where: { organizationId, ...(actor.organizationRole === 'OWNER' ? {} : { archivedAt: null }) }, include: { members: { where: { memberId: actor.id, leftAt: null } }, _count: { select: { members: { where: { leftAt: null, member: { leftAt: null } } } } } }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] })
-  return locations.map(({ members, _count, ...item }) => ({ ...item, role: actor.organizationRole === 'OWNER' ? 'OWNER' : members[0]?.role ?? 'MEMBER', memberCount: _count.members }))
+  const roles = await ensureAccessRoles(prisma, organizationId)
+  return locations.filter(l => actor.owner || actor.readableLocationIds.includes(l.id) || hasPermission(actor, 'locations.browse')).map(({ members, _count, ...item }) => ({ ...item, permissions: Object.keys(actor.permissionLocations).filter(key => actor.permissionLocations[key].includes(item.id)), roleName: actor.owner ? 'Владелец' : roles.find(r => r.id === actor.accessAssignments.find(a => a.locationId === item.id)?.roleId)?.name ?? roles.find(r => r.id === actor.accessRoleId)?.name ?? 'Без роли', role: actor.organizationRole === 'OWNER' ? 'OWNER' : members[0]?.role ?? 'MEMBER', memberCount: _count.members }))
 }
 export async function saveLocation(userId: string, organizationId: string, locationId: string | null, input: z.infer<typeof locationBody>) {
   return prisma.$transaction(async tx => {
     await lock(tx, organizationId)
     const actor = await actorIn(tx, userId, organizationId)
-    requireOrganizationRole(actor.role, ['OWNER'])
+    requirePermission(actor, locationId ? 'locations.edit' : 'locations.create', locationId ?? null)
     if (locationId && !await tx.organizationLocation.findFirst({ where: { id: locationId, organizationId, archivedAt: null } })) throw new ApiError(404, 'LOCATION_NOT_FOUND', 'Точка не найдена.')
     const { teamNames, ...metadata } = input
     const location = locationId ? await tx.organizationLocation.update({ where: { id: locationId }, data: metadata }) : await tx.organizationLocation.create({ data: { ...metadata, organizationId } })
@@ -79,7 +80,7 @@ export async function archiveLocation(userId: string, organizationId: string, lo
 export async function assignLocationMember(userId: string, organizationId: string, locationId: string, memberId: string, requestedRole?: 'ADMIN' | 'MEMBER') {
   return prisma.$transaction(async tx => {
     await lock(tx, organizationId)
-    const actor = await requireLocationManager(tx, userId, organizationId, locationId)
+    const actor = await requireLocationManager(tx, userId, organizationId, locationId, 'members.assign')
     const member = await tx.organizationMember.findFirst({ where: { id: memberId, organizationId, leftAt: null, user: { deletedAt: null } } })
     if (!member) throw new ApiError(404, 'MEMBER_NOT_FOUND', 'Сотрудник не найден.')
     const role = requestedRole ?? (member.role === 'ADMIN' ? 'ADMIN' : 'MEMBER')
@@ -96,7 +97,7 @@ export async function assignLocationMember(userId: string, organizationId: strin
 export async function removeLocationMember(userId: string, organizationId: string, locationId: string, memberId: string) {
   return prisma.$transaction(async tx => {
     await lock(tx, organizationId)
-    const actor = await requireLocationManager(tx, userId, organizationId, locationId)
+    const actor = await requireLocationManager(tx, userId, organizationId, locationId, 'members.remove')
     const target = await tx.locationMember.findUnique({ where: { locationId_memberId: { locationId, memberId } }, include: { member: true } })
     if (!target || target.leftAt || target.member.leftAt) throw new ApiError(404, 'MEMBER_NOT_FOUND', 'Сотрудник не найден.')
     if (target.member.role === 'OWNER' || (actor.role !== 'OWNER' && target.role === 'ADMIN')) throw new ApiError(403, 'INSUFFICIENT_PERMISSIONS', 'Этого участника нельзя убрать из точки.')
@@ -113,7 +114,7 @@ export async function saveTeam(userId: string, organizationId: string, teamId: s
   return prisma.$transaction(async tx => {
     await lock(tx, organizationId)
     const locationId = scopedLocationId(organizationId) ?? (await getMembership(userId, organizationId)).locationId
-    await requireLocationManager(tx, userId, organizationId, locationId)
+    await requireLocationManager(tx, userId, organizationId, locationId, 'members.assign')
     if (teamId && !await tx.locationTeam.findFirst({ where: { id: teamId, organizationId, locationId } })) throw new ApiError(404, 'TEAM_NOT_FOUND', 'Команда не найдена.')
     const ids = [...new Set(input.memberIds)]
     if (await tx.locationMember.count({ where: { locationId, memberId: { in: ids }, leftAt: null, member: { leftAt: null } } }) !== ids.length) throw new ApiError(400, 'TEAM_MEMBERS_INVALID', 'Выберите постоянных сотрудников этой точки.')
@@ -127,7 +128,7 @@ export async function deleteTeam(userId: string, organizationId: string, teamId:
   return prisma.$transaction(async tx => {
     await lock(tx, organizationId)
     const locationId = scopedLocationId(organizationId) ?? (await getMembership(userId, organizationId)).locationId
-    await requireLocationManager(tx, userId, organizationId, locationId)
+    await requireLocationManager(tx, userId, organizationId, locationId, 'members.assign')
     const team = await tx.locationTeam.findFirst({ where: { id: teamId, organizationId, locationId } })
     if (!team) throw new ApiError(404, 'TEAM_NOT_FOUND', 'Команда не найдена.')
     await tx.locationTeam.delete({ where: { id: teamId } })
@@ -136,8 +137,8 @@ export async function deleteTeam(userId: string, organizationId: string, teamId:
 export async function transferMember(userId: string, organizationId: string, input: z.infer<typeof transferBody>) {
   return prisma.$transaction(async tx => {
     await lock(tx, organizationId)
-    const actor = await requireLocationManager(tx, userId, organizationId, input.fromLocationId)
-    await requireLocationManager(tx, userId, organizationId, input.toLocationId)
+    const actor = await requireLocationManager(tx, userId, organizationId, input.fromLocationId, 'members.assign')
+    await requireLocationManager(tx, userId, organizationId, input.toLocationId, 'members.assign')
     const source = await tx.locationMember.findUnique({ where: { locationId_memberId: { locationId: input.fromLocationId, memberId: input.memberId } }, include: { member: true } })
     if (!source || source.leftAt || source.member.leftAt || source.organizationId !== organizationId) throw new ApiError(404, 'MEMBER_NOT_FOUND', 'Сотрудник не состоит в исходной точке.')
     if (source.member.role === 'OWNER' || (source.role === 'ADMIN' && actor.role !== 'OWNER')) throw new ApiError(403, 'OWNER_REQUIRED', 'Перевод администратора оформляет владелец.')
@@ -158,7 +159,8 @@ export async function transferMember(userId: string, organizationId: string, inp
 }
 
 export async function locationOverview(userId: string, organizationId: string) {
-  const locations = (await listLocations(userId, organizationId)).filter(point => !point.archivedAt)
+  const viewer = await getMembership(userId, organizationId)
+  const locations = (await listLocations(userId, organizationId)).filter(point => !point.archivedAt && hasPermission(viewer, 'dashboard.view', point.id))
   const { startOfZonedDate, addCalendarDays } = await import('../schedule/timezone.ts')
   const { mediaUrl } = await import('../storage/image-service.ts')
   return Promise.all(locations.map(async point => {

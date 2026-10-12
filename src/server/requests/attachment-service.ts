@@ -1,3 +1,4 @@
+import { requirePermission } from '../organizations/access.ts'
 import { createHash, randomUUID } from 'node:crypto'
 import sharp from 'sharp'
 import { prisma } from '../db.ts'
@@ -38,6 +39,7 @@ async function validateContents(input: Buffer, mimeType: string) {
 
 export async function addRequestAttachment(userId: string, organizationId: string, requestId: string, input: unknown, mimeType: string, originalName?: string) {
   const { actor, item } = await assertRequestFileAccess(userId, organizationId, requestId)
+  requirePermission(actor,'requests.edit')
   if (item.createdByMemberId !== actor.id || item.status !== 'PENDING') throw new ApiError(403, 'ATTACHMENT_FORBIDDEN', 'Вложения может добавлять автор до рассмотрения заявки.')
   const type = await prisma.requestType.findUniqueOrThrow({ where: { id: item.requestTypeId } })
   if (!type.allowsAttachments) throw new ApiError(400, 'ATTACHMENTS_NOT_ALLOWED', 'Этот тип заявки не поддерживает вложения.')
@@ -69,6 +71,7 @@ export async function downloadRequestAttachment(userId: string, organizationId: 
 
 export async function deleteRequestAttachment(userId: string, organizationId: string, requestId: string, attachmentId: string) {
   const { actor, item } = await assertRequestFileAccess(userId, organizationId, requestId)
+  requirePermission(actor,'requests.edit')
   if (item.createdByMemberId !== actor.id || item.status !== 'PENDING') throw new ApiError(403, 'ATTACHMENT_FORBIDDEN', 'Удалить вложение может автор до рассмотрения заявки.')
   const fileId = await prisma.$transaction(async (tx) => {
     const request = await tx.organizationRequest.findFirst({ where: { id: requestId, organizationId, createdByMemberId: actor.id, status: 'PENDING' }, select: { id: true } })

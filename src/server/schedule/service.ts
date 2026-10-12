@@ -1,3 +1,4 @@
+import { hasPermission, requirePermission } from '../organizations/access.ts'
 import { requireLocationManager } from '../organizations/location-service.ts'
 import { locationWhere, locationMemberWhere, scopedLocationId } from '../organizations/location-context.ts'
 import { mediaUrl } from '../storage/image-service.ts'
@@ -7,7 +8,7 @@ import { cancelShiftRequests, lockShift } from '../requests/shift-conflicts.ts'
 import type { Prisma, WorkShift } from '../../generated/prisma/client.ts'
 import { prisma } from '../db.ts'
 import { ApiError } from '../api-error.ts'
-import { getMembership, requireOrganizationRole } from '../organizations/permissions.ts'
+import { getMembership } from '../organizations/permissions.ts'
 import { addCalendarDays, startOfZonedDate, zonedDateTimeToUtc } from './timezone.ts'
 import { recordShiftNotification, sendImportantShiftEmail } from '../organizations/notification-service.ts'
 
@@ -93,7 +94,7 @@ const shiftInclude = { offerReservation: { select: { offer: { select: { id: true
 
 export async function listCancelledShifts(userId: string, organizationId: string, query: { page: number; limit: number; memberId?: string; order: 'asc' | 'desc' }) {
   const actor = await getMembership(userId, organizationId)
-  requireOrganizationRole(actor.role, ['OWNER', 'ADMIN'])
+  requirePermission(actor, 'schedule.history')
   const where = { organizationId, ...locationWhere(organizationId), status: 'CANCELLED' as const, ...(query.memberId ? { memberId: query.memberId } : {}) }
   const [total, shifts] = await Promise.all([
     prisma.workShift.count({ where }),
@@ -106,18 +107,20 @@ export async function listSchedule(userId: string, organizationId: string, fromD
   const actor = await getMembership(userId, organizationId)
   const from = startOfZonedDate(fromDate, actor.organization.timezone)
   const to = startOfZonedDate(toDate, actor.organization.timezone)
-  if (mode === 'history') requireOrganizationRole(actor.role, ['OWNER', 'ADMIN'])
+  if (mode === 'history') requirePermission(actor, 'schedule.history')
+  if (!hasPermission(actor, 'schedule.view')) requirePermission(actor, 'schedule.own')
   const shifts = await prisma.workShift.findMany({
-    where: { organizationId, ...locationWhere(organizationId), status: mode === 'history' ? 'CANCELLED' : 'SCHEDULED', scheduledStartAt: { lt: to }, scheduledEndAt: { gt: from } },
+    where: { organizationId, ...locationWhere(organizationId), ...(!hasPermission(actor, 'schedule.view') ? { memberId: actor.id } : {}), status: mode === 'history' ? 'CANCELLED' : 'SCHEDULED', scheduledStartAt: { lt: to }, scheduledEndAt: { gt: from } },
     include: shiftInclude,
     orderBy: [{ scheduledStartAt: 'asc' }, { member: { user: { lastName: 'asc' } } }],
   })
-  const absences = await prisma.employeeAbsence.findMany({ where: { organizationId, member: locationMemberWhere(organizationId), cancelledAt: null, startDate: { lt: new Date(`${toDate}T00:00:00.000Z`) }, endDate: { gte: new Date(`${fromDate}T00:00:00.000Z`) } }, include: { member: { include: { user: { select: { email: true, firstName: true, lastName: true, middleName: true, avatarFileId: true } } } } }, orderBy: { startDate: 'asc' } })
-  return { timezone: actor.organization.timezone, shifts: shifts.map(publicShift), absences: (mode === 'history' ? [] : absences).map((item) => ({ id: item.id, memberId: item.memberId, memberName: displayName(item.member.user), memberAvatarUrl: mediaUrl(item.member.user.avatarFileId), reason: actor.role === 'MEMBER' && item.memberId !== actor.id ? null : item.reason, type: actor.role === 'MEMBER' && item.memberId !== actor.id ? 'ABSENCE' as const : item.type, startDate: dateText(item.startDate), endDate: dateText(item.endDate) })) }
+  const absences = await prisma.employeeAbsence.findMany({ where: { organizationId, member: locationMemberWhere(organizationId), ...(!hasPermission(actor, 'absences.view') && !hasPermission(actor, 'schedule.view') ? { memberId: actor.id } : {}), cancelledAt: null, startDate: { lt: new Date(`${toDate}T00:00:00.000Z`) }, endDate: { gte: new Date(`${fromDate}T00:00:00.000Z`) } }, include: { member: { include: { user: { select: { email: true, firstName: true, lastName: true, middleName: true, avatarFileId: true } } } } }, orderBy: { startDate: 'asc' } })
+  return { timezone: actor.organization.timezone, shifts: shifts.map(publicShift), absences: (mode === 'history' ? [] : absences).map((item) => ({ id: item.id, memberId: item.memberId, memberName: displayName(item.member.user), memberAvatarUrl: mediaUrl(item.member.user.avatarFileId), reason: !hasPermission(actor, 'absences.details') && item.memberId !== actor.id ? null : item.reason, type: !hasPermission(actor, 'absences.details') && item.memberId !== actor.id ? 'ABSENCE' as const : item.type, startDate: dateText(item.startDate), endDate: dateText(item.endDate) })) }
 }
 
 export async function listMyUpcomingShifts(userId: string, organizationId: string) {
   const actor = await getMembership(userId, organizationId)
+  requirePermission(actor, 'schedule.own')
   const shifts = await prisma.workShift.findMany({
     where: { organizationId, ...locationWhere(organizationId), memberId: actor.id, status: 'SCHEDULED', scheduledEndAt: { gt: new Date() } },
     include: shiftInclude,
@@ -132,7 +135,7 @@ export async function createShift(userId: string, organizationId: string, input:
 
 export async function createShiftBatch(userId: string, organizationId: string, inputs: ShiftInput[], acknowledgeWorkload = false) {
   const actor = await getMembership(userId, organizationId)
-  requireOrganizationRole(actor.role, ['OWNER', 'ADMIN'])
+  requirePermission(actor, 'schedule.create')
   if (!inputs.length || inputs.length > 62) throw new ApiError(400, 'BATCH_SIZE', 'Выберите от 1 до 62 смен.')
   const prepared = inputs.map(input => {
     const start = zonedDateTimeToUtc(input.startDate, input.startTime, actor.organization.timezone)
@@ -142,7 +145,7 @@ export async function createShiftBatch(userId: string, organizationId: string, i
   })
   try {
     const result = await prisma.$transaction(async tx => {
-      if (scopedLocationId(organizationId)) { await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId}, 1))::text`; await requireLocationManager(tx, userId, organizationId, actor.locationId) }
+      if (scopedLocationId(organizationId)) { await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId}, 1))::text`; await requireLocationManager(tx, userId, organizationId, actor.locationId, 'schedule.create') }
       const records = []
       for (const memberId of [...new Set(inputs.map(input => input.memberId))].sort()) {
         await activeTarget(tx, organizationId, memberId)
@@ -177,7 +180,7 @@ export async function createShiftBatch(userId: string, organizationId: string, i
 
 export async function updateShift(userId: string, organizationId: string, shiftId: string, input: ShiftInput) {
   const actor = await getMembership(userId, organizationId)
-  requireOrganizationRole(actor.role, ['OWNER', 'ADMIN'])
+  requirePermission(actor, 'schedule.edit')
   const current = await shiftInOrganization(prisma, organizationId, shiftId)
   if (current.status === 'CANCELLED') throw new ApiError(409, 'SHIFT_CANCELLED', 'Отменённую смену нельзя изменить.')
   if (current.scheduledEndAt <= new Date()) throw new ApiError(409, 'SHIFT_ALREADY_FINISHED', 'Для завершённой смены измените фактическое время.')
@@ -191,7 +194,7 @@ export async function updateShift(userId: string, organizationId: string, shiftI
   try {
     const assignmentChanged = current.memberId !== input.memberId || current.scheduledStartAt.getTime() !== startAt.getTime() || current.scheduledEndAt.getTime() !== endAt.getTime()
     const shift = await prisma.$transaction(async tx => {
-      if (scopedLocationId(organizationId)) { await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId}, 1))::text`; await requireLocationManager(tx, userId, organizationId, actor.locationId) }
+      if (scopedLocationId(organizationId)) { await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId}, 1))::text`; await requireLocationManager(tx, userId, organizationId, actor.locationId, 'schedule.edit') }
     await lockShift(tx, shiftId)
       const fresh = await shiftInOrganization(tx, organizationId, shiftId)
       if (fresh.updatedAt.getTime() !== current.updatedAt.getTime() || fresh.status !== 'SCHEDULED') throw new ApiError(409, 'SHIFT_CHANGED', 'Смена уже изменилась. Откройте её заново.')
@@ -233,7 +236,9 @@ export async function listShiftNotifications(userId: string) {
     include: { shift: true, organization: { select: { id: true, name: true, timezone: true } } },
     distinct: ['shiftId'], orderBy: { createdAt: 'desc' }, take: 50,
   })
-  return notifications.flatMap(notification => notification.shift ? [{ id: notification.shift.id, organization: notification.organization, scheduledStartAt: notification.shift.scheduledStartAt, scheduledEndAt: notification.shift.scheduledEndAt, createdAt: notification.createdAt }] : [])
+  const filtered = []
+  for (const notification of notifications) {const actor=await getMembership(userId,notification.organization.id);if(notification.shift && hasPermission(actor,'schedule.own',notification.shift.locationId)) filtered.push(notification)}
+  return filtered.flatMap(notification => notification.shift ? [{ id: notification.shift.id, organization: notification.organization, scheduledStartAt: notification.shift.scheduledStartAt, scheduledEndAt: notification.shift.scheduledEndAt, createdAt: notification.createdAt }] : [])
 }
 
 export async function readShiftNotification(userId: string, shiftId: string) {
@@ -247,24 +252,26 @@ export async function readShiftNotification(userId: string, shiftId: string) {
 
 export async function getShift(userId: string, organizationId: string, shiftId: string, page = 1, limit = 20) {
   const actor = await getMembership(userId, organizationId)
-  if (actor.role === 'MEMBER') {
+  if (!hasPermission(actor, 'schedule.history')) {
     const shift = await prisma.workShift.findFirst({ where: { id: shiftId, organizationId, ...locationWhere(organizationId) }, include: shiftInclude })
     if (!shift) throw new ApiError(404, 'SHIFT_NOT_FOUND', 'Смена не найдена.')
+    requirePermission(actor, shift.memberId === actor.id ? 'schedule.own' : 'schedule.view')
     return { ...publicShift(shift), adjustments: [], adjustmentPagination: { page: 1, limit, total: 0, pages: 1 } }
   }
   const shift = await prisma.workShift.findFirst({ where: { id: shiftId, organizationId, ...locationWhere(organizationId) }, include: { ...shiftInclude, adjustments: { include: { changedByMember: { include: { user: { select: { email: true, firstName: true, lastName: true, middleName: true, avatarFileId: true } } } } }, orderBy: { createdAt: 'desc' }, skip: (page - 1) * limit, take: limit } } })
   if (!shift) throw new ApiError(404, 'SHIFT_NOT_FOUND', 'Смена не найдена.')
+  requirePermission(actor, shift.memberId === actor.id ? 'schedule.own' : 'schedule.view')
   const total = shift._count.adjustments
   return { ...publicShift(shift), adjustments: shift.adjustments.map((item) => ({ ...item, changedByName: displayName(item.changedByMember.user) })), adjustmentPagination: { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) } }
 }
 
 export async function cancelShift(userId: string, organizationId: string, shiftId: string, reason: string) {
   const actor = await getMembership(userId, organizationId)
-  requireOrganizationRole(actor.role, ['OWNER', 'ADMIN'])
+  requirePermission(actor, 'schedule.cancel')
   const current = await shiftInOrganization(prisma, organizationId, shiftId)
   if (current.status === 'CANCELLED') throw new ApiError(409, 'SHIFT_CANCELLED', 'Смена уже отменена.')
   const shift = await prisma.$transaction(async tx => {
-    if (scopedLocationId(organizationId)) { await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId}, 1))::text`; await requireLocationManager(tx, userId, organizationId, actor.locationId) }
+    if (scopedLocationId(organizationId)) { await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId}, 1))::text`; await requireLocationManager(tx, userId, organizationId, actor.locationId, 'schedule.cancel') }
     await lockShift(tx, shiftId)
     const fresh = await shiftInOrganization(tx, organizationId, shiftId)
     if (fresh.status === 'CANCELLED') throw new ApiError(409, 'SHIFT_CANCELLED', 'Смена уже отменена.')
@@ -279,7 +286,7 @@ export async function cancelShift(userId: string, organizationId: string, shiftI
 
 export async function correctActualTime(userId: string, organizationId: string, shiftId: string, input: ActualInput) {
   const actor = await getMembership(userId, organizationId)
-  requireOrganizationRole(actor.role, ['OWNER', 'ADMIN'])
+  requirePermission(actor, 'schedule.actual')
   const current = await shiftInOrganization(prisma, organizationId, shiftId)
   if (current.status === 'CANCELLED') throw new ApiError(409, 'SHIFT_CANCELLED', 'Отменённую смену нельзя корректировать.')
   if (current.scheduledEndAt > new Date()) throw new ApiError(409, 'SHIFT_NOT_FINISHED', 'Фактическое время можно указать после окончания смены.')
@@ -288,7 +295,7 @@ export async function correctActualTime(userId: string, organizationId: string, 
   validateDuration(startAt, endAt, input.breakMinutes)
   if (endAt > new Date()) throw new ApiError(400, 'ACTUAL_TIME_IN_FUTURE', 'Фактическое окончание не может быть в будущем.')
   return prisma.$transaction(async (tx) => {
-    if (scopedLocationId(organizationId)) { await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId}, 1))::text`; await requireLocationManager(tx, userId, organizationId, actor.locationId) }
+    if (scopedLocationId(organizationId)) { await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId}, 1))::text`; await requireLocationManager(tx, userId, organizationId, actor.locationId, 'schedule.actual') }
     await lockShift(tx, shiftId)
     const fresh = await shiftInOrganization(tx, organizationId, shiftId)
     if (fresh.status === 'CANCELLED') throw new ApiError(409, 'SHIFT_CANCELLED', 'Отменённую смену нельзя корректировать.')

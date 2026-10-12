@@ -1,9 +1,10 @@
+import { requirePermission } from './access.ts'
 import { locationWhere } from './location-context.ts'
 import { createHash, createCipheriv, createDecipheriv, randomBytes, randomInt } from 'node:crypto'
 import { prisma } from '../db.ts'
 import { mediaUrl } from '../storage/image-service.ts'
 import { ApiError } from '../api-error.ts'
-import { getMembership, requireOrganizationRole } from './permissions.ts'
+import { getMembership } from './permissions.ts'
 
 // Domain-separated key keeps invitation material encrypted across navigation/restarts.
 function codeKey() {
@@ -43,7 +44,7 @@ function rawInviteCode() {
 
 export async function createEmailInvitation(actorUserId: string, organizationId: string, invitedEmail: string) {
   const actor = await getMembership(actorUserId, organizationId)
-  requireOrganizationRole(actor.role, ['OWNER', 'ADMIN'])
+  requirePermission(actor, 'members.invite')
   const actorUser = await prisma.user.findUniqueOrThrow({ where: { id: actorUserId } })
   if (actorUser.email === invitedEmail) throw new ApiError(400, 'CANNOT_INVITE_SELF', 'Нельзя пригласить самого себя.')
   const existingUser = await prisma.user.findUnique({ where: { email: invitedEmail } })
@@ -80,7 +81,7 @@ export async function createEmailInvitation(actorUserId: string, organizationId:
 
 export async function createCodeInvitation(actorUserId: string, organizationId: string) {
   const actor = await getMembership(actorUserId, organizationId)
-  requireOrganizationRole(actor.role, ['OWNER', 'ADMIN'])
+  requirePermission(actor, 'members.invite')
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const code = rawInviteCode()
     try {
@@ -117,7 +118,7 @@ export async function listPendingInvitations(userEmail: string) {
 
 export async function listActiveOrganizationInvitations(actorUserId: string, organizationId: string) {
   const actor = await getMembership(actorUserId, organizationId)
-  requireOrganizationRole(actor.role, ['OWNER', 'ADMIN'])
+  requirePermission(actor, 'members.invite')
   const invitations = await prisma.organizationInvite.findMany({
     where: { organizationId, ...locationWhere(organizationId), ...activeInviteWhere() },
     select: { id: true, type: true, invitedEmail: true, expiresAt: true, createdAt: true, codeCiphertext: true },
@@ -200,7 +201,7 @@ export async function rejectEmailInvitation(userEmail: string, inviteId: string)
 
 export async function revokeInvitation(actorUserId: string, organizationId: string, inviteId: string) {
   const actor = await getMembership(actorUserId, organizationId)
-  requireOrganizationRole(actor.role, ['OWNER', 'ADMIN'])
+  requirePermission(actor, 'members.invites.revoke')
   const revoked = await prisma.organizationInvite.updateMany({ where: { id: inviteId, organizationId, ...locationWhere(organizationId), acceptedAt: null, rejectedAt: null, revokedAt: null }, data: { revokedAt: new Date() } })
   if (!revoked.count) throw new ApiError(404, 'INVITATION_NOT_FOUND', 'Активное приглашение не найдено.')
 }

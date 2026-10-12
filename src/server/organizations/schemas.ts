@@ -14,6 +14,7 @@ export const memberListQuery = z.object({
   page: z.coerce.number().int().min(1).max(100_000).optional(),
   pageSize: z.coerce.number().int().min(1).max(50).optional(),
   role: z.enum(['OWNER', 'ADMIN', 'MEMBER']).optional(),
+  accessRoleId:uuid.optional(),
   search: z.string().trim().max(100).optional(),
 })
 export const inviteParams = z.object({ inviteId: uuid })

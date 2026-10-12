@@ -15,5 +15,5 @@ export function useDocumentRefresh() {
 
 export function useDocumentMembers(organizationId: string, enabled = true, all = false, pointId?: string | null) {
   const { locationId, apiRequest } = useAuth()
-  return useQuery({ enabled, queryKey: ['document-members', organizationId, locationId, all, pointId], queryFn: () => apiRequest<{ members: Array<{ id: string; name: string; email: string; avatarUrl: string | null; role: 'OWNER' | 'ADMIN' | 'MEMBER'; former: boolean }> }>(`/organizations/${organizationId}/documents-members?all=${all}${pointId ? `&locationId=${pointId}` : ''}`) })
+  return useQuery({ enabled, queryKey: ['document-members', organizationId, locationId, all, pointId], queryFn: () => apiRequest<{ members: Array<{ id: string; accessRoleIds:string[]; name: string; email: string; avatarUrl: string | null; role: 'OWNER' | 'ADMIN' | 'MEMBER'; former: boolean }> }>(`/organizations/${organizationId}/documents-members?all=${all}${pointId ? `&locationId=${pointId}` : ''}`) })
 }

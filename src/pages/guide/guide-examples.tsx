@@ -10,6 +10,9 @@ import type { DocumentItem } from '../../app/documents/types.ts'
 import type { StaffEvent } from '../../app/events/types.ts'
 import type { GuideExampleId } from './content/types.ts'
 import { guideExampleLabels } from './guide-example-labels.ts'
+import { permissionCatalog } from '../../app/access/catalog.ts'
+import { AccessIcon, AccessPermission } from '../app/access-elements.tsx'
+import '../app/access-settings.scss'
 import '../app/schedule/schedule.scss'
 import '../app/schedule/schedule-redesign.scss'
 import '../app/schedule/reporting.scss'
@@ -42,7 +45,7 @@ const event: StaffEvent = {
   startAt: '2026-10-19T07:00:00Z', endAt: '2026-10-19T07:30:00Z', timezone: 'Europe/Moscow', place: 'Переговорная', meetingUrl: null,
   shared: true, locations: [], audienceMode: 'ALL', audienceRoles: [], recipients: [], recipientCount: 8, isRecipient: true,
   createdBy: { id: 'example-author', name: 'Михаил Орлов' }, updatedBy: { id: 'example-author', name: 'Михаил Орлов' },
-  revision: 1, createdAt: '2026-10-01T09:00:00Z', updatedAt: '2026-10-01T09:00:00Z', cancelledAt: null, status: 'UPCOMING', canManage: false,
+  revision: 1, createdAt: '2026-10-01T09:00:00Z', updatedAt: '2026-10-01T09:00:00Z', cancelledAt: null, status: 'UPCOMING', canManage: false, canCancel:false,
 }
 
 
@@ -56,5 +59,7 @@ export default function GuideExample({ example }: { example: GuideExampleId }) {
     {example === 'documents' && <DocumentRow item={document} onOpen={noop} acknowledgementHighlight />}
     {example === 'events' && <div className="event-row"><EventRowContent event={event} /></div>}
     {example === 'reports' && <div className="report-dialog document-dialog"><ReportRules /></div>}
+    {example === 'role-permissions' && <div className="access-card" style={{ padding: 20 }}><div className="access-module__heading"><span className="access-tile access-tile--custom"><AccessIcon name="shield" /></span><div><h3>Бухгалтер</h3><p>Пример выбора отдельных возможностей роли</p></div></div><div className="access-permission-grid">{permissionCatalog.filter(permission => ['reports.preview', 'reports.export', 'schedule.edit', 'documents.personal.view'].includes(permission.key)).map(permission => <AccessPermission key={permission.key} permission={permission} enabled={permission.key.startsWith('reports.')} onChange={noop} />)}</div></div>}
+    {example === 'document-access' && <DocumentRow item={{ ...document, id: 'example-restricted-document', displayName: 'Отчёт для бухгалтерии', fileName: 'Отчёт.pdf', visibility: 'SELECTED', locationId: 'example-center', locationName: 'Центр', acknowledgement: null }} onOpen={noop} />}
   </div></div>
 }

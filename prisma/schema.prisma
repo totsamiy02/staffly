@@ -143,6 +143,8 @@ model Organization {
   createdBy            User                   @relation("OrganizationCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
   logo                 StoredFile?            @relation("OrganizationLogo", fields: [logoFileId], references: [id], onDelete: SetNull)
   files                StoredFile[]           @relation("OrganizationFiles")
+  accessRoles          AccessRole[]
+  accessAudit          AccessAudit[]
   members              OrganizationMember[]
   invitations          OrganizationInvite[]
   sensitiveActions     SensitiveActionToken[]
@@ -242,6 +244,10 @@ model AccountNotification {
 }
 
 model OrganizationMember {
+  accessConfigured Boolean @default(false) @map("access_configured")
+  accessRoleId String? @map("access_role_id") @db.Uuid
+  accessRole AccessRole? @relation(fields: [organizationId, accessRoleId], references: [organizationId, id], onDelete: Restrict)
+  accessAssignments AccessAssignment[]
   personnelNumber String? @map("personnel_number") @db.VarChar(32)
   reportTemplates ReportTemplate[]
   id             String           @id @default(uuid()) @db.Uuid
@@ -677,9 +683,13 @@ enum DocumentVisibility {
   ORGANIZATION
   ADMINS
   PRIVATE_MEMBER
+  SELECTED
 }
 
 model DocumentFolder {
+  audienceRoleIds String[] @default([]) @map("audience_role_ids") @db.Uuid
+  audienceMemberIds String[] @default([]) @map("audience_member_ids") @db.Uuid
+  inheritAccess Boolean @default(false) @map("inherit_access")
   visibility DocumentVisibility @default(ORGANIZATION)
   locationId String? @map("location_id") @db.Uuid
   location OrganizationLocation? @relation(fields: [organizationId, locationId], references: [organizationId, id], onDelete: Restrict)
@@ -711,6 +721,9 @@ model DocumentFolderPin {
 }
 
 model Document {
+  audienceRoleIds String[] @default([]) @map("audience_role_ids") @db.Uuid
+  audienceMemberIds String[] @default([]) @map("audience_member_ids") @db.Uuid
+  inheritAccess Boolean @default(false) @map("inherit_access")
   locationId String? @map("location_id") @db.Uuid
   location OrganizationLocation? @relation(fields: [organizationId, locationId], references: [organizationId, id], onDelete: Restrict)
   id String @id @default(uuid()) @db.Uuid
@@ -777,6 +790,7 @@ model OrganizationLocation {
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   members LocationMember[]
   teams LocationTeam[]
+  accessAssignments AccessAssignment[]
   shifts WorkShift[]
   requests OrganizationRequest[]
   templates ShiftTemplate[]
@@ -857,6 +871,7 @@ enum EventAudienceMode {
 }
 
 model OrganizationEvent {
+  audienceAccessRoleIds String[] @default([]) @map("audience_access_role_ids") @db.Uuid
   id String @id @default(uuid()) @db.Uuid
   organizationId String @map("organization_id") @db.Uuid
   title String @db.VarChar(160)
@@ -1000,4 +1015,44 @@ model ShiftOffer {
   @@index([initiatorMemberId, createdAt])
   @@index([recipientMemberId, status])
   @@map("shift_offers")
+}
+
+model AccessRole {
+  id String @id @default(uuid()) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  name String @db.VarChar(80)
+  description String @default("") @db.VarChar(500)
+  systemCode OrganizationRole? @map("system_code")
+  permissions String[] @default([])
+  revision Int @default(1)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organizationMembers OrganizationMember[]
+  assignments AccessAssignment[]
+  @@unique([organizationId, id])
+  @@unique([organizationId, systemCode])
+  @@map("access_roles")
+}
+model AccessAssignment {
+  organizationId String @map("organization_id") @db.Uuid
+  memberId String @map("member_id") @db.Uuid
+  locationId String @map("location_id") @db.Uuid
+  roleId String @map("role_id") @db.Uuid
+  member OrganizationMember @relation(fields: [organizationId, memberId], references: [organizationId, id], onDelete: Cascade)
+  location OrganizationLocation @relation(fields: [organizationId, locationId], references: [organizationId, id], onDelete: Cascade)
+  role AccessRole @relation(fields: [organizationId, roleId], references: [organizationId, id], onDelete: Restrict)
+  @@id([memberId, locationId])
+  @@index([organizationId, roleId])
+  @@map("access_assignments")
+}
+model AccessAudit {
+  id String @id @default(uuid()) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  actorMemberId String @map("actor_member_id") @db.Uuid
+  action String @db.VarChar(80)
+  details Json
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  @@index([organizationId, createdAt])
+  @@map("access_audit")
 }

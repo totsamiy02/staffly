@@ -30,7 +30,7 @@ test('guide content has stable unique addresses, valid anchors and complete refe
   for (const slug of [...featuredSlugs, ...popularSlugs]) assert.ok(guideArticleBySlug.has(slug), slug)
 })
 test('search finds common Russian task wording, synonyms, inflections and body text', () => {
-  for (const [query, slug] of [['отдать смену', 'transfer-shift'], ['поменяться', 'swap-shifts'], ['ЭКСЕЛЬ', 'excel-report'], ['табель', 'excel-report'], ['пересекающиеся смены', 'review-requests'], ['сеансы', 'security'], ['больничный', 'submit-request']]) {
+  for (const [query, slug] of [['отдать смену', 'transfer-shift'], ['поменяться', 'swap-shifts'], ['ЭКСЕЛЬ', 'excel-report'], ['табель', 'excel-report'], ['пересекающиеся смены', 'review-requests'], ['сеансы', 'security'], ['больничный', 'submit-request'], ['кастомная роль', 'custom-roles'], ['итоговые права', 'member-access'], ['наследовать доступ', 'document-access'], ['разрешения по модулям', 'role-permissions']]) {
     assert.ok(searchGuide(query).some(article => article.slug === slug), `${query}: missing ${slug}`)
   }
   assert.deepEqual(searchGuide('  '), guideArticles)

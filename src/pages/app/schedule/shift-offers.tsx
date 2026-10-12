@@ -1,3 +1,4 @@
+import { canAccess } from '../../../app/access/catalog.ts'
 import { OfferShiftCard, OfferIcon } from './offer-shift-card.tsx'
 import { useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
@@ -28,7 +29,7 @@ export function ShiftOfferForm({ organization, shift, onClose, onCreated }: { or
   const query = useOfferCandidates(organization.id, shift.id)
   const { apiRequest } = useAuth()
   const cache = useQueryClient(), toast = useToast()
-  const [kind, setKind] = useState<'TRANSFER' | 'SWAP'>('TRANSFER')
+  const [kind, setKind] = useState<'TRANSFER' | 'SWAP'>(canAccess(organization,'offers.transfer')?'TRANSFER':'SWAP')
   const [audience, setAudience] = useState<'person' | 'all'>('all')
   const [recipientId, setRecipientId] = useState(''), [targetId, setTargetId] = useState(''), [comment, setComment] = useState('')
   const [busy, setBusy] = useState(false), [error, setError] = useState('')
@@ -50,7 +51,7 @@ export function ShiftOfferForm({ organization, shift, onClose, onCreated }: { or
   return <AnimatedOverlay variant="modal" className="shift-offer-overlay" onClose={onClose} dismissible={!busy}>{close => <DocumentDialog title="Передать или обменять" eyebrow="" className="shift-offer-dialog shift-offer-dialog--form" onClose={close} busy={busy}><form className="shift-offer-form" onSubmit={event => void submit(event)}>
     <OfferShiftCard shift={source} locationName={organization.location?.name ?? 'Точка'} label={kind === 'SWAP' ? 'Вы отдаёте' : 'Ваша смена'} tone={kind === 'SWAP' ? 'out' : undefined} />
     {query.isLoading ? <div className="app-state"><span className="app-spinner" />Подбираем коллег…</div> : query.isError ? <div className="app-state" role="alert">{query.error.message}<button type="button" className="app-secondary" onClick={() => void query.refetch()}>Повторить</button></div> : <>
-      <div className="offer-operation"><SegmentedNav label="Передача или обмен"><button type="button" aria-pressed={kind === 'TRANSFER'} disabled={busy} onClick={() => { setKind('TRANSFER'); setTargetId('') }}><OfferIcon kind="send" />Передать смену</button><button type="button" aria-pressed={kind === 'SWAP'} disabled={busy} onClick={() => setKind('SWAP')}><OfferIcon kind="swap" />Обменяться</button></SegmentedNav></div>
+      <div className="offer-operation"><SegmentedNav label="Передача или обмен"><button type="button" aria-pressed={kind === 'TRANSFER'} disabled={busy || !canAccess(organization,'offers.transfer')} onClick={() => { setKind('TRANSFER'); setTargetId('') }}><OfferIcon kind="send" />Передать смену</button><button type="button" aria-pressed={kind === 'SWAP'} disabled={busy || !canAccess(organization,'offers.swap')} onClick={() => setKind('SWAP')}><OfferIcon kind="swap" />Обменяться</button></SegmentedNav></div>
       {selectedMode === 'DISABLED' ? <p className="offer-note">{kind === 'TRANSFER' ? 'Передача смен' : 'Обмен сменами'} выключена владельцем.</p> : <>
         {kind === 'TRANSFER' && <div className="offer-field offer-audience"><span>Кому предложить</span><SegmentedNav label="Адресат предложения"><button type="button" aria-pressed={audience === 'person'} disabled={busy} onClick={() => setAudience('person')}><OfferIcon kind="person" />Коллеге</button><button type="button" aria-pressed={audience === 'all'} disabled={busy} onClick={() => setAudience('all')}><OfferIcon kind="people" />Всем в точке</button></SegmentedNav>{audience === 'all' && <small>Предложение увидят подходящие сотрудники этой точки.</small>}</div>}
         {(kind === 'SWAP' || audience === 'person') && <EmployeePicker label="Коллега" emptyLabel="Выберите коллегу" disabled={busy} value={recipientId} onChange={id => { setRecipientId(id); setTargetId('') }} members={(settings?.candidates ?? []).map(c => ({ id: c.id, displayName: c.name, email: c.email, avatarUrl: c.avatarUrl, disabledReason: kind === 'TRANSFER' ? c.transferReason : !c.shifts.some(s => !s.reason) ? 'Нет подходящих смен для обмена' : null }))} />}
@@ -102,7 +103,7 @@ export function ShiftOffersPanel({ organization, offerId, onClose, onOffer }: { 
   const list = useOffers(organization.id, tab, page), query = useOffer(organization.id, offerId)
   const ownMemberId = organization.viewerMemberId
   const offer = query.data?.offer
-  const canManage = organization.role !== 'MEMBER'
+  const canManage = canAccess(organization,'offers.approve')
   async function action(value: string) {
     if (!offer || busy) return
     setBusy(true); setError('')

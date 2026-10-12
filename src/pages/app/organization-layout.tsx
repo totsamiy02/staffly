@@ -1,3 +1,4 @@
+import { canAccess, type Permission } from '../../app/access/catalog.ts'
 import { locationTone } from '../../app/organizations/format.ts'
 import { useAuth } from '../../app/auth/auth-context.tsx'
 import RoleBadge from '../../component/ui/role-badge/role-badge.tsx'
@@ -20,6 +21,7 @@ import Avatar from '../../component/ui/avatar/avatar.tsx'
 import { useDocuments } from '../../app/documents/queries.ts'
 import './app.scss'
 
+const modulePermissions:Record<string,Permission[]> = {employees:['members.view'],schedule:['schedule.own','schedule.view','statistics.own','statistics.view','reports.preview','reports.export'],requests:['requests.own','requests.view','staffing.respond','staffing.create'],documents:['documents.view'],events:['events.view','events.create','events.edit','events.cancel'],settings:['organization.edit','schedule.settings','schedule.templates','positions.manage','offers.settings','locations.edit','locations.create','requestTypes.manage']}
 const navigation = [
   ['', 'Главная'], ['employees', 'Сотрудники'], ['schedule', 'Расписание'], ['requests', 'Заявки'], ['events', 'События'], ['documents', 'Документы'], ['settings', 'Настройки'],
 ] as const
@@ -91,11 +93,11 @@ export default function OrganizationLayout() {
   const organization = query.data.organization
   const organizationPath = `/app/organizations/${organization.id}`
   const currentSegment = location.pathname.slice(organizationPath.length).split('/').filter(Boolean)[0] ?? ''
-  const helpCategory = ({ employees: 'team', schedule: 'schedule', requests: 'requests', events: 'events', documents: 'documents', settings: 'organization' } as Record<string, string>)[currentSegment] ?? 'start'
   const currentSection = navigation.find(([path]) => path === currentSegment)?.[1] ?? 'Неизвестный раздел'
   const points = locations.data?.locations ?? (organization.location ? [organization.location] : [])
   const locationAddress = [organization.location?.city, organization.location?.address].filter(Boolean).join(' · ')
-  const module = (content: ReactNode) => <ModuleErrorBoundary key={location.pathname + organization.locationId} organizationPath={organizationPath}>{content}</ModuleErrorBoundary>
+  const allowed = !currentSegment || currentSegment==='settings' && organization.owner || (modulePermissions[currentSegment]??[]).some(p=>canAccess(organization,p))
+  const module = (content: ReactNode) => !allowed ? <section className="workspace-problem"><h1>Раздел недоступен</h1><p>Владелец может изменить вашу роль и доступ к этой точке.</p><Link className="app-secondary" to={organizationPath}>На главную</Link></section> : <ModuleErrorBoundary key={location.pathname + organization.locationId} organizationPath={organizationPath}>{content}</ModuleErrorBoundary>
   function toggleSidebar() {
     setSidebarCollapsed((value) => {
       window.localStorage.setItem('staffly:sidebar-collapsed', String(!value))
@@ -104,7 +106,7 @@ export default function OrganizationLayout() {
   }
   return <div className="app-page"><AppTopbar key={organization.locationId} organization={organization} /><div className={`workspace-shell${sidebarCollapsed ? ' workspace-shell--collapsed' : ''}`}>
     <aside className="workspace-sidebar" aria-label="Навигация организации">
-      <div className="workspace-sidebar__organization"><Avatar url={organization.logoUrl} name={organization.name} className="workspace-sidebar__organization-avatar" eager /><div><strong>{organization.name}</strong><small><RoleBadge role={organization.organizationRole ?? organization.role} /> · {currentSection}</small></div></div>
+      <div className="workspace-sidebar__organization"><Avatar url={organization.logoUrl} name={organization.name} className="workspace-sidebar__organization-avatar" eager /><div><strong>{organization.name}</strong><small><RoleBadge role={organization.organizationRole ?? organization.role} name={organization.roleName} /> · {currentSection}</small></div></div>
       <div className="workspace-points" role="radiogroup" aria-label="Точки организации">
         {points.map((point, index) => <button type="button" role="radio" tabIndex={point.id === organization.locationId ? 0 : -1} onKeyDown={event => {
           if (!['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
@@ -118,15 +120,15 @@ export default function OrganizationLayout() {
         {locations.isError && <button className="app-secondary" onClick={() => void locations.refetch()}>Повторить</button>}
       </div>
       <button className="workspace-sidebar__collapse" type="button" aria-label={sidebarCollapsed ? 'Развернуть меню' : 'Свернуть меню'} onClick={toggleSidebar}><CollapseIcon collapsed={sidebarCollapsed} /><span>{sidebarCollapsed ? 'Развернуть' : 'Свернуть'}</span></button>
-      <nav aria-label="Разделы организации">{navigation.map(([path, label]) => <NavLink end title={sidebarCollapsed ? label : undefined} to={`${path ? `${organizationPath}/${path}` : organizationPath}?location=${organization.locationId}`} key={label}><NavigationIcon section={path} /><span>{label}</span>{path === 'documents' && <DocumentNavBadge organizationId={organization.id} />}</NavLink>)}</nav>
-      <div className="workspace-sidebar__footer"><Link className="workspace-sidebar__back" title={sidebarCollapsed ? 'Справочник' : undefined} to="/guide"><GuideIcon /><span>Справочник</span></Link><NavLink className="workspace-sidebar__back" title={sidebarCollapsed ? 'Все организации' : undefined} to="/app"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m10 6-6 6 6 6M4 12h16" /></svg><span>Все организации</span></NavLink></div>
+      <nav aria-label="Разделы организации">{navigation.filter(([path]) => !path || path === 'settings' && organization.owner || (modulePermissions[path] ?? []).some(p => canAccess(organization,p))).map(([path, label]) => <NavLink end title={sidebarCollapsed ? label : undefined} to={`${path ? `${organizationPath}/${path}` : organizationPath}?location=${organization.locationId}`} key={label}><NavigationIcon section={path} /><span>{label}</span>{path === 'documents' && <DocumentNavBadge organizationId={organization.id} />}</NavLink>)}</nav>
+      <div className="workspace-sidebar__footer"><NavLink className="workspace-sidebar__back" title={sidebarCollapsed ? 'Все организации' : undefined} to="/app"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m10 6-6 6 6 6M4 12h16" /></svg><span>Все организации</span></NavLink><Link className="workspace-sidebar__guide" to="/guide" title="Справочник" aria-label="Справочник"><GuideIcon name="book" /><span>Справочник</span></Link></div>
     </aside>
-    <main ref={contentRef} className="workspace-content" key={currentSegment ? organization.locationId : organization.id}>{currentSegment && <div className="workspace-location-banner" data-tone={locationTone(organization.locationId ?? '')}><NavigationIcon section="location" /><strong title={organization.location?.name}>{organization.location?.name}</strong>{locationAddress && <span title={locationAddress}>{locationAddress}</span>}<Link className="workspace-guide-link" to={`/guide/category/${helpCategory}`}><GuideIcon name="help" /><span>Помощь по разделу</span></Link></div>}
+    <main ref={contentRef} className="workspace-content" key={currentSegment ? organization.locationId : organization.id}>{currentSegment && <div className="workspace-location-banner" data-tone={locationTone(organization.locationId ?? '')}><NavigationIcon section="location" /><strong title={organization.location?.name}>{organization.location?.name}</strong>{locationAddress && <span title={locationAddress}>{locationAddress}</span>}</div>}
       <Routes>
         <Route index element={module(<OrganizationDashboard organization={organization} />)} />
         <Route path="employees" element={module(<OrganizationMembers organization={organization} />)} />
-        <Route path="schedule" element={module(<SchedulePage key="calendar" organization={organization} />)} />
-        <Route path="schedule/history" element={organization.role === 'MEMBER' ? <Navigate to={`/app/organizations/${organization.id}/schedule`} replace /> : module(<SchedulePage key="history" organization={organization} historyMode />)} />
+        <Route path="schedule" element={module(<>{!canAccess(organization,'schedule.view') && !canAccess(organization,'schedule.own') ? <Navigate to={organizationPath + (canAccess(organization,'statistics.own') ? '/schedule/work-time' : '/schedule/statistics') + location.search} replace/> : <SchedulePage key="calendar" organization={organization}/>}</>)} />
+        <Route path="schedule/history" element={!canAccess(organization, 'schedule.history') ? <Navigate to={`/app/organizations/${organization.id}/schedule`} replace /> : module(<SchedulePage key="history" organization={organization} historyMode />)} />
         <Route path="schedule/statistics" element={module(<StatisticsPage organization={organization} />)} />
         <Route path="schedule/work-time" element={module(<MyWorkTimePage organization={organization} />)} />
         <Route path="requests" element={module(<RequestsPage organization={organization} />)} />

@@ -24,19 +24,19 @@ export function useDashboardSchedule(organizationId: string, points: Organizatio
   }
 }
 
-export function useDashboardRecords(organizationId: string, locationId: string | undefined, pointId: string, manager: boolean) {
+export function useDashboardRecords(organizationId: string, locationId: string | undefined, pointId: string, manager: boolean, access: { requests: boolean; documents: boolean; members: boolean }) {
   const { apiRequest } = useAuth()
   const scope = manager ? 'incoming' : 'mine'
   const params = new URLSearchParams({ locationId: locationId ?? '', pointId })
   const enabled = Boolean(locationId)
-  const requests = useQuery({ ...liveQueryOptions, queryKey: ['requests', organizationId, 'dashboard', scope, pointId], enabled,
+  const requests = useQuery({ ...liveQueryOptions, queryKey: ['requests', organizationId, 'dashboard', scope, pointId], enabled: enabled && access.requests,
     queryFn: () => apiRequest<RequestList>(`/organizations/${organizationId}/requests/${scope}?${params}&page=1&pageSize=4`) })
-  const pending = useQuery({ ...liveQueryOptions, queryKey: ['requests', organizationId, 'dashboard-pending', scope, pointId], enabled,
+  const pending = useQuery({ ...liveQueryOptions, queryKey: ['requests', organizationId, 'dashboard-pending', scope, pointId], enabled: enabled && access.requests,
     queryFn: () => apiRequest<RequestList>(`/organizations/${organizationId}/requests/${scope}?${params}&status=PENDING&page=1&pageSize=1`) })
-  const documents = useQuery({ ...liveQueryOptions, queryKey: ['documents', organizationId, 'dashboard', pointId], enabled,
+  const documents = useQuery({ ...liveQueryOptions, queryKey: ['documents', organizationId, 'dashboard', pointId], enabled: enabled && access.documents,
     queryFn: () => apiRequest<DocumentPage>(`/organizations/${organizationId}/documents?${params}&scope=required&pageSize=4`) })
   // The directory count is distinct members, not the sum of point memberships.
-  const members = useQuery({ ...liveQueryOptions, queryKey: ['organization-members', organizationId, 'dashboard-count', pointId], enabled,
+  const members = useQuery({ ...liveQueryOptions, queryKey: ['organization-members', organizationId, 'dashboard-count', pointId], enabled: enabled && access.members,
     queryFn: () => apiRequest<{ pagination: { total: number } }>(`/organizations/${organizationId}/members?locationId=${locationId}&directory=true&page=1&pageSize=1${pointId === 'all' ? '' : `&pointId=${pointId}`}`) })
   return { requests, pending, documents, members }
 }

@@ -1,3 +1,5 @@
+import { hasPermission, locationsFor, ensureAccessRoles } from '../organizations/access.ts'
+import type { Permission } from '../../app/access/catalog.ts'
 import { Prisma, type OrganizationEvent } from '../../generated/prisma/client.ts'
 import { prisma } from '../db.ts'
 import { ApiError } from '../api-error.ts'
@@ -17,12 +19,15 @@ const include = {
 } satisfies Prisma.OrganizationEventInclude
 type LoadedEvent = Prisma.OrganizationEventGetPayload<{ include: typeof include }>
 const name = (user: { firstName: string | null; lastName: string | null; middleName: string | null; email: string }) => [user.lastName, user.firstName, user.middleName].filter(Boolean).join(' ') || user.email
-const manager = (actor: Actor, shared: boolean, ids: string[]) => actor.organizationRole === 'OWNER' || !shared && ids.length > 0 && ids.every(id => actor.managedLocationIds.includes(id))
+const manager = (actor: Actor, shared: boolean, ids: string[], permission: Permission = 'events.edit') => actor.owner || (shared ? hasPermission(actor, 'events.shared', null) && hasPermission(actor, permission, null) : ids.length > 0 && ids.every(id => hasPermission(actor, permission, id)))
 export function eventVisibility(actor: Actor): Prisma.OrganizationEventWhereInput {
-  if (actor.organizationRole === 'OWNER') return {}
+  if (actor.owner) return {}
+  const viewIds = locationsFor(actor, 'events.view')
+  const managerIds = [...new Set([...locationsFor(actor,'events.edit'),...locationsFor(actor,'events.cancel')])]
   return { OR: [
-    { recipients: { some: { memberId: actor.id, removedAt: null } } },
-    ...(actor.managedLocationIds.length ? [{ shared: true }, { locations: { some: { locationId: { in: actor.managedLocationIds } } } }] : []),
+    { AND: [{ recipients: { some: { memberId: actor.id, removedAt: null } } }, { OR: [{ locations:{some:{locationId:{in:viewIds}}} }, ...(viewIds.length ? [{shared:true}] : [])] }] },
+    { locations: {some:{locationId:{in:managerIds}}} },
+    ...(hasPermission(actor,'events.shared',null) && (hasPermission(actor,'events.edit',null) || hasPermission(actor,'events.cancel',null)) ? [{shared:true}] : []),
   ] }
 }
 function dto(event: LoadedEvent, actor: Actor, now = new Date()) {
@@ -31,49 +36,53 @@ function dto(event: LoadedEvent, actor: Actor, now = new Date()) {
     id: event.id, organizationId: event.organizationId, title: event.title, description: event.description, typeLabel: event.typeLabel,
     startAt: event.startAt, endAt: event.endAt, timezone: event.timezone, place: event.place, meetingUrl: event.meetingUrl,
     shared: event.shared, locations: event.locations.map(({ location }) => ({ id: location.id, name: location.name, timezone: location.timezone, archivedAt: location.archivedAt })),
-    audienceMode: event.audienceMode, audienceRoles: event.audienceRoles,
+    audienceMode: event.audienceMode, audienceRoles: event.audienceRoles, audienceAccessRoleIds: event.audienceAccessRoleIds,
     recipients: active.map(({ member }) => ({ id: member.id, name: name(member.user), avatarUrl: mediaUrl(member.user.avatarFileId), role: member.role })),
     recipientCount: active.length, isRecipient: active.some(row => row.memberId === actor.id),
     createdBy: { id: event.createdByMemberId, name: name(event.createdBy.user) }, updatedBy: { id: event.updatedByMemberId, name: name(event.updatedBy.user) },
     revision: event.revision, createdAt: event.createdAt, updatedAt: event.updatedAt, cancelledAt: event.cancelledAt,
     status: event.cancelledAt ? 'CANCELLED' : (event.endAt ?? event.startAt) <= now ? 'PAST' : event.startAt <= now ? 'ONGOING' : 'UPCOMING',
+    canCancel: manager(actor,event.shared,event.locations.map(row => row.locationId),'events.cancel') && !event.cancelledAt && (event.endAt ?? event.startAt) > now,
     canManage: manager(actor, event.shared, event.locations.map(row => row.locationId)) && !event.cancelledAt && (event.endAt ?? event.startAt) > now,
   }
 }
-async function scope(tx: Prisma.TransactionClient, actor: Actor, shared: boolean, locationIds: string[], write: boolean) {
+async function scope(tx: Prisma.TransactionClient, actor: Actor, shared: boolean, locationIds: string[], write: boolean, permission: Permission = 'events.create') {
   const ids = [...new Set(locationIds)].sort()
   if (shared ? ids.length > 0 : !ids.length) throw new ApiError(400, 'EVENT_SCOPE_REQUIRED', 'Выберите точки или всю организацию.')
   const locations = await tx.organizationLocation.findMany({ where: { organizationId: actor.organizationId, ...(shared ? {} : { id: { in: ids } }), archivedAt: null }, orderBy: { createdAt: 'asc' } })
   if (!shared && locations.length !== ids.length) throw new ApiError(400, 'LOCATION_NOT_FOUND', 'Одна из выбранных точек недоступна.')
-  if (write && !manager(actor, shared, ids)) throw new ApiError(403, 'INSUFFICIENT_PERMISSIONS', 'Управлять событием можно только в пределах назначенных вам точек.')
+  if (write && !manager(actor, shared, ids, permission)) throw new ApiError(403, 'INSUFFICIENT_PERMISSIONS', 'Управлять событием можно только в пределах назначенных вам точек.')
   const organization = await tx.organization.findUniqueOrThrow({ where: { id: actor.organizationId }, select: { timezone: true } })
   return { locations, ids, timezone: !shared && locations.length === 1 ? locations[0].timezone : organization.timezone }
 }
-async function audience(tx: Prisma.TransactionClient, organizationId: string, shared: boolean, ids: string[], roles?: string[]) {
-  return tx.organizationMember.findMany({
-    where: { organizationId, leftAt: null, user: { deletedAt: null }, ...(roles?.length ? { role: { not: 'OWNER' as const } } : {}),
-      ...(shared && !roles?.length ? {} : { locationMemberships: { some: { leftAt: null, location: { archivedAt: null }, ...(!shared ? { locationId: { in: ids } } : {}), ...(roles?.length ? { role: { in: roles as ('ADMIN' | 'MEMBER')[] } } : {}) } } }),
-    },
-    include: { user: true, locationMemberships: { where: { leftAt: null, location: { archivedAt: null }, ...(!shared ? { locationId: { in: ids } } : {}) } } },
-    orderBy: [{ user: { lastName: 'asc' } }, { id: 'asc' }],
-  })
+async function audience(tx: Prisma.TransactionClient, organizationId: string, shared: boolean, ids: string[], legacyRoles?: string[]) {
+  const members = await tx.organizationMember.findMany({where:{organizationId,leftAt:null,user:{deletedAt:null}},include:{user:true,accessAssignments:true,locationMemberships:{where:{leftAt:null,location:{archivedAt:null},...(!shared?{locationId:{in:ids}}:{})}}},orderBy:[{user:{lastName:'asc'}},{id:'asc'}]})
+  return members.filter(m => (shared || m.role === 'OWNER' || m.accessRoleId || m.locationMemberships.length || m.accessAssignments.some(a=>ids.includes(a.locationId))) && (!legacyRoles?.length || m.locationMemberships.some(l=>legacyRoles.includes(l.role))))
 }
 export async function eventMembers(userId: string, organizationId: string, shared: boolean, ids: string[]) {
   return prisma.$transaction(async tx => {
     const actor = await getMembership(userId, organizationId, tx)
-    const selected = await scope(tx, actor, shared, ids, true)
+    const selected = await scope(tx, actor, shared, ids, false)
+    if (!manager(actor,shared,selected.ids,'events.create') && !manager(actor,shared,selected.ids,'events.edit')) throw new ApiError(403,'INSUFFICIENT_PERMISSIONS','Недостаточно прав.')
     const members = await audience(tx, organizationId, shared, selected.ids)
-    return { timezone: selected.timezone, members: members.map(member => ({ id: member.id, name: name(member.user), avatarUrl: mediaUrl(member.user.avatarFileId), role: member.role, locationRoles: member.role === 'OWNER' ? [] : member.locationMemberships.map(row => row.role) })) }
+    const roles = await ensureAccessRoles(tx,organizationId)
+    return { timezone: selected.timezone, members: members.map(member => ({ id: member.id, name: name(member.user), avatarUrl: mediaUrl(member.user.avatarFileId), role: member.role, accessRoleIds:[...(member.accessRoleId?[member.accessRoleId]:[]), ...(member.accessConfigured ? member.accessAssignments.filter(a=>shared || ids.includes(a.locationId)).map(a=>a.roleId) : member.locationMemberships.map(l=>roles.find(r=>r.systemCode===l.role)!.id)), ...(member.role==='OWNER'?[roles.find(r=>r.systemCode==='OWNER')!.id]:[])], locationRoles: member.role === 'OWNER' ? [] : member.locationMemberships.map(row => row.role) })) }
   })
 }
 function payload(input: EventInput, timezone: string) {
   const startAt = zonedDateTimeToUtc(input.startDate, input.startTime, timezone)
   const endAt = input.endDate && input.endTime ? zonedDateTimeToUtc(input.endDate, input.endTime, timezone) : null
   if (endAt && endAt <= startAt) throw new ApiError(400, 'EVENT_INVALID_PERIOD', 'Окончание должно быть позже начала.')
-  return { title: input.title, description: input.description, typeLabel: input.typeLabel, startAt, endAt, timezone, place: input.place, meetingUrl: input.meetingUrl, shared: input.shared, audienceMode: input.audienceMode, audienceRoles: [...new Set(input.audienceRoles)].sort() }
+  return { title: input.title, description: input.description, typeLabel: input.typeLabel, startAt, endAt, timezone, place: input.place, meetingUrl: input.meetingUrl, shared: input.shared, audienceAccessRoleIds: input.audienceAccessRoleIds ?? [], audienceMode: input.audienceMode, audienceRoles: [...new Set(input.audienceRoles)].sort() }
 }
 async function resolveRecipients(tx: Prisma.TransactionClient, organizationId: string, input: EventInput, ids: string[]) {
-  const candidates = await audience(tx, organizationId, input.shared, ids, input.audienceMode === 'ROLES' ? input.audienceRoles : undefined)
+  const candidates = await audience(tx, organizationId, input.shared, ids, input.audienceMode === 'ROLES' && !input.audienceAccessRoleIds?.length ? input.audienceRoles : undefined)
+  if (input.audienceMode === 'ROLES' && input.audienceAccessRoleIds?.length) {
+    const roles = await ensureAccessRoles(tx, organizationId)
+    if (input.audienceAccessRoleIds.some(id => !roles.some(r => r.id === id))) throw new ApiError(400, 'INVALID_ROLE', 'Роль из другой организации.')
+    const hydrated = await Promise.all(candidates.map(m => getMembership(m.userId, organizationId, tx)))
+    return hydrated.filter(m => input.audienceAccessRoleIds!.some(id => m.accessRoleId === id || m.role === 'OWNER' && roles.find(r=>r.id===id)?.systemCode==='OWNER' || (m.accessConfigured ? m.accessAssignments.some(a => a.roleId === id && (input.shared || ids.includes(a.locationId))) : m.locationMemberships.some(l=>(input.shared || ids.includes(l.locationId)) && roles.find(r=>r.id===id)?.systemCode===l.role)))).map(m => m.id)
+  }
   if (input.audienceMode !== 'SELECTED') return candidates.map(member => member.id)
   const selected = [...new Set(input.memberIds)]
   if (selected.some(id => !candidates.some(member => member.id === id))) throw new ApiError(400, 'EVENT_INVALID_RECIPIENT', 'Один из сотрудников не относится к выбранным точкам.')
@@ -88,7 +97,7 @@ async function notify(tx: Prisma.TransactionClient, event: OrganizationEvent, me
 }
 async function recordChange(tx: Prisma.TransactionClient, event: LoadedEvent, actor: Actor, action: string) {
   await tx.eventChange.create({ data: { organizationId: event.organizationId, eventId: event.id, memberId: actor.id, revision: event.revision, action,
-    snapshot: { title: event.title, description: event.description, typeLabel: event.typeLabel, startAt: event.startAt.toISOString(), endAt: event.endAt?.toISOString() ?? null, timezone: event.timezone, place: event.place, meetingUrl: event.meetingUrl, shared: event.shared, locationIds: event.locations.map(row => row.locationId), memberIds: event.recipients.map(row => row.memberId), audienceMode: event.audienceMode, audienceRoles: event.audienceRoles, cancelledAt: event.cancelledAt?.toISOString() ?? null } } })
+    snapshot: { title: event.title, description: event.description, typeLabel: event.typeLabel, startAt: event.startAt.toISOString(), endAt: event.endAt?.toISOString() ?? null, timezone: event.timezone, place: event.place, meetingUrl: event.meetingUrl, shared: event.shared, locationIds: event.locations.map(row => row.locationId), memberIds: event.recipients.map(row => row.memberId), audienceMode: event.audienceMode, audienceRoles: event.audienceRoles, audienceAccessRoleIds: event.audienceAccessRoleIds, cancelledAt: event.cancelledAt?.toISOString() ?? null } } })
 }
 export async function createEvent(userId: string, organizationId: string, input: EventInput) {
   return prisma.$transaction(async tx => {
@@ -138,13 +147,13 @@ export async function updateEvent(userId: string, organizationId: string, eventI
     if (!manager(actor, previous.shared, previous.locations.map(row => row.locationId))) throw new ApiError(403, 'INSUFFICIENT_PERMISSIONS', 'Недостаточно прав для изменения события.')
     if (previous.cancelledAt || (previous.endAt ?? previous.startAt) <= new Date()) throw new ApiError(409, 'EVENT_CLOSED', 'Прошедшее или отменённое событие нельзя изменить.')
     if (input.revision !== previous.revision) throw new ApiError(409, 'CONCURRENT_UPDATE', 'Событие уже изменилось. Откройте его заново.')
-    const selected = await scope(tx, actor, input.shared, input.locationIds, true)
+    const selected = await scope(tx, actor, input.shared, input.locationIds, true, 'events.edit')
     const data = payload(input, selected.timezone)
     const startChanged = data.startAt.getTime() !== previous.startAt.getTime()
     if (startChanged && data.startAt <= new Date()) throw new ApiError(400, 'EVENT_START_IN_PAST', 'Выберите будущее время начала.')
     const oldIds = previous.recipients.map(row => row.memberId)
     const scopeChanged = previous.shared !== input.shared || previous.locations.map(row => row.locationId).sort().join() !== selected.ids.join()
-    const audienceChanged = previous.audienceMode !== input.audienceMode || [...previous.audienceRoles].sort().join() !== data.audienceRoles.join() || input.audienceMode === 'SELECTED' && [...new Set(input.memberIds)].sort().join() !== [...oldIds].sort().join()
+    const audienceChanged = previous.audienceAccessRoleIds.join() !== (input.audienceAccessRoleIds ?? []).join() || previous.audienceMode !== input.audienceMode || [...previous.audienceRoles].sort().join() !== data.audienceRoles.join() || input.audienceMode === 'SELECTED' && [...new Set(input.memberIds)].sort().join() !== [...oldIds].sort().join()
     const nextIds = input.refreshRecipients || scopeChanged || audienceChanged ? await resolveRecipients(tx, organizationId, input, selected.ids) : oldIds
     const removed = oldIds.filter(id => !nextIds.includes(id)), added = nextIds.filter(id => !oldIds.includes(id))
     const material = startChanged || (data.endAt?.getTime() ?? null) !== (previous.endAt?.getTime() ?? null) || data.timezone !== previous.timezone || data.place !== previous.place || data.meetingUrl !== previous.meetingUrl || scopeChanged
@@ -163,7 +172,7 @@ export async function cancelEvent(userId: string, organizationId: string, eventI
   return prisma.$transaction(async tx => {
     await tx.$queryRaw`SELECT id FROM organization_events WHERE id = ${eventId}::uuid AND organization_id = ${organizationId}::uuid FOR UPDATE`
     const actor = await getMembership(userId, organizationId, tx), previous = await accessibleEvent(tx, actor, eventId)
-    if (!manager(actor, previous.shared, previous.locations.map(row => row.locationId))) throw new ApiError(403, 'INSUFFICIENT_PERMISSIONS', 'Недостаточно прав для отмены события.')
+    if (!manager(actor, previous.shared, previous.locations.map(row => row.locationId), 'events.cancel')) throw new ApiError(403, 'INSUFFICIENT_PERMISSIONS', 'Недостаточно прав для отмены события.')
     if (previous.cancelledAt) return dto(previous, actor)
     if ((previous.endAt ?? previous.startAt) <= new Date()) throw new ApiError(409, 'EVENT_CLOSED', 'Событие уже завершилось.')
     if (previous.revision !== revision) throw new ApiError(409, 'CONCURRENT_UPDATE', 'Событие уже изменилось. Откройте его заново.')

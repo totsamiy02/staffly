@@ -21,7 +21,7 @@ router.post(base + '/members', heavyLimiter, async (request, response) => { cons
 router.post(base + '/preview', heavyLimiter, async (request, response) => { const { organizationId } = parse(params, request.params); response.set('Cache-Control', 'no-store').json(previewReport(await buildReport(user(request), organizationId, parse(reportBody, request.body)))) })
 router.post(base + '/export', exportLimiter, async (request, response) => {
   const { organizationId } = parse(params, request.params), input = parse(reportBody, request.body)
-  const report = await buildReport(user(request), organizationId, input), buffer = await reportWorkbook(report)
+  const report = await buildReport(user(request), organizationId, input, new Date(), 'reports.export'), buffer = await reportWorkbook(report)
   response.set({ 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Content-Disposition': `attachment; filename="Staffly_${input.from}_${input.to}.xlsx"`, 'Cache-Control': 'no-store' }).send(buffer)
 })
 router.post(base + '/templates', mutationLimiter, async (request, response) => { const { organizationId } = parse(params, request.params); response.status(201).json(await saveReportTemplate(user(request), organizationId, null, parse(templateBody, request.body))) })

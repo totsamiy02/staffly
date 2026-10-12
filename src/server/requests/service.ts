@@ -1,3 +1,4 @@
+import { hasPermission, requirePermission, locationsFor, permissionRecipients } from '../organizations/access.ts'
 import { requireLocationManager } from '../organizations/location-service.ts'
 import { locationWhere, locationMemberWhere, scopedLocationId } from '../organizations/location-context.ts'
 import { assertAbsencePeriod, absencePeriodBody, notifyAbsence } from '../schedule/absence-service.ts'
@@ -6,7 +7,7 @@ import { cancelShiftRequests, lockShift, reconcileShiftRequests } from './shift-
 import type { OrganizationRole, Prisma, RequestDateMode, RequestSystemCode, RequestStatus } from '../../generated/prisma/client.ts'
 import { prisma } from '../db.ts'
 import { ApiError } from '../api-error.ts'
-import { getMembership, requireOrganizationRole } from '../organizations/permissions.ts'
+import { getMembership } from '../organizations/permissions.ts'
 import { addCalendarDays, startOfZonedDate, zonedDateTimeToUtc } from '../schedule/timezone.ts'
 import { activeTarget, assertNoApprovedAbsence } from '../schedule/service.ts'
 import { deliverRequestDecision } from '../mail.ts'
@@ -42,18 +43,18 @@ async function ensureSystemTypes(organizationId: string) {
 export async function listRequestTypes(userId: string, organizationId: string, includeInactive = false) {
   const actor = await getMembership(userId, organizationId)
   await ensureSystemTypes(organizationId)
-  return prisma.requestType.findMany({ where: { organizationId, OR: [{ systemCode: null }, { systemCode: { not: 'SICK_LEAVE' } }], ...(!includeInactive || actor.role !== 'OWNER' ? { isActive: true } : {}) }, orderBy: [{ systemCode: 'asc' }, { name: 'asc' }] })
+  return prisma.requestType.findMany({ where: { organizationId, OR: [{ systemCode: null }, { systemCode: { not: 'SICK_LEAVE' } }], ...(!includeInactive || !hasPermission(actor,'requestTypes.manage',null) ? { isActive: true } : {}) }, orderBy: [{ systemCode: 'asc' }, { name: 'asc' }] })
 }
 
 export async function createRequestType(userId: string, organizationId: string, input: { name: string; description?: string | null; dateMode: RequestDateMode; requiresComment: boolean; allowsAttachments: boolean }) {
   const actor = await getMembership(userId, organizationId)
-  requireOrganizationRole(actor.role, ['OWNER'])
+  requirePermission(actor, 'requestTypes.manage', null)
   return prisma.requestType.create({ data: { organizationId, name: input.name, description: input.description || null, dateMode: input.dateMode, requiresComment: input.requiresComment, allowsAttachments: input.allowsAttachments } })
 }
 
 export async function updateRequestType(userId: string, organizationId: string, typeId: string, input: { name: string; description?: string | null; dateMode: RequestDateMode; requiresComment: boolean; allowsAttachments: boolean; isActive: boolean }) {
   const actor = await getMembership(userId, organizationId)
-  requireOrganizationRole(actor.role, ['OWNER'])
+  requirePermission(actor, 'requestTypes.manage', null)
   const type = await prisma.requestType.findFirst({ where: { id: typeId, organizationId } })
   if (!type) throw new ApiError(404, 'REQUEST_TYPE_NOT_FOUND', 'Тип заявки не найден.')
   if (type.systemCode === 'SICK' && !input.isActive) throw new ApiError(409, 'MANDATORY_REQUEST_TYPE', 'Сообщение об отсутствии — обязательный тип заявки.')
@@ -86,9 +87,10 @@ export async function createRequest(userId: string, organizationId: string, inpu
   if (!type) throw new ApiError(404, 'REQUEST_TYPE_NOT_FOUND', 'Активный тип заявки не найден.')
   if (type.systemCode === 'STAFFING_RESPONSE') throw new ApiError(400, 'STAFFING_RESPONSE_ONLY', 'Откликнитесь на открытую заявку на подмену.')
   if (type.systemCode === 'SICK_LEAVE') throw new ApiError(400, 'SICK_REPORT_ONLY', 'Используйте действие «Сообщить о болезни» без согласования.')
+  requirePermission(actor,type.systemCode==='STAFFING' ? 'staffing.create' : 'requests.create')
   validateTypeFields(type, input)
-  if (scopedLocationId(organizationId) && !actor.assignedLocationId && actor.role !== 'OWNER') throw new ApiError(403, 'MEMBER_NOT_IN_LOCATION', 'Для этой точки используйте отклик на заявку о подмене.')
-  if (type.systemCode === 'STAFFING') await requireLocationManager(prisma, userId, organizationId, actor.locationId)
+  if (scopedLocationId(organizationId) && !actor.assignedLocationId && actor.role !== 'OWNER' && type.systemCode !== 'STAFFING') throw new ApiError(403, 'MEMBER_NOT_IN_LOCATION', 'Для этой точки используйте отклик на заявку о подмене.')
+  if (type.systemCode === 'STAFFING') await requireLocationManager(prisma, userId, organizationId, actor.locationId, 'staffing.create')
   const position = input.staffingPositionId ? await prisma.organizationPosition.findFirst({ where: { id: input.staffingPositionId, organizationId, isActive: true } }) : null
   if (type.systemCode === 'STAFFING' && (input.staffingPositionId && !position || !position && !input.staffingPositionName)) throw new ApiError(400, 'STAFFING_POSITION_REQUIRED', 'Укажите требуемую должность.')
   if (type.systemCode === 'SICK') return saveAbsenceRequest(userId, organizationId, type, input)
@@ -104,7 +106,7 @@ export async function createRequest(userId: string, organizationId: string, inpu
   const endDate = type.dateMode === 'SINGLE' ? startDate : dateValue(input.endDate)
   return prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId}, 1))::text`
-    if (type.systemCode === 'STAFFING') await requireLocationManager(tx, userId, organizationId, actor.locationId)
+    if (type.systemCode === 'STAFFING') await requireLocationManager(tx, userId, organizationId, actor.locationId, 'staffing.create')
     if (shift) {
       await lockShift(tx, shift.id)
       const fresh = await tx.workShift.findUniqueOrThrow({ where: { id: shift.id } })
@@ -116,7 +118,7 @@ export async function createRequest(userId: string, organizationId: string, inpu
       const recipients = await tx.organizationMember.findMany({ where: { organizationId, leftAt: null, user: { deletedAt: null }, locationMemberships: { some: { leftAt: null, locationId: { not: actor.locationId }, location: { archivedAt: null } }, none: { locationId: actor.locationId, leftAt: null } } }, select: { userId: true } })
       if (recipients.length) await tx.accountNotification.createMany({ data: recipients.map(member => ({ organizationId, userId: member.userId, requestId: request.id, type: 'REQUEST_CREATED', title: 'Нужен сотрудник на подмену', message: `${actor.location.name} · ${position?.name ?? input.staffingPositionName}` })) })
     }
-    const reviewers = await tx.organizationMember.findMany({ where: { organizationId, leftAt: null, OR: scopedLocationId(organizationId) ? [{ role: 'OWNER' }, { locationMemberships: { some: { locationId: scopedLocationId(organizationId), role: 'ADMIN', leftAt: null } } }] : [{ role: { in: ['OWNER', 'ADMIN'] } }] }, select: { userId: true } })
+    const reviewers = await permissionRecipients(tx, organizationId, 'requests.resolve', actor.locationId)
     if (reviewers.length) await tx.accountNotification.createMany({ data: reviewers.map((reviewer) => ({ userId: reviewer.userId, organizationId, requestId: request.id, type: 'REQUEST_CREATED' as const, title: 'Новая заявка', message: `${memberName(actorUser)} · ${type.name}` })) })
     return request
   })
@@ -124,6 +126,7 @@ export async function createRequest(userId: string, organizationId: string, inpu
 
 export async function updateRequest(userId: string, organizationId: string, requestId: string, input: CreateInput) {
   const actor = await getMembership(userId, organizationId)
+  requirePermission(actor,'requests.edit')
   const current = await prisma.organizationRequest.findFirst({ where: { id: requestId, organizationId, ...locationWhere(organizationId), createdByMemberId: actor.id } })
   if (!current) throw new ApiError(404, 'REQUEST_NOT_FOUND', 'Заявка не найдена.')
   if (['STAFFING', 'STAFFING_RESPONSE'].includes(current.systemCodeSnapshot ?? '')) throw new ApiError(409, 'STAFFING_EDIT_LOCKED', 'Чтобы изменить условия подмены, отмените заявку и создайте новую. Отклики сохранятся в истории.')
@@ -163,7 +166,7 @@ export async function updateRequest(userId: string, organizationId: string, requ
     await tx.requestEvent.create({ data: { requestId, actorMemberId: actor.id, type: 'EDITED' } })
     await tx.requestRead.deleteMany({ where: { requestId } })
     await tx.accountNotification.updateMany({ where: { requestId, type: 'REQUEST_CREATED', readAt: null }, data: { readAt: new Date() } })
-    const reviewers = await tx.organizationMember.findMany({ where: { organizationId, leftAt: null, OR: scopedLocationId(organizationId) ? [{ role: 'OWNER' }, { locationMemberships: { some: { locationId: scopedLocationId(organizationId), role: 'ADMIN', leftAt: null } } }] : [{ role: { in: ['OWNER', 'ADMIN'] } }] }, select: { userId: true } })
+    const reviewers = await permissionRecipients(tx, organizationId, 'requests.resolve', actor.locationId)
     if (reviewers.length) await tx.accountNotification.createMany({ data: reviewers.map((reviewer) => ({ userId: reviewer.userId, organizationId, requestId, type: 'REQUEST_CREATED' as const, title: 'Заявка изменена', message: `${memberName(author)} · ${type.name}` })) })
     return tx.organizationRequest.findUniqueOrThrow({ where: { id: requestId } })
   }, { isolationLevel: 'Serializable' })
@@ -181,18 +184,22 @@ const requestInclude = {
   reads: { orderBy: { readAt: 'asc' } },
 } as const
 
-function publicRequest(item: any, viewerMemberId?: string) {
-  return { ...item, locationName: item.location?.name, timezone: item.location?.timezone, responseCount: item._count?.staffingResponses ?? 0, absenceReason: item.absence?.reason ?? null, startDate: dateText(item.startDate), endDate: dateText(item.endDate), creatorName: memberName(item.creator.user), creatorRole: item.creator.role, creatorEmail: item.creator.user.email, creatorAvatarUrl: mediaUrl(item.creator.user.avatarFileId), resolvedByName: item.resolvedBy ? memberName(item.resolvedBy.user) : null, firstReadAt: item.reads?.[0]?.readAt ?? null, readByViewer: viewerMemberId ? item.reads?.some((read: { memberId: string }) => read.memberId === viewerMemberId) : false, attachments: item.attachments?.map((attachment: any) => ({ id: attachment.id, fileName: attachment.fileName, mimeType: attachment.storedFile.mimeType, size: attachment.storedFile.size, downloadUrl: `/api/organizations/${item.organizationId}/requests/${item.id}/attachments/${attachment.id}` })) ?? [], events: item.events?.map((event: any) => ({ id: event.id, type: event.type, comment: event.comment, createdAt: event.createdAt, actorName: memberName(event.actor.user) })) ?? [] }
+function publicRequest(item: any, viewerMemberId?: string, actor?: Awaited<ReturnType<typeof getMembership>>) {
+  const {creator:_creator,resolvedBy:_resolvedBy,absence:_absence,location:_location,reads:_reads,_count,...fields}=item
+  const own=item.createdByMemberId===viewerMemberId, details=own || !actor || hasPermission(actor,'absences.details',item.locationId), contacts=own || !actor || hasPermission(actor,'members.contacts',item.locationId)
+  return { ...fields, ...(!details && item.systemCodeSnapshot==='SICK' ? {comment:null,events:[]} : {}), locationName: item.location?.name, timezone: item.location?.timezone, responseCount: item._count?.staffingResponses ?? 0, absenceReason: details ? item.absence?.reason ?? null : null, startDate: dateText(item.startDate), endDate: dateText(item.endDate), creatorName: memberName(item.creator.user), creatorRole: item.creator.role, creatorEmail: contacts ? item.creator.user.email : '', creatorAvatarUrl: mediaUrl(item.creator.user.avatarFileId), resolvedByName: item.resolvedBy ? memberName(item.resolvedBy.user) : null, firstReadAt: item.reads?.[0]?.readAt ?? null, readByViewer: viewerMemberId ? item.reads?.some((read: { memberId: string }) => read.memberId === viewerMemberId) : false, attachments: actor && !own && !hasPermission(actor,'requests.attachments',item.locationId) ? [] : item.attachments?.map((attachment: any) => ({ id: attachment.id, fileName: attachment.fileName, mimeType: attachment.storedFile.mimeType, size: attachment.storedFile.size, downloadUrl: `/api/organizations/${item.organizationId}/requests/${item.id}/attachments/${attachment.id}` })) ?? [], events: item.events?.map((event: any) => ({ id: event.id, type: event.type, comment: !details && item.systemCodeSnapshot==='SICK' ? null : event.comment, createdAt: event.createdAt, actorName: memberName(event.actor.user) })) ?? [] }
 }
 
 type ListOptions = { pointId?: string; page: number; pageSize: number; status?: RequestStatus; typeId?: string; memberId?: string; role?: OrganizationRole; from?: string; to?: string; search?: string }
 
 export async function listRequests(userId: string, organizationId: string, scope: 'mine' | 'incoming' | 'history' | 'staffing', options: ListOptions) {
   const actor = await getMembership(userId, organizationId)
-  if (!['mine', 'staffing'].includes(scope)) requireOrganizationRole(actor.organizationRole, ['OWNER', 'ADMIN'])
-  const pointScope = scope === 'staffing' ? { location: { archivedAt: null }, ...(options.pointId && options.pointId !== 'all' ? { locationId: options.pointId } : {}) } : options.pointId ? { ...(scope === 'mine' || actor.organizationRole === 'OWNER' ? {} : { locationId: { in: actor.managedLocationIds } }), ...(options.pointId !== 'all' ? { locationId: options.pointId } : {}) } : locationWhere(organizationId)
-  if (scope !== 'mine' && scope !== 'staffing' && options.pointId && options.pointId !== 'all') await requireLocationManager(prisma, userId, organizationId, options.pointId)
-  if (scope !== 'mine' && scope !== 'staffing' && !options.pointId) requireOrganizationRole(actor.role, ['OWNER', 'ADMIN'])
+  if (scope === 'mine') requirePermission(actor, 'requests.own')
+  if (scope === 'staffing' && !hasPermission(actor, 'staffing.create')) requirePermission(actor, 'staffing.respond')
+  if (!['mine', 'staffing'].includes(scope)) requirePermission(actor, 'requests.view', options.pointId === 'all' ? undefined : options.pointId ?? actor.locationId)
+  const pointScope = scope === 'staffing' ? { location: { archivedAt: null }, ...(options.pointId && options.pointId !== 'all' ? { locationId: options.pointId } : {}) } : options.pointId ? { ...(scope === 'mine' || actor.organizationRole === 'OWNER' ? {} : { locationId: { in: locationsFor(actor, 'requests.view') } }), ...(options.pointId !== 'all' ? { locationId: options.pointId } : {}) } : locationWhere(organizationId)
+  if (scope !== 'mine' && scope !== 'staffing' && options.pointId && options.pointId !== 'all') await requireLocationManager(prisma, userId, organizationId, options.pointId, 'requests.view')
+  if (scope !== 'mine' && scope !== 'staffing' && !options.pointId) requirePermission(actor, 'requests.view')
   await reconcileShiftRequests(organizationId)
   const dateFilters: Prisma.OrganizationRequestWhereInput[] = []
   if (options.from || options.to) {
@@ -211,14 +218,16 @@ export async function listRequests(userId: string, organizationId: string, scope
   }
   const [total, rows] = await prisma.$transaction([prisma.organizationRequest.count({ where }), prisma.organizationRequest.findMany({ where, include: requestInclude, orderBy: { createdAt: 'desc' }, skip: (options.page - 1) * options.pageSize, take: options.pageSize })])
   const unread = scope === 'incoming' ? await prisma.organizationRequest.count({ where: { ...where, reads: { none: { memberId: actor.id } } } }) : 0
-  return { requests: rows.map((item) => publicRequest(item, actor.id)), pagination: { page: options.page, pageSize: options.pageSize, total, pages: Math.max(1, Math.ceil(total / options.pageSize)) }, counters: { pending: scope === 'incoming' ? total : 0, unread } }
+  return { requests: rows.map((item) => publicRequest(item, actor.id, actor)), pagination: { page: options.page, pageSize: options.pageSize, total, pages: Math.max(1, Math.ceil(total / options.pageSize)) }, counters: { pending: scope === 'incoming' ? total : 0, unread } }
 }
 
 async function requestForAccess(userId: string, organizationId: string, requestId: string) {
   const actor = await getMembership(userId, organizationId)
   await reconcileShiftRequests(organizationId)
   const item = await prisma.organizationRequest.findFirst({ where: { id: requestId, organizationId, ...locationWhere(organizationId) }, include: requestInclude })
-  if (!item || (actor.role === 'MEMBER' && item.createdByMemberId !== actor.id && item.systemCodeSnapshot !== 'STAFFING')) throw new ApiError(404, 'REQUEST_NOT_FOUND', 'Заявка не найдена.')
+  if (!item || (!hasPermission(actor, 'requests.view') && item.createdByMemberId !== actor.id && item.systemCodeSnapshot !== 'STAFFING')) throw new ApiError(404, 'REQUEST_NOT_FOUND', 'Заявка не найдена.')
+  if (item.createdByMemberId === actor.id) requirePermission(actor, 'requests.own')
+  if (item.systemCodeSnapshot==='STAFFING' && item.createdByMemberId!==actor.id && !hasPermission(actor,'requests.view')) requirePermission(actor,'staffing.respond')
   return { actor, item }
 }
 
@@ -231,35 +240,38 @@ async function conflictsFor(item: { organizationId: string; createdByMemberId: s
 
 export async function getRequest(userId: string, organizationId: string, requestId: string) {
   const { actor, item } = await requestForAccess(userId, organizationId, requestId)
-  if (actor.role !== 'MEMBER') {
+  if (hasPermission(actor, 'requests.view')) {
     const read = await prisma.requestRead.upsert({ where: { requestId_memberId: { requestId, memberId: actor.id } }, create: { requestId, memberId: actor.id }, update: {} })
     if (!item.reads.some((entry) => entry.memberId === actor.id)) item.reads.push(read)
   }
-  const staffingResponses = item.systemCodeSnapshot === 'STAFFING' && actor.role !== 'MEMBER' ? (await prisma.organizationRequest.findMany({ where: { organizationId, staffingRequestId: item.id }, include: requestInclude, orderBy: { createdAt: 'asc' } })).map(response => publicRequest(response, actor.id)) : []
+  const staffingResponses = item.systemCodeSnapshot === 'STAFFING' && hasPermission(actor, 'requests.view') ? (await prisma.organizationRequest.findMany({ where: { organizationId, staffingRequestId: item.id }, include: requestInclude, orderBy: { createdAt: 'asc' } })).map(response => publicRequest(response, actor.id, actor)) : []
   const ownResponse = item.systemCodeSnapshot === 'STAFFING' ? await prisma.organizationRequest.findFirst({ where: { staffingRequestId: item.id, createdByMemberId: actor.id }, select: { id: true } }) : null
   const memberships = item.systemCodeSnapshot === 'STAFFING' ? await prisma.locationMember.findMany({ where: { memberId: actor.id, leftAt: null, location: { archivedAt: null } }, select: { locationId: true } }) : []
-  return { staffingResponses, viewerResponseId: ownResponse?.id ?? null, viewerCanRespond: item.status === 'PENDING' && !!item.proposedStartAt && item.proposedStartAt > new Date() && !ownResponse && memberships.some(point => point.locationId !== item.locationId) && !memberships.some(point => point.locationId === item.locationId), request: publicRequest(item, actor.id), conflicts: await conflictsFor(item, actor.organization.timezone), absenceConflicts: item.status === 'PENDING' && item.systemCodeSnapshot && absenceCodes.includes(item.systemCodeSnapshot) && item.startDate && item.endDate ? (await prisma.employeeAbsence.findMany({ where: { organizationId, memberId: item.createdByMemberId, cancelledAt: null, startDate: { lte: item.endDate }, endDate: { gte: item.startDate } }, select: { id: true, type: true, startDate: true, endDate: true } })).map(a => ({ ...a, startDate: dateText(a.startDate), endDate: dateText(a.endDate) })) : [], otherAbsentEmployees: actor.role !== 'MEMBER' && item.startDate && item.endDate ? (await prisma.employeeAbsence.findMany({ where: { organizationId, member: locationMemberWhere(organizationId), memberId: { not: item.createdByMemberId }, cancelledAt: null, startDate: { lte: item.endDate }, endDate: { gte: item.startDate } }, distinct: ['memberId'], select: { memberId: true } })).length : 0 }
+  return { staffingResponses, viewerResponseId: ownResponse?.id ?? null, viewerCanRespond: hasPermission(actor,'staffing.respond') && item.status === 'PENDING' && !!item.proposedStartAt && item.proposedStartAt > new Date() && !ownResponse && memberships.some(point => point.locationId !== item.locationId) && !memberships.some(point => point.locationId === item.locationId), request: { ...publicRequest(item, actor.id, actor), ...(!hasPermission(actor, 'requests.attachments') && item.createdByMemberId !== actor.id ? {attachments:[]} : {}), ...(!hasPermission(actor,'absences.details') && item.createdByMemberId !== actor.id ? {absenceReason:null} : {}) }, conflicts: await conflictsFor(item, actor.organization.timezone), absenceConflicts: item.status === 'PENDING' && item.systemCodeSnapshot && absenceCodes.includes(item.systemCodeSnapshot) && item.startDate && item.endDate ? (await prisma.employeeAbsence.findMany({ where: { organizationId, memberId: item.createdByMemberId, cancelledAt: null, startDate: { lte: item.endDate }, endDate: { gte: item.startDate } }, select: { id: true, type: true, startDate: true, endDate: true } })).map(a => ({ ...a, startDate: dateText(a.startDate), endDate: dateText(a.endDate) })) : [], otherAbsentEmployees: hasPermission(actor, 'requests.view') && item.startDate && item.endDate ? (await prisma.employeeAbsence.findMany({ where: { organizationId, member: locationMemberWhere(organizationId), memberId: { not: item.createdByMemberId }, cancelledAt: null, startDate: { lte: item.endDate }, endDate: { gte: item.startDate } }, distinct: ['memberId'], select: { memberId: true } })).length : 0 }
 }
 
 export async function resolveRequest(userId: string, organizationId: string, requestId: string, decision: 'APPROVED' | 'REJECTED', comment: string | null | undefined, cancelConflictingShifts = false, acknowledgeWorkload = false, acknowledgeAbsence = false) {
   const actor = await getMembership(userId, organizationId)
-  requireOrganizationRole(actor.role, ['OWNER', 'ADMIN'])
+  if (!hasPermission(actor,'requests.resolve') && !hasPermission(actor,'staffing.resolve')) requirePermission(actor,'requests.resolve')
   await reconcileShiftRequests(organizationId)
   const current = await prisma.organizationRequest.findFirst({ where: { id: requestId, organizationId, ...locationWhere(organizationId) }, include: { creator: true } })
   if (!current) throw new ApiError(404, 'REQUEST_NOT_FOUND', 'Заявка не найдена.')
+  const resolveKey = ['STAFFING','STAFFING_RESPONSE'].includes(current.systemCodeSnapshot??'') ? 'staffing.resolve' as const : 'requests.resolve' as const
+  requirePermission(actor,resolveKey,current.locationId)
   if (current.systemCodeSnapshot === 'SICK') throw new ApiError(409, 'INFORMATIONAL_REQUEST', 'Сообщение об отсутствии не требует решения.')
   if (decision === 'REJECTED' && !comment?.trim()) throw new ApiError(400, 'RESOLUTION_COMMENT_REQUIRED', 'Укажите причину отклонения.')
   if (decision === 'APPROVED' && current.systemCodeSnapshot === 'STAFFING') throw new ApiError(409, 'STAFFING_RESPONSE_REQUIRED', 'Подтвердите отклик сотрудника, чтобы назначить подмену.')
   if (decision === 'APPROVED' && current.systemCodeSnapshot === 'SICK_LEAVE') throw new ApiError(409, 'SICK_REPORT_ONLY', 'Болезнь больше не требует одобрения. Сотруднику нужно сообщить о болезни через новое действие; старая заявка остаётся в истории.')
   const result = await prisma.$transaction(async (tx) => {
-    if (scopedLocationId(organizationId)) { await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId}, 1))::text`; await requireLocationManager(tx, userId, organizationId, actor.locationId) }
+    if (scopedLocationId(organizationId)) { await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId}, 1))::text`; await requireLocationManager(tx, userId, organizationId, actor.locationId, resolveKey) }
     const liveConflicts = decision === 'APPROVED' ? await conflictsFor(current, actor.organization.timezone, tx) : []
-    if (cancelConflictingShifts && scopedLocationId(organizationId)) for (const locationId of new Set(liveConflicts.map(shift => shift.locationId))) await requireLocationManager(tx, userId, organizationId, locationId)
+    if (cancelConflictingShifts) for (const locationId of new Set(liveConflicts.map(shift => shift.locationId))) await requireLocationManager(tx, userId, organizationId, locationId, 'schedule.cancel')
     for (const id of liveConflicts.map(shift => shift.id).sort()) await lockShift(tx, id)
     if (current.relatedShiftId) await lockShift(tx, current.relatedShiftId)
     const changed = await tx.organizationRequest.updateMany({ where: { id: requestId, organizationId, ...locationWhere(organizationId), updatedAt: current.updatedAt, status: 'PENDING' }, data: { status: decision, resolvedAt: new Date(), resolvedByMemberId: actor.id, resolutionComment: comment?.trim() || null } })
     if (!changed.count) throw new ApiError(409, 'REQUEST_ALREADY_RESOLVED', 'Заявка уже была обработана.')
     if (decision === 'REJECTED' && current.systemCodeSnapshot === 'STAFFING') await cancelStaffingResponses(tx, current.id, actor.id)
+    if (decision==='APPROVED' && ['SHIFT_PROPOSAL','STAFFING_RESPONSE'].includes(current.systemCodeSnapshot??'')) requirePermission(actor,'schedule.create',current.locationId)
     if (decision === 'APPROVED' && current.systemCodeSnapshot === 'STAFFING_RESPONSE') {
       const offer = await tx.organizationRequest.findFirst({ where: { id: current.staffingRequestId!, organizationId, locationId: current.locationId, status: 'PENDING', systemCodeSnapshot: 'STAFFING' } })
       if (!offer || !offer.proposedStartAt || !offer.proposedEndAt || offer.proposedStartAt <= new Date()) throw new ApiError(409, 'STAFFING_CLOSED', 'Подмена уже закрыта или смена началась.')
@@ -290,6 +302,7 @@ export async function resolveRequest(userId: string, organizationId: string, req
       await tx.organizationRequest.update({ where: { id: requestId }, data: { relatedShiftId: createdShift.id } })
       await recordShiftNotification(tx, createdShift, 'SHIFT_ASSIGNED', actor.organization.timezone)
     }
+    if (decision==='APPROVED' && current.systemCodeSnapshot==='SHIFT_CHANGE') requirePermission(actor,'schedule.edit',current.locationId)
     if (decision === 'APPROVED' && current.systemCodeSnapshot === 'SHIFT_CHANGE') {
       if (!current.relatedShiftId || !current.originalStartAt || !current.originalEndAt || !current.proposedStartAt || !current.proposedEndAt) throw new ApiError(409, 'SHIFT_PROPOSAL_MISSING', 'В этой заявке нет нового времени смены. Попросите подать её заново.')
       if (current.proposedStartAt <= new Date()) throw new ApiError(409, 'SHIFT_PROPOSAL_PAST', 'Предложенное время уже прошло. Попросите подать новую заявку.')
@@ -331,7 +344,7 @@ export async function resolveRequest(userId: string, organizationId: string, req
 }
 
 export async function cancelRequest(userId: string, organizationId: string, requestId: string, systemReason?: string) {
-  const actor = await getMembership(userId, organizationId)
+  const actor = await getMembership(userId, organizationId); requirePermission(actor, 'requests.edit')
   const current = await prisma.organizationRequest.findFirst({ where: { id: requestId, organizationId, ...locationWhere(organizationId) } })
   if (!current || current.createdByMemberId !== actor.id) throw new ApiError(404, 'REQUEST_NOT_FOUND', 'Заявка не найдена.')
   const changed = await prisma.$transaction(async (tx) => {
@@ -351,7 +364,9 @@ export async function cancelRequest(userId: string, organizationId: string, requ
 }
 
 export async function assertRequestFileAccess(userId: string, organizationId: string, requestId: string) {
-  return requestForAccess(userId, organizationId, requestId)
+  const result = await requestForAccess(userId, organizationId, requestId)
+  if (result.item.createdByMemberId !== result.actor.id) requirePermission(result.actor, 'requests.attachments')
+  return result
 }
 
 async function saveAbsenceRequest(userId: string, organizationId: string, type: { id: string; name: string }, input: CreateInput, current?: { id: string; status: RequestStatus; updatedAt: Date }) {
@@ -380,7 +395,7 @@ async function saveAbsenceRequest(userId: string, organizationId: string, type: 
     }
     await tx.requestEvent.create({ data: { requestId: request.id, actorMemberId: actor.id, type: current ? 'EDITED' : 'CREATED' } })
     const absence = await tx.employeeAbsence.findUniqueOrThrow({ where: { sourceRequestId: request.id } })
-    const reviewers = await tx.organizationMember.findMany({ where: { organizationId, leftAt: null, OR: [{ role: 'OWNER' }, { role: 'ADMIN' }, { locationMemberships: { some: { role: 'ADMIN', leftAt: null, location: { archivedAt: null, members: { some: { memberId: actor.id, leftAt: null } } } } } }], user: { deletedAt: null } }, select: { userId: true } })
+    const reviewers = await permissionRecipients(tx, organizationId, 'absences.view', actor.locationId)
     await tx.accountNotification.updateMany({ where: { requestId: request.id, readAt: null }, data: { readAt: new Date() } })
     if (reviewers.length) await tx.accountNotification.createMany({ data: reviewers.map(({ userId: recipient }) => ({ userId: recipient, organizationId, requestId: request.id, absenceId: absence.id, type: current ? 'ABSENCE_CHANGED' as const : 'ABSENCE_REPORTED' as const, title: current ? 'Сообщение об отсутствии изменено' : 'Сотрудник сообщил об отсутствии', message: `${memberName(employee)} · ${parsed.data.startDate}–${parsed.data.endDate}` })) })
     return request
@@ -398,7 +413,7 @@ async function cancelStaffingResponses(tx: Prisma.TransactionClient, requestId: 
   await tx.accountNotification.createMany({ data: responses.map(item => ({ organizationId: item.organizationId, userId: item.creator.userId, requestId: item.id, type: 'REQUEST_CANCELLED', title: 'Подмена закрыта', message: 'Ваш отклик сохранён в истории.' })) })
 }
 export async function respondToStaffing(userId: string, organizationId: string, requestId: string, comment?: string) {
-  const actor = await getMembership(userId, organizationId)
+  const actor = await getMembership(userId, organizationId); requirePermission(actor, 'staffing.respond')
   await ensureSystemTypes(organizationId)
   return prisma.$transaction(async tx => {
     await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId}, 1))::text`
@@ -411,7 +426,7 @@ export async function respondToStaffing(userId: string, organizationId: string, 
     const type = await tx.requestType.findFirstOrThrow({ where: { organizationId, systemCode: 'STAFFING_RESPONSE' } })
     const response = await tx.organizationRequest.create({ data: { organizationId, locationId: offer.locationId, createdByMemberId: actor.id, requestTypeId: type.id, typeNameSnapshot: type.name, systemCodeSnapshot: 'STAFFING_RESPONSE', staffingRequestId: offer.id, staffingPositionId: offer.staffingPositionId, staffingPositionName: offer.staffingPositionName, proposedStartAt: offer.proposedStartAt, proposedEndAt: offer.proposedEndAt, comment: comment?.trim() || null } })
     await tx.requestEvent.create({ data: { requestId: response.id, actorMemberId: actor.id, type: 'CREATED' } })
-    const reviewers = await tx.organizationMember.findMany({ where: { organizationId, leftAt: null, OR: [{ role: 'OWNER' }, { locationMemberships: { some: { locationId: offer.locationId, role: 'ADMIN', leftAt: null } } }] }, select: { userId: true } })
+    const reviewers = await permissionRecipients(tx, organizationId, 'staffing.resolve', offer.locationId)
     if (reviewers.length) await tx.accountNotification.createMany({ data: reviewers.map(item => ({ organizationId, userId: item.userId, requestId: response.id, type: 'REQUEST_CREATED', title: 'Отклик на подмену', message: `${offer.location.name} · ${offer.staffingPositionName}` })) })
     return response
   }, { isolationLevel: 'ReadCommitted' }).catch(error => { if (error?.code === 'P2002') throw new ApiError(409, 'ALREADY_RESPONDED', 'Вы уже откликнулись на эту подмену.'); throw error })

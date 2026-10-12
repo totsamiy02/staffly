@@ -1,3 +1,4 @@
+import { hasPermission } from './access.ts'
 import { Prisma } from '../../generated/prisma/client.ts'
 import { prisma } from '../db.ts'
 import { formatNotificationPeriod } from '../../app/organizations/notification-format.ts'
@@ -49,6 +50,26 @@ export function decodeNotificationCursor(cursor: string | undefined) {
 export async function listNotificationHistory(userId: string, email: string, options: { limit: number; cursor?: string; unread?: boolean; organizationId?: string; locationId?: string; category?: string }) {
   if (options.organizationId) await getMembership(userId, options.organizationId)
   const cursor = decodeNotificationCursor(options.cursor)
+  // Recheck stored notifications against current permissions before pagination AND counts.
+  const candidates = await prisma.accountNotification.findMany({ where: { userId, hiddenAt: null, ...(options.organizationId ? { organizationId: options.organizationId } : {}), organization: { deletedAt: null, members: { some: { userId, leftAt: null } } } }, include: { request: true, shift: true, absence: { include: { member: { include: { locationMemberships: { where: { leftAt: null } } } } } }, shiftOffer: true } })
+  const actors = new Map<string, Awaited<ReturnType<typeof getMembership>>>()
+  const denied: string[] = []
+  for (const row of candidates) {
+    let actor = actors.get(row.organizationId)
+    if (!actor) { actor = await getMembership(userId, row.organizationId); actors.set(row.organizationId, actor) }
+    let allowed = true
+    if (row.documentId) {
+      const { getDocument } = await import('../documents/service.ts')
+      try { await getDocument(userId, row.organizationId, row.documentId) } catch (error) { if (!(error instanceof ApiError) || ![403,404].includes(error.status)) throw error; allowed = false }
+    } else if (row.eventId) {
+      const { getEvent } = await import('../events/service.ts')
+      try { await getEvent(userId, row.organizationId, row.eventId) } catch (error) { if (!(error instanceof ApiError) || ![403,404].includes(error.status)) throw error; allowed = false }
+    } else if (row.shiftOffer) allowed = [row.shiftOffer.initiatorMemberId,row.shiftOffer.recipientMemberId,row.shiftOffer.acceptedByMemberId].includes(actor.id) || hasPermission(actor,'offers.approve',row.shiftOffer.locationId) || row.shiftOffer.recipientMemberId === null && hasPermission(actor,'offers.accept',row.shiftOffer.locationId)
+    else if (row.absence) allowed = actor.owner || (row.absence.memberId === actor.id ? actor.permissions.includes('absences.own') : row.absence.member.locationMemberships.length ? row.absence.member.locationMemberships.some(l => hasPermission(actor,'absences.view',l.locationId)) : hasPermission(actor,'absences.view'))
+    else if (row.request) allowed = row.request.createdByMemberId === actor.id ? hasPermission(actor,'requests.own',row.request.locationId) : row.request.systemCodeSnapshot === 'STAFFING' ? hasPermission(actor,'staffing.respond',row.request.locationId) || hasPermission(actor,'staffing.create',row.request.locationId) : hasPermission(actor,'requests.view',row.request.locationId)
+    else if (row.shift) allowed = row.shift.memberId === actor.id ? hasPermission(actor,'schedule.own',row.shift.locationId) : hasPermission(actor,'schedule.view',row.shift.locationId)
+    if (!allowed) denied.push(row.id)
+  }
   // Both sources are existing records; invitations can predate the recipient's registration.
   const historySource = Prisma.sql`
     WITH history AS (
@@ -70,12 +91,7 @@ export async function listNotificationHistory(userId: string, email: string, opt
         END, so.location_id, d.location_id, r.location_id, s.location_id)
       LEFT JOIN location_members lm ON lm.member_id = m.id AND lm.location_id = l.id AND lm.left_at IS NULL
       WHERE n.user_id = ${userId}::uuid AND m.id IS NOT NULL AND n.hidden_at IS NULL
-      AND (n.shift_offer_id IS NULL OR (so.id IS NOT NULL AND (m.role = 'OWNER' OR lm.member_id IS NOT NULL OR EXISTS (SELECT 1 FROM location_transfers lt WHERE lt.member_id = m.id AND lt.to_location_id = so.location_id AND lt.temporary AND lt.start_at <= NOW() AND lt.end_at > NOW())) AND (so.initiator_member_id = m.id OR so.recipient_member_id = m.id OR so.accepted_by_member_id = m.id OR m.role = 'OWNER' OR lm.role = 'ADMIN' OR so.recipient_member_id IS NULL)))
-      AND (n.event_id IS NULL OR (e.id IS NOT NULL AND (m.role = 'OWNER' OR EXISTS (SELECT 1 FROM event_recipients er WHERE er.event_id = e.id AND er.member_id = m.id AND er.removed_at IS NULL) OR EXISTS (SELECT 1 FROM location_members em JOIN organization_locations eml ON eml.id = em.location_id WHERE em.member_id = m.id AND em.left_at IS NULL AND em.role = 'ADMIN' AND eml.archived_at IS NULL AND (e.shared OR EXISTS (SELECT 1 FROM event_locations el WHERE el.event_id = e.id AND el.location_id = em.location_id))))))
-      AND (n.document_id IS NULL OR ((d.location_id IS NULL OR lm.member_id IS NOT NULL OR m.role = 'OWNER') AND d.organization_id = o.id AND ((m.role = 'OWNER' OR lm.role = 'ADMIN') OR (d.deleted_at IS NULL AND (d.visibility = 'ORGANIZATION' OR (d.visibility = 'ADMINS' AND (lm.role = 'ADMIN' OR d.location_id IS NULL AND m.role = 'ADMIN')) OR (d.visibility = 'PRIVATE_MEMBER' AND d.target_member_id = m.id))))))
-      AND (n.document_id IS NULL OR m.role = 'OWNER' OR lm.role = 'ADMIN' OR (d.location_id IS NULL AND m.role = 'ADMIN') OR NOT EXISTS (WITH RECURSIVE parents AS (SELECT id, parent_id, visibility FROM document_folders WHERE id = d.folder_id UNION ALL SELECT f.id, f.parent_id, f.visibility FROM document_folders f JOIN parents p ON f.id = p.parent_id) SELECT 1 FROM parents WHERE visibility = 'ADMINS'))
-      AND (r.id IS NULL OR n.absence_id IS NOT NULL OR r.system_code_snapshot = 'STAFFING' OR r.created_by_member_id = m.id OR m.role = 'OWNER' OR lm.role = 'ADMIN')
-      AND (a.id IS NULL OR a.member_id = m.id OR m.role = 'OWNER' OR lm.role = 'ADMIN')
+      AND NOT (n.id = ANY(${denied}::uuid[]))
       ${options.unread ? Prisma.sql`AND n.read_at IS NULL` : Prisma.empty}
       UNION ALL
       SELECT 'invite:' || i.id, 'invite', 'ORGANIZATION_INVITATION', 'Приглашение в организацию', o.name,
@@ -100,7 +116,7 @@ export async function listNotificationHistory(userId: string, email: string, opt
     const organizationPath = `/app/organizations/${row.organizationId}`
     const month = row.shiftStartAt ? new Intl.DateTimeFormat('en-CA', { timeZone: row.timezone, year: 'numeric', month: '2-digit' }).formatToParts(row.shiftStartAt) : []
     const monthText = `${month.find(part => part.type === 'year')?.value}-${month.find(part => part.type === 'month')?.value}`
-    const href = row.role ? row.shiftOfferId ? `${organizationPath}/schedule?offer=${row.shiftOfferId}` : row.eventId ? `${organizationPath}/events?event=${row.eventId}` : row.documentId ? `${organizationPath}/documents?document=${row.documentId}` : row.absenceId ? `${organizationPath}/schedule?absences=1&absence=${row.absenceId}` : row.shiftId ? `${organizationPath}/schedule?view=mine&month=${monthText}&shift=${row.shiftId}` : row.requestId ? `${organizationPath}/requests?tab=${row.requestSystemCode === 'STAFFING' ? 'staffing' : row.type === 'REQUEST_CREATED' && row.role !== 'MEMBER' ? 'incoming' : 'mine'}&request=${row.requestId}` : organizationPath : row.source === 'invite' && row.state === 'ACTIVE' ? `/app#invitation-${row.id.split(':')[1]}` : null
+    const href = row.role ? row.shiftOfferId ? `${organizationPath}/schedule?offer=${row.shiftOfferId}` : row.eventId ? `${organizationPath}/events?event=${row.eventId}` : row.documentId ? `${organizationPath}/documents?document=${row.documentId}` : row.absenceId ? `${organizationPath}/schedule?absences=1&absence=${row.absenceId}` : row.shiftId ? `${organizationPath}/schedule?view=mine&month=${monthText}&shift=${row.shiftId}` : row.requestId ? `${organizationPath}/requests?tab=${row.requestSystemCode === 'STAFFING' ? 'staffing' : row.type === 'REQUEST_CREATED' && !!actors.get(row.organizationId) && hasPermission(actors.get(row.organizationId)!,'requests.view',row.locationId ?? undefined) ? 'incoming' : 'mine'}&request=${row.requestId}` : organizationPath : row.source === 'invite' && row.state === 'ACTIVE' ? `/app#invitation-${row.id.split(':')[1]}` : null
     return { shiftOfferId: row.shiftOfferId, eventId: row.eventId, locationId: row.locationId, locationName: row.locationName, requestId: row.requestId, actionable: row.actionable, documentId: row.documentId, id: row.id, source: row.source, type: row.type, title: row.title, message: row.message, createdAt: row.createdAt, readAt: row.readAt, state: row.state, expiresAt: row.expiresAt, inviter: row.inviter, organization: { id: row.organizationId, name: row.organizationName, logoUrl: mediaUrl(row.logoFileId) },
       href: href && row.locationId && row.role ? `${href}${href.includes('?') ? '&' : '?'}location=${row.locationId}` : href }
   })

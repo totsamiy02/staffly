@@ -1,3 +1,4 @@
+import { canAccess } from '../../../app/access/catalog.ts'
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import type { OrganizationSummary } from '../../../app/organizations/types.ts'
@@ -19,8 +20,7 @@ export default function EventsPage({ organization }: { organization: Organizatio
   const [form, setForm] = useState<StaffEvent | 'new' | null>(null)
   const eventId = params.get('event')
   const points = locations.data?.locations ?? []
-  const owner = (organization.organizationRole ?? organization.role) === 'OWNER'
-  const manager = owner || points.some(point => point.role === 'ADMIN' && !point.archivedAt)
+  const manager = canAccess(organization,'events.create') || points.some(point=>point.permissions?.includes('events.create') && !point.archivedAt)
   const filter = pointId === 'all' || points.some(point => point.id === pointId) ? pointId : 'all'
   const events = useEvents(organization.id, { tab, search: debouncedSearch, pointId: filter, page, ...(day ? { from: day, to: addDays(day, 1) } : {}) })
   const range = calendarRange(month)

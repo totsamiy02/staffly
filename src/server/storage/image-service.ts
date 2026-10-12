@@ -1,3 +1,4 @@
+import { requirePermission } from '../organizations/access.ts'
 import { createHash, randomUUID } from 'node:crypto'
 import sharp from 'sharp'
 import { prisma } from '../db.ts'
@@ -130,7 +131,7 @@ export async function removeUserAvatar(userId: string) {
 
 async function requireOrganizationEditor(userId: string, organizationId: string) {
   const membership = await getMembership(userId, organizationId)
-  if (membership.organizationRole !== 'OWNER') throw new ApiError(403, 'INSUFFICIENT_PERMISSIONS', 'Изменять логотип может владелец организации.')
+  requirePermission(membership, 'organization.edit', null)
 }
 
 export async function replaceOrganizationLogo(userId: string, organizationId: string, input: unknown) {
