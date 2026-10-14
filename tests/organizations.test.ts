@@ -41,6 +41,9 @@ async function expectCode(action: () => Promise<unknown>, code: string) {
 }
 
 before(async () => {
+  await prisma.scheduleDraft.deleteMany()
+  await prisma.demandException.deleteMany()
+  await prisma.demandVersion.deleteMany()
   await prisma.organizationEvent.deleteMany()
   await prisma.locationTransfer.deleteMany()
   await prisma.accountNotification.deleteMany()

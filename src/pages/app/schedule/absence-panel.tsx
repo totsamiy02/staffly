@@ -1,3 +1,4 @@
+import { lockBodyScroll } from '../../../component/ui/body-scroll-lock.ts'
 import { canAccess } from '../../../app/access/catalog.ts'
 import { useToastFeedback } from '../../../component/ui/toast/toast-context.ts'
 import Avatar from '../../../component/ui/avatar/avatar.tsx'
@@ -19,7 +20,7 @@ type Absence = EmployeeAbsence & {canEdit:boolean;canCancel:boolean; sourceReque
 export default function AbsencePanel({ organization, focusId, onClose }: { organization: OrganizationSummary; focusId?: string | null; onClose: () => void }) {
   const { locationId, apiRequest } = useAuth()
   const dialog = useRef<HTMLElement>(null)
-  useEffect(() => { const previous = document.activeElement; const previousOverflow = document.body.style.overflow; document.body.style.overflow = 'hidden'; dialog.current?.querySelector<HTMLButtonElement>('button')?.focus(); return () => { document.body.style.overflow = previousOverflow; if (previous instanceof HTMLElement && previous.isConnected) previous.focus() } }, [])
+  useEffect(() => { const previous = document.activeElement; const release = lockBodyScroll(); dialog.current?.querySelector<HTMLButtonElement>('button')?.focus(); return () => { release(); if (previous instanceof HTMLElement && previous.isConnected) previous.focus() } }, [])
   const client = useQueryClient()
   const [history, setHistory] = useState(false)
   const [selectedAbsenceId, setSelectedAbsenceId] = useState(focusId)

@@ -65,6 +65,7 @@ enum WorkShiftStatus {
 }
 
 enum AccountNotificationType {
+  SCHEDULE_DISCUSSION
   ABSENCE_REPORTED
   ABSENCE_CHANGED
   ABSENCE_CANCELLED
@@ -121,6 +122,9 @@ enum RequestEventType {
 }
 
 model Organization {
+  demandVersions DemandVersion[]
+  demandExceptions DemandException[]
+  scheduleDrafts ScheduleDraft[]
   id                 String                 @id @default(uuid()) @db.Uuid
   name               String                 @db.VarChar(120)
   description        String?                @db.VarChar(1000)
@@ -202,6 +206,8 @@ model StoredFile {
 }
 
 model AccountNotification {
+  scheduleDraftId String? @map("schedule_draft_id") @db.Uuid
+  scheduleDraft ScheduleDraft? @relation(fields: [organizationId, scheduleDraftId], references: [organizationId, id], onDelete: Cascade)
   eventId String? @map("event_id") @db.Uuid
   eventDeliveryKey String? @unique @map("event_delivery_key") @db.VarChar(200)
   event OrganizationEvent? @relation(fields: [organizationId, eventId], references: [organizationId, id], onDelete: Cascade)
@@ -244,6 +250,10 @@ model AccountNotification {
 }
 
 model OrganizationMember {
+  authoredDrafts ScheduleDraft[] @relation("DraftAuthor")
+  draftRecipients DraftRecipient[]
+  draftComments DraftComment[]
+  draftHistory DraftHistory[]
   accessConfigured Boolean @default(false) @map("access_configured")
   accessRoleId String? @map("access_role_id") @db.Uuid
   accessRole AccessRole? @relation(fields: [organizationId, accessRoleId], references: [organizationId, id], onDelete: Restrict)
@@ -778,6 +788,12 @@ enum LocationRole {
 }
 
 model OrganizationLocation {
+  coverageEnabled Boolean @default(false) @map("coverage_enabled")
+  discussionEnabled Boolean @default(false) @map("discussion_enabled")
+  discussionHours Int @default(24) @map("discussion_hours")
+  demandVersions DemandVersion[]
+  demandExceptions DemandException[]
+  scheduleDrafts ScheduleDraft[]
   id String @id @default(uuid()) @db.Uuid
   organizationId String @map("organization_id") @db.Uuid
   name String @db.VarChar(120)
@@ -1055,4 +1071,129 @@ model AccessAudit {
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   @@index([organizationId, createdAt])
   @@map("access_audit")
+}
+
+// A version is a complete weekly schedule: null = unconfigured, [] = explicitly no demand.
+model DemandVersion {
+  id String @id @default(uuid()) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  locationId String @map("location_id") @db.Uuid
+  effectiveFrom DateTime @map("effective_from") @db.Date
+  days Json
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  location OrganizationLocation @relation(fields: [organizationId, locationId], references: [organizationId, id], onDelete: Restrict)
+  @@index([locationId, effectiveFrom, createdAt])
+  @@map("demand_versions")
+}
+model DemandException {
+  id String @id @default(uuid()) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  locationId String @map("location_id") @db.Uuid
+  date DateTime @db.Date
+  intervals Json
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  location OrganizationLocation @relation(fields: [organizationId, locationId], references: [organizationId, id], onDelete: Restrict)
+  @@unique([locationId, date])
+  @@map("demand_exceptions")
+}
+enum ScheduleDraftStatus {
+  PREPARING
+  OPEN
+  CLOSED
+  APPLIED
+  CANCELLED
+}
+model ScheduleDraft {
+  id String @id @default(uuid()) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  locationId String @map("location_id") @db.Uuid
+  authorMemberId String @map("author_member_id") @db.Uuid
+  title String @db.VarChar(160)
+  description String? @db.VarChar(2000)
+  fromDate DateTime @map("from_date") @db.Date
+  toDate DateTime @map("to_date") @db.Date
+  timezone String @db.VarChar(64)
+  status ScheduleDraftStatus @default(PREPARING)
+  revision Int @default(1)
+  deadline DateTime? @db.Timestamptz(3)
+  publishedAt DateTime? @map("published_at") @db.Timestamptz(3)
+  finishedAt DateTime? @map("finished_at") @db.Timestamptz(3)
+  finishedByMemberId String? @map("finished_by_member_id") @db.Uuid
+  // Immutable final result; subsequent work-calendar edits do not rewrite history.
+  appliedSnapshot Json?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  location OrganizationLocation @relation(fields: [organizationId, locationId], references: [organizationId, id], onDelete: Restrict)
+  author OrganizationMember @relation("DraftAuthor", fields: [organizationId, authorMemberId], references: [organizationId, id], onDelete: Restrict)
+  proposals DraftShift[]
+  recipients DraftRecipient[]
+  comments DraftComment[]
+  history DraftHistory[]
+  notifications AccountNotification[]
+  @@unique([organizationId, id])
+  @@index([locationId, status, fromDate, toDate])
+  @@map("schedule_drafts")
+}
+model DraftShift {
+  id String @id @default(uuid()) @db.Uuid
+  draftId String @map("draft_id") @db.Uuid
+  // Source and proposed data are validated snapshots, never active WorkShift records.
+  sourceShiftId String? @map("source_shift_id") @db.Uuid
+  source Json?
+  proposed Json
+  kind String @db.VarChar(10)
+  revision Int
+  appliedShiftId String? @map("applied_shift_id") @db.Uuid
+  draft ScheduleDraft @relation(fields: [draftId], references: [id], onDelete: Cascade)
+  @@unique([draftId, sourceShiftId])
+  @@map("draft_shifts")
+}
+model DraftRecipient {
+  draftId String @map("draft_id") @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  memberId String @map("member_id") @db.Uuid
+  requiredRevision Int @map("required_revision")
+  response String? @db.VarChar(20)
+  respondedRevision Int? @map("responded_revision")
+  respondedAt DateTime? @map("responded_at") @db.Timestamptz(3)
+  draft ScheduleDraft @relation(fields: [organizationId, draftId], references: [organizationId, id], onDelete: Cascade)
+  member OrganizationMember @relation(fields: [organizationId, memberId], references: [organizationId, id], onDelete: Cascade)
+  @@id([draftId, memberId])
+  @@map("draft_recipients")
+}
+model DraftComment {
+  id String @id @default(uuid()) @db.Uuid
+  draftId String @map("draft_id") @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  memberId String @map("member_id") @db.Uuid
+  proposalId String? @map("proposal_id") @db.Uuid
+  date DateTime? @db.Date
+  revision Int
+  snapshot Json
+  text String @db.VarChar(2000)
+  status String @default("OPEN") @db.VarChar(20)
+  decision String? @db.VarChar(2000)
+  decidedByMemberId String? @map("decided_by_member_id") @db.Uuid
+  decidedAt DateTime? @map("decided_at") @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  draft ScheduleDraft @relation(fields: [organizationId, draftId], references: [organizationId, id], onDelete: Cascade)
+  member OrganizationMember @relation(fields: [organizationId, memberId], references: [organizationId, id], onDelete: Restrict)
+  @@index([draftId, createdAt])
+  @@map("draft_comments")
+}
+model DraftHistory {
+  id String @id @default(uuid()) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  draftId String @map("draft_id") @db.Uuid
+  actorMemberId String @map("actor_member_id") @db.Uuid
+  revision Int
+  action String @db.VarChar(40)
+  details Json
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  draft ScheduleDraft @relation(fields: [organizationId, draftId], references: [organizationId, id], onDelete: Cascade)
+  actor OrganizationMember @relation(fields: [organizationId, actorMemberId], references: [organizationId, id], onDelete: Restrict)
+  @@index([draftId, createdAt])
+  @@map("draft_history")
 }

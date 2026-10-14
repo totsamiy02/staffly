@@ -1,3 +1,5 @@
+import DraftPage from './schedule/draft-page.tsx'
+import DemandPage from './schedule/demand-page.tsx'
 import { canAccess, type Permission } from '../../app/access/catalog.ts'
 import { locationTone } from '../../app/organizations/format.ts'
 import { useAuth } from '../../app/auth/auth-context.tsx'
@@ -21,7 +23,7 @@ import Avatar from '../../component/ui/avatar/avatar.tsx'
 import { useDocuments } from '../../app/documents/queries.ts'
 import './app.scss'
 
-const modulePermissions:Record<string,Permission[]> = {employees:['members.view'],schedule:['schedule.own','schedule.view','statistics.own','statistics.view','reports.preview','reports.export'],requests:['requests.own','requests.view','staffing.respond','staffing.create'],documents:['documents.view'],events:['events.view','events.create','events.edit','events.cancel'],settings:['organization.edit','schedule.settings','schedule.templates','positions.manage','offers.settings','locations.edit','locations.create','requestTypes.manage']}
+const modulePermissions:Record<string,Permission[]> = {employees:['members.view'],schedule:['coverage.view','drafts.view','schedule.own','schedule.view','statistics.own','statistics.view','reports.preview','reports.export'],requests:['requests.own','requests.view','staffing.respond','staffing.create'],documents:['documents.view'],events:['events.view','events.create','events.edit','events.cancel'],settings:['coverage.manage','organization.edit','schedule.settings','schedule.templates','positions.manage','offers.settings','locations.edit','locations.create','requestTypes.manage']}
 const navigation = [
   ['', 'Главная'], ['employees', 'Сотрудники'], ['schedule', 'Расписание'], ['requests', 'Заявки'], ['events', 'События'], ['documents', 'Документы'], ['settings', 'Настройки'],
 ] as const
@@ -96,7 +98,7 @@ export default function OrganizationLayout() {
   const currentSection = navigation.find(([path]) => path === currentSegment)?.[1] ?? 'Неизвестный раздел'
   const points = locations.data?.locations ?? (organization.location ? [organization.location] : [])
   const locationAddress = [organization.location?.city, organization.location?.address].filter(Boolean).join(' · ')
-  const allowed = !currentSegment || currentSegment==='settings' && organization.owner || (modulePermissions[currentSegment]??[]).some(p=>canAccess(organization,p))
+  const allowed = location.pathname.startsWith(organizationPath+'/schedule/drafts') || !currentSegment || currentSegment==='settings' && organization.owner || (modulePermissions[currentSegment]??[]).some(p=>canAccess(organization,p))
   const module = (content: ReactNode) => !allowed ? <section className="workspace-problem"><h1>Раздел недоступен</h1><p>Владелец может изменить вашу роль и доступ к этой точке.</p><Link className="app-secondary" to={organizationPath}>На главную</Link></section> : <ModuleErrorBoundary key={location.pathname + organization.locationId} organizationPath={organizationPath}>{content}</ModuleErrorBoundary>
   function toggleSidebar() {
     setSidebarCollapsed((value) => {
@@ -127,7 +129,10 @@ export default function OrganizationLayout() {
       <Routes>
         <Route index element={module(<OrganizationDashboard organization={organization} />)} />
         <Route path="employees" element={module(<OrganizationMembers organization={organization} />)} />
-        <Route path="schedule" element={module(<>{!canAccess(organization,'schedule.view') && !canAccess(organization,'schedule.own') ? <Navigate to={organizationPath + (canAccess(organization,'statistics.own') ? '/schedule/work-time' : '/schedule/statistics') + location.search} replace/> : <SchedulePage key="calendar" organization={organization}/>}</>)} />
+        <Route path="schedule" element={module(<>{!canAccess(organization,'schedule.view') && !canAccess(organization,'schedule.own') && !canAccess(organization,'coverage.view') ? <Navigate to={organizationPath + (canAccess(organization,'statistics.own') ? '/schedule/work-time' : '/schedule/statistics') + location.search} replace/> : <SchedulePage key="calendar" organization={organization}/>}</>)} />
+        <Route path="schedule/demand" element={module(<DemandPage organization={organization} />)} />
+        <Route path="schedule/drafts" element={module(<DraftPage organization={organization} />)} />
+        <Route path="schedule/drafts/:draftId" element={module(<DraftPage organization={organization} />)} />
         <Route path="schedule/history" element={!canAccess(organization, 'schedule.history') ? <Navigate to={`/app/organizations/${organization.id}/schedule`} replace /> : module(<SchedulePage key="history" organization={organization} historyMode />)} />
         <Route path="schedule/statistics" element={module(<StatisticsPage organization={organization} />)} />
         <Route path="schedule/work-time" element={module(<MyWorkTimePage organization={organization} />)} />

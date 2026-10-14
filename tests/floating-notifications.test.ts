@@ -26,10 +26,10 @@ test('old unread notices and repeated deliveries do not reappear across pages', 
   assert.deepEqual(takeFreshNotifications([{ ...notice('invalid'), createdAt: 'bad-date' }], seen, now), [])
 })
 
-test('a burst displays the four most recent notices and consumes the overflow', () => {
+test('a burst preserves every notice in chronological order for sequential delivery', () => {
   const seen = new Set<string>()
   const items = Array.from({ length: 6 }, (_, index) => notice(String(index), 'EVENT_CHANGED', index))
-  assert.deepEqual(takeFreshNotifications(items, seen, now).map(item => item.id), ['3', '2', '1', '0'])
+  assert.deepEqual(takeFreshNotifications(items, seen, now).map(item => item.id), ['5', '4', '3', '2', '1', '0'])
   assert.equal(seen.size, 6)
   assert.deepEqual(takeFreshNotifications(items, seen, now), [])
 })

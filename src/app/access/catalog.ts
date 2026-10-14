@@ -407,13 +407,20 @@ export const permissionCatalog = [
     "label": "Типы заявок",
     "group": "Организация и точки",
     "scope": "organization"
-  }
+  },
+  { key: 'coverage.view', label: 'Потребность и покрытие', group: 'Расписание', scope: 'location' },
+  { key: 'coverage.manage', label: 'Управление потребностью', group: 'Расписание', scope: 'location' },
+  { key: 'drafts.view', label: 'Предварительные графики команды', group: 'Расписание', scope: 'location' },
+  { key: 'drafts.edit', label: 'Создание и правка предварительного графика', group: 'Расписание', scope: 'location' },
+  { key: 'drafts.discuss', label: 'Управление обсуждением графика', group: 'Расписание', scope: 'location' },
+  { key: 'drafts.resolve', label: 'Обработка замечаний к графику', group: 'Расписание', scope: 'location' },
+  { key: 'drafts.apply', label: 'Применение графика', group: 'Расписание', scope: 'location' },
 ] as const
 export type Permission = typeof permissionCatalog[number]['key']
 export const permissionKeys = permissionCatalog.map(item => item.key)
 export const recommendedPermissions: Record<'OWNER' | 'ADMIN' | 'MEMBER', Permission[]> = {
   OWNER: [...permissionKeys],
-  ADMIN: ["members.view", "members.contacts", "members.personnel.view", "members.personnel.edit", "members.invite", "members.invites.revoke", "members.positions", "members.assign", "members.remove", "schedule.own", "schedule.view", "schedule.history", "schedule.create", "schedule.edit", "schedule.cancel", "schedule.actual", "schedule.templates", "schedule.settings", "absences.own", "absences.view", "absences.details", "absences.edit", "absences.cancel", "requests.own", "requests.create", "requests.edit", "requests.view", "requests.resolve", "requests.attachments", "staffing.create", "staffing.respond", "staffing.resolve", "offers.transfer", "offers.swap", "offers.accept", "offers.approve", "statistics.own", "statistics.view", "reports.preview", "reports.export", "reports.templates", "documents.view", "documents.download", "documents.upload", "documents.folders", "documents.edit", "documents.delete", "documents.access", "documents.assign", "documents.control", "documents.personal.view", "documents.personal.edit", "events.view", "events.create", "events.edit", "events.cancel", "dashboard.view", "locations.edit", "locations.browse"],
+  ADMIN: ["coverage.view", "coverage.manage", "drafts.view", "drafts.edit", "drafts.discuss", "drafts.resolve", "drafts.apply", "members.view", "members.contacts", "members.personnel.view", "members.personnel.edit", "members.invite", "members.invites.revoke", "members.positions", "members.assign", "members.remove", "schedule.own", "schedule.view", "schedule.history", "schedule.create", "schedule.edit", "schedule.cancel", "schedule.actual", "schedule.templates", "schedule.settings", "absences.own", "absences.view", "absences.details", "absences.edit", "absences.cancel", "requests.own", "requests.create", "requests.edit", "requests.view", "requests.resolve", "requests.attachments", "staffing.create", "staffing.respond", "staffing.resolve", "offers.transfer", "offers.swap", "offers.accept", "offers.approve", "statistics.own", "statistics.view", "reports.preview", "reports.export", "reports.templates", "documents.view", "documents.download", "documents.upload", "documents.folders", "documents.edit", "documents.delete", "documents.access", "documents.assign", "documents.control", "documents.personal.view", "documents.personal.edit", "events.view", "events.create", "events.edit", "events.cancel", "dashboard.view", "locations.edit", "locations.browse"],
   MEMBER: ["members.view", "members.contacts", "schedule.own", "schedule.view", "absences.own", "requests.own", "requests.create", "requests.edit", "staffing.respond", "offers.transfer", "offers.swap", "offers.accept", "statistics.own", "documents.view", "documents.download", "events.view", "locations.browse", "dashboard.view"],
 }
 export const systemRoleNames = { OWNER: 'Владелец', ADMIN: 'Администратор', MEMBER: 'Пользователь' }
@@ -422,6 +429,7 @@ export function canAccess(access: AccessSnapshot, permission: Permission) { retu
 
 // Selecting an action also enables the minimum read permissions it needs.
 export const permissionDependencies: Partial<Record<Permission, Permission[]>> = {
+  'coverage.manage':['coverage.view'], 'drafts.view':['schedule.view'], 'drafts.edit':['drafts.view','members.view'], 'drafts.discuss':['drafts.view'], 'drafts.resolve':['drafts.view'], 'drafts.apply':['drafts.view'],
   'members.contacts':['members.view'], 'members.personnel.view':['members.view'], 'members.personnel.edit':['members.personnel.view'], 'members.invite':['members.view'], 'members.invites.revoke':['members.invite'], 'members.assign':['members.view'], 'members.remove':['members.view'], 'members.positions':['members.view'],
   'schedule.create':['schedule.view'], 'schedule.edit':['schedule.view'], 'schedule.cancel':['schedule.view'], 'schedule.actual':['schedule.view'], 'schedule.history':['schedule.view'],
   'absences.details':['absences.view'], 'absences.edit':['absences.view'], 'absences.cancel':['absences.view'],

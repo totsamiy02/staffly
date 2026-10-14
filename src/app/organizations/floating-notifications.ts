@@ -9,5 +9,5 @@ export function takeFreshNotifications(items: HistoryNotification[], seen: Set<s
     const age = now - Date.parse(item.createdAt)
     return !item.readAt && Number.isFinite(age) && age >= -60_000 && age <= freshnessMs
   })
-  return fresh.sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)).slice(-4)
+  return fresh.sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
 }

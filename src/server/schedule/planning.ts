@@ -19,7 +19,7 @@ export async function planningData(userId: string, organizationId: string) {
   ])
   const schedule = hasPermission(actor,'schedule.view') || hasPermission(actor,'schedule.own') || hasPermission(actor,'schedule.templates')
   const directory = hasPermission(actor,'members.view') || hasPermission(actor,'members.positions')
-  const canSeePositions = schedule || directory || hasPermission(actor,'positions.manage',null) || (['requests.create','staffing.create','staffing.respond','offers.accept','statistics.view','statistics.own'] as const).some(key=>actor.permissions.includes(key))
+  const canSeePositions = schedule || directory || hasPermission(actor,'coverage.view') || hasPermission(actor,'positions.manage',null) || (['requests.create','staffing.create','staffing.respond','offers.accept','statistics.view','statistics.own'] as const).some(key=>actor.permissions.includes(key))
   return { positions:canSeePositions ? positions : [], templates:schedule ? templates : [], assignments:schedule || directory ? assignments.filter(a=>directory || hasPermission(actor,'schedule.view') || a.memberId===actor.id) : [], monthlyWorkMinutes:schedule || hasPermission(actor,'schedule.settings') || hasPermission(actor,'statistics.own') || hasPermission(actor,'statistics.view') ? actor.organization.monthlyWorkMinutes : null }
 }
 export async function savePosition(userId: string, organizationId: string, id: string | null, input: z.infer<typeof positionBody>) {

@@ -9,6 +9,7 @@ export type MemberPagination = { page: number; pageSize: number; total: number; 
 export type ActiveOrganizationInvitation = { code: string | null; id: string; type: 'EMAIL' | 'CODE'; invitedEmail: string | null; expiresAt: string; createdAt: string }
 
 export type HistoryNotification = {
+  scheduleDraftId?: string | null
   shiftOfferId?: string | null
   eventId?: string | null
   requestId?: string | null

@@ -16,7 +16,6 @@ export default function Select({ children, value, onChange, disabled, required, 
   const [label, setLabel] = useState('')
   const [invalid, setInvalid] = useState(false)
   const openRef = useRef(false)
-  const pointerClick = useRef(false)
   const options: Option[] = []
   function collect(nodes: ReactNode) {
     Children.forEach(nodes, child => {
@@ -40,8 +39,8 @@ export default function Select({ children, value, onChange, disabled, required, 
     function outside(event: PointerEvent) { if (!host.current?.contains(event.target as Node) && !popup.current?.contains(event.target as Node)) setOpenState(false) }
     const otherOpened = (event: Event) => { if ((event as CustomEvent<string>).detail !== listId) setOpenState(false) }
     document.addEventListener('staffly:popover-open', otherOpened)
-    document.addEventListener('pointerdown', outside)
-    return () => { document.removeEventListener('pointerdown', outside); document.removeEventListener('staffly:popover-open', otherOpened) }
+    document.addEventListener('pointerdown', outside, true)
+    return () => { document.removeEventListener('pointerdown', outside, true); document.removeEventListener('staffly:popover-open', otherOpened) }
   }, [listId, setOpenState])
   useEffect(() => { setInvalid(false) }, [value])
   useLayoutEffect(() => {
@@ -69,6 +68,10 @@ export default function Select({ children, value, onChange, disabled, required, 
     if (top < list.scrollTop + searchHeight) list.scrollTop = top - searchHeight
     else if (top + option.offsetHeight > list.scrollTop + list.clientHeight) list.scrollTop = top + option.offsetHeight - list.clientHeight
   }, [active, open, popupStyle])
+
+  // Search must receive focus after the portal container ref has been committed.
+  // autoFocus on its child fires earlier and the trigger blur mistakes it for an outside focus.
+  useLayoutEffect(() => { if (open && searchable) popup.current?.querySelector<HTMLInputElement>('input')?.focus() }, [open, searchable])
 
   function choose(index: number) {
     const option = options[index]
@@ -100,11 +103,11 @@ export default function Select({ children, value, onChange, disabled, required, 
     <select {...props} value={value} disabled={disabled} required={required} onChange={onChange} tabIndex={-1} aria-hidden="true" onFocus={() => trigger.current?.focus()} className="staffly-select__validation" onInvalid={event => { event.preventDefault(); setInvalid(true); trigger.current?.focus(); setOpenState(true) }}>
       {options.map((option, index) => <option key={`${option.value}-${index}`} value={option.value} disabled={option.disabled}>{option.search}</option>)}
     </select>
-    <button id={id} ref={trigger} type="button" role="combobox" aria-label={accessibleLabel} aria-labelledby={props['aria-labelledby']} aria-describedby={props['aria-describedby']} aria-expanded={open} aria-controls={listId} aria-owns={open ? listId : undefined} aria-haspopup="listbox" aria-required={required} aria-invalid={props['aria-invalid'] ?? invalid} aria-activedescendant={open && available.some(option => option.index === active) ? `${listId}-${active}` : undefined} disabled={disabled} className="staffly-control" onPointerDown={event => { event.preventDefault(); event.stopPropagation(); pointerClick.current = true; setActive(Math.max(0, selected)); setOpenState(!openRef.current) }} onClick={() => { if (pointerClick.current) { pointerClick.current = false; return } setActive(Math.max(0, selected)); setOpenState(!openRef.current) }} onKeyDown={event => navigate(event)}>
+    <button id={id} ref={trigger} type="button" role="combobox" aria-label={accessibleLabel} aria-labelledby={props['aria-labelledby']} aria-describedby={props['aria-describedby']} aria-expanded={open} aria-controls={listId} aria-owns={open ? listId : undefined} aria-haspopup="listbox" aria-required={required} aria-invalid={props['aria-invalid'] ?? invalid} aria-activedescendant={open && available.some(option => option.index === active) ? `${listId}-${active}` : undefined} disabled={disabled} className="staffly-control" onClick={event => { event.preventDefault(); event.stopPropagation(); trigger.current?.focus(); setActive(Math.max(0, selected)); setOpenState(!openRef.current) }} onKeyDown={event => navigate(event)}>
       <span>{options[selected]?.label ?? 'Выберите значение'}</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 7 5 5 5-5" /></svg>
     </button>
     {open && createPortal(<div ref={popup} style={popupStyle} className="staffly-select__options staffly-select__options--floating">
-      {searchable && <input type="search" role="combobox" aria-label="Поиск сотрудника" aria-expanded="true" aria-controls={listId} aria-activedescendant={available.some(option => option.index === active) ? `${listId}-${active}` : undefined} placeholder="ФИО или почта" value={search} onChange={event => { setSearch(event.target.value); const terms = event.target.value.trim().toLocaleLowerCase().split(/\s+/); setActive(options.findIndex(option => !option.disabled && terms.every(term => option.search.toLocaleLowerCase().includes(term)))) }} onKeyDown={event => navigate(event, true)} autoFocus />}
+      {searchable && <input type="search" role="combobox" aria-label="Поиск сотрудника" aria-expanded="true" aria-controls={listId} aria-activedescendant={available.some(option => option.index === active) ? `${listId}-${active}` : undefined} placeholder="ФИО или почта" value={search} onChange={event => { setSearch(event.target.value); const terms = event.target.value.trim().toLocaleLowerCase().split(/\s+/); setActive(options.findIndex(option => !option.disabled && terms.every(term => option.search.toLocaleLowerCase().includes(term)))) }} onKeyDown={event => navigate(event, true)} />}
       <div id={listId} role="listbox" aria-label={accessibleLabel}>
         {!matches.length && <p className="staffly-select__empty">Ничего не найдено</p>}
         {matches.map(({ index, ...option }) => <div role="option" id={`${listId}-${index}`} data-index={index} key={`${option.value}-${index}`} aria-selected={index === selected} aria-disabled={option.disabled} className={index === active ? 'is-active' : ''} onPointerMove={() => setActive(index)} onMouseDown={event => event.preventDefault()} onClick={() => choose(index)}>{option.label}{index === selected && <span aria-hidden="true">✓</span>}</div>)}

@@ -1,3 +1,4 @@
+import DraftInbox from './schedule/draft-inbox.tsx'
 import { canAccess } from '../../app/access/catalog.ts'
 import { Link } from 'react-router-dom'
 import Avatar from '../../component/ui/avatar/avatar.tsx'
@@ -23,6 +24,7 @@ export default function OrganizationDashboard({ organization }: { organization: 
   const [todayPointId, setTodayPointId] = useState<string | null>(null)
   const todayPoint = overview.data?.locations.find(point => point.id === todayPointId)
   return <div className="workspace-dashboard dashboard-home">{dashboard ? <DashboardOverview organization={organization} /> : <header><h1>{organization.name}</h1><p>Доступные разделы находятся в меню организации.</p></header>}
+    <DraftInbox organization={organization}/>
     {dashboard && <section className="location-overview"><h2>Сегодня по точкам</h2>{overview.isLoading ? <p>Загружаем смены…</p> : overview.isError ? <p role="alert">Не удалось загрузить смены. <button className="app-secondary" onClick={() => void overview.refetch()}>Повторить</button></p> : <div className="location-overview__grid">{overview.data?.locations.map(point => {
       return <button type="button" className="location-today-card" data-tone={locationTone(point.id)} key={point.id} onClick={() => setTodayPointId(point.id)} aria-label={`${point.name}: сегодня на смене ${point.todayMemberCount}. Посмотреть сотрудников`}>
         <span className="location-today-card__heading"><PointMark /><span className="location-today-card__title"><strong>{point.name}</strong><span className="location-today-card__address">{[point.city, point.address].filter(Boolean).join(', ') || 'Адрес не указан'}</span></span><svg className="location-today-card__arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5" /></svg></span>

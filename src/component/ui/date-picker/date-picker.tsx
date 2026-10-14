@@ -24,8 +24,8 @@ export default function DatePicker({ value, onChange, min, max, disabled, readOn
     function outside(event: PointerEvent) { if (!host.current?.contains(event.target as Node)) setOpen(false) }
     const otherOpened = (event: Event) => { if ((event as CustomEvent<string>).detail !== panelId) setOpen(false) }
     document.addEventListener('staffly:popover-open', otherOpened)
-    document.addEventListener('pointerdown', outside)
-    return () => { document.removeEventListener('pointerdown', outside); document.removeEventListener('staffly:popover-open', otherOpened) }
+    document.addEventListener('pointerdown', outside, true)
+    return () => { document.removeEventListener('pointerdown', outside, true); document.removeEventListener('staffly:popover-open', otherOpened) }
   }, [panelId])
   useEffect(() => { setInvalid(false) }, [value])
   useEffect(() => {
@@ -85,7 +85,7 @@ export default function DatePicker({ value, onChange, min, max, disabled, readOn
     if (event.key === 'Escape' && open) { event.stopPropagation(); setOpen(false); trigger.current?.focus() }
   }}>
     <input {...props} type="text" value={text} onChange={() => undefined} disabled={disabled} required={required && !readOnly} tabIndex={-1} aria-hidden="true" onFocus={() => trigger.current?.focus()} className="staffly-select__validation" onInvalid={event => { event.preventDefault(); setInvalid(true); openCalendar() }} />
-    <button id={id} ref={trigger} type="button" className={`staffly-control${text ? '' : ' is-placeholder'}`} disabled={disabled} aria-label={props['aria-label'] ?? (label || 'Дата')} aria-labelledby={props['aria-labelledby']} aria-describedby={props['aria-describedby']} aria-haspopup="dialog" aria-expanded={open} aria-controls={panelId} aria-required={required} aria-invalid={props['aria-invalid'] ?? invalid} aria-readonly={readOnly} onClick={() => open ? setOpen(false) : openCalendar()}>
+    <button id={id} ref={trigger} type="button" className={`staffly-control${text ? '' : ' is-placeholder'}`} disabled={disabled} aria-label={props['aria-label'] ?? (label || 'Дата')} aria-labelledby={props['aria-labelledby']} aria-describedby={props['aria-describedby']} aria-haspopup="dialog" aria-expanded={open} aria-controls={panelId} aria-required={required} aria-invalid={props['aria-invalid'] ?? invalid} aria-readonly={readOnly} onClick={event => { event.preventDefault(); event.stopPropagation(); if (open) setOpen(false); else openCalendar() }}>
       {text ? parse(text).toLocaleDateString('ru-RU') : 'Выберите дату'}<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 5h12v12H4zM7 3v4m6-4v4M4 9h12" /></svg>
     </button>
     {open && <div id={panelId} role="dialog" aria-label="Выбор даты" className="staffly-calendar">

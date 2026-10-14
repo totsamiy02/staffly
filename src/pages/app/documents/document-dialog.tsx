@@ -1,9 +1,10 @@
 import { useEffect, useRef, type ReactNode } from 'react'
 import './documents.scss'
+import { lockBodyScroll } from '../../../component/ui/body-scroll-lock.ts'
 // Focus handling is shared by every dialog in this module, including the drawer.
 export default function DocumentDialog({ title, onClose, children, drawer = false, busy = false, viewer = false, className = '', eyebrow = 'Документы', headerContent, onEscape }: { title: string; onClose: () => void; children: ReactNode; drawer?: boolean; busy?: boolean; viewer?: boolean; className?: string; eyebrow?: string; headerContent?: ReactNode; onEscape?: () => void }) {
   const ref = useRef<HTMLDivElement>(null)
-  useEffect(() => { const previous = document.activeElement as HTMLElement | null; const original = document.body.style.overflow; document.body.style.overflow = 'hidden'; ref.current?.focus(); return () => { document.body.style.overflow = original; previous?.focus() } }, [])
+  useEffect(() => { const previous = document.activeElement as HTMLElement | null; const release = lockBodyScroll(); ref.current?.focus(); return () => { release(); if (previous?.isConnected) previous.focus() } }, [])
   return <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title} className={`${viewer ? 'document-viewer' : drawer ? 'schedule-drawer document-drawer' : 'request-modal document-dialog'} ${className}`} onKeyDown={event => {
     if (event.defaultPrevented) return
     if (event.key === 'Escape' && onEscape) { event.stopPropagation(); onEscape(); return }

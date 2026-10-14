@@ -29,12 +29,13 @@ async function readJson<T>(response: Response): Promise<T> {
   const text = await response.text()
   let parsed: unknown = {}
   try { parsed = text ? JSON.parse(text) : {} } catch { parsed = {} }
-  const data = (parsed && typeof parsed === 'object' ? parsed : {}) as T & { message?: string; code?: string }
+  const data = (parsed && typeof parsed === 'object' ? parsed : {}) as T & { message?: string; code?: string; errors?: unknown }
   if (!response.ok) {
     const fallback = response.status === 404 ? 'Запрошенные данные не найдены.' : response.status >= 500 ? 'Сервис временно недоступен. Попробуйте позже.' : 'Не удалось выполнить запрос.'
-    const error = new Error(data.message || fallback) as Error & { code?: string; status?: number }
+    const error = new Error(data.message || fallback) as Error & { code?: string; status?: number; errors?: unknown }
     error.code = data.code
     error.status = response.status
+    error.errors = data.errors
     throw error
   }
   return data

@@ -1,12 +1,12 @@
-import { useEffect, useState } from 'react'
-import { createPortal } from 'react-dom'
+import { useEffect } from 'react'
 import { useAuth } from '../../../app/auth/auth-context.tsx'
+import { useFloatingMessages } from '../../../component/ui/toast/toast-context.ts'
 import { useNotificationHistory, useNotificationActions } from '../../../app/organizations/queries.ts'
-import type { HistoryNotification } from '../../../app/organizations/types.ts'
 import { takeFreshNotifications } from '../../../app/organizations/floating-notifications.ts'
 import NotificationItem from './notification-item.tsx'
 
 const seenByUser = new Map<string, Set<string>>()
+const pendingByUser = new Map<string, Map<string,string>>()
 function seenNotices(userId: string) {
   const cached = seenByUser.get(userId)
   if (cached) return cached
@@ -16,43 +16,28 @@ function seenNotices(userId: string) {
   seenByUser.set(userId, seen)
   return seen
 }
-
 export default function NotificationAlerts({ organizationId, suppressed }: { organizationId?: string; suppressed?: boolean }) {
   const { user } = useAuth()
   const notifications = useNotificationHistory({ organizationId, unread: true, limit: 50, locationId: null })
   const actions = useNotificationActions(organizationId)
-  const [visible, setVisible] = useState<Array<{ item: HistoryNotification; seconds: number }>>([])
-  const [pageVisible, setPageVisible] = useState(document.visibilityState === 'visible')
-
-  useEffect(() => { setVisible([]) }, [user?.id])
-
+  const { enqueue, dismiss, remove } = useFloatingMessages()
+  const userId=user?.id??''
+  if(!pendingByUser.has(userId))pendingByUser.set(userId,new Map())
+  const pending=pendingByUser.get(userId)!
   useEffect(() => {
-    const update = () => setPageVisible(document.visibilityState === 'visible')
-    document.addEventListener('visibilitychange', update)
-    return () => document.removeEventListener('visibilitychange', update)
-  }, [])
-
-  useEffect(() => {
-    if (!user?.id) return
+    if (!user?.id || !notifications.data) return
     const seen = seenNotices(user.id)
-    const fresh = takeFreshNotifications(notifications.data?.notifications ?? [], seen)
-    try { sessionStorage.setItem(`staffly:floating-notices:${user.id}`, JSON.stringify([...seen].slice(-200))) } catch { /* Keep in-memory deduplication. */ }
-    if (suppressed) { setVisible([]); return }
-    if (notifications.data) setVisible(current => [...current.flatMap(entry => {
-      const item = notifications.data.notifications.find(item => item.id === entry.item.id)
-      return item ? [{ ...entry, item }] : []
-    }), ...fresh.map(item => ({ item, seconds: 15 }))].slice(-4))
-  }, [notifications.data, user?.id, suppressed])
-
-  useEffect(() => {
-    if (!pageVisible) return
-    const timer = window.setInterval(() => setVisible((current) => current.map((entry) => ({ ...entry, seconds: entry.seconds - 1 })).filter((entry) => entry.seconds >= 0)), 1_000)
-    return () => window.clearInterval(timer)
-  }, [pageVisible])
-
-  function close(id: string) { setVisible(current => current.map(entry => entry.item.id === id ? { ...entry, seconds: 0 } : entry)) }
-  if (suppressed || !visible.length) return null
-  return createPortal(<aside className="notification-alerts staffly-notification-stack" aria-label="Новые уведомления">{visible.filter(({ item }) => !organizationId || item.organization.id === organizationId).map(({ item, seconds }) => <div className={`notification-alert${seconds === 0 ? ' is-closing' : ''}`} role="status" key={item.id}>
-    <NotificationItem item={item} floating compact showOrganization={!organizationId} now={Date.now()} busy={actions.read.isPending} onDismiss={() => close(item.id)} onNavigate={() => close(item.id)} onRead={(id, unread) => actions.read.mutate({ id, unread })} onInvite={(id, action) => actions.invitation.mutate({ id, action })} />
-  </div>)}</aside>, document.body)
+    const fresh = takeFreshNotifications(notifications.data.notifications, seen)
+    try { sessionStorage.setItem(`staffly:floating-notices:${user.id}`, JSON.stringify([...seen].slice(-200))) } catch { /* In-memory fallback. */ }
+    if (suppressed) { for (const [id,org] of pending) if(!organizationId||org===organizationId){remove(`notice:${id}`);pending.delete(id)};return }
+    for (const [id,org] of pending) if ((!organizationId||org===organizationId)&&!notifications.data.notifications.some(item => item.id === id)) { remove(`notice:${id}`); pending.delete(id) }
+    for (const item of fresh) {
+      if (organizationId && item.organization.id !== organizationId) continue
+      pending.set(item.id,item.organization.id)
+      const id = `notice:${item.id}`
+      const close = () => { pending.delete(item.id); dismiss(id) }
+      enqueue({ id, duration: 7000, className: 'notification-alert', content: <NotificationItem item={item} floating compact showOrganization={!organizationId} now={Date.now()} busy={actions.read.isPending} onDismiss={close} onNavigate={close} onRead={(id, unread) => actions.read.mutate({ id, unread })} onInvite={(id, action) => actions.invitation.mutate({ id, action })} /> })
+    }
+  }, [notifications.data, user?.id, organizationId, suppressed, enqueue, dismiss, remove, actions.read, actions.invitation, pending])
+  return null
 }

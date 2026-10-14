@@ -1,3 +1,4 @@
+import teamPlanningRouter from './schedule/team-planning-routes.ts'
 import express from 'express'
 import { ZodError } from 'zod'
 import cookieParser from 'cookie-parser'
@@ -27,6 +28,7 @@ app.use('/api/organizations/:organizationId/shifts/batch', express.json({ limit:
 app.use('/api/organizations/:organizationId/documents/:documentId/assign', express.json({ limit: '64kb' }))
 app.use('/api/organizations/:organizationId/events', express.json({ limit: '64kb' }))
 app.use('/api/organizations/:organizationId/statistics/reports', express.json({ limit: '128kb' }))
+app.use('/api/organizations/:organizationId/schedule', express.json({ limit: '192kb' }))
 app.use(express.json({ limit: '16kb' }))
 app.use(cookieParser())
 app.use('/api', (request, response, next) => {
@@ -73,9 +75,11 @@ app.use('/api', (_request, response, next) => { response.set('Cache-Control', 'n
 app.use('/api', (_request, response, next) => { response.set('Cache-Control', 'no-store'); next() }, requestsRouter)
 app.use('/api', documentsRouter)
 app.use('/api', eventsRouter)
+app.use('/api', teamPlanningRouter)
 app.use('/api', (_request, response) => response.status(404).json({ code: 'API_NOT_FOUND', message: 'Запрошенный адрес не найден.' }))
 app.use((error: unknown, request: express.Request, response: express.Response, _next: express.NextFunction) => {
   if (error && typeof error === 'object' && 'type' in error && error.type === 'entity.too.large') {
+    if (/\/organizations\/[0-9a-f-]+\/schedule\//.test(request.path)) { response.status(413).json({code:'PLANNING_BODY_TOO_LARGE',message:'Данные планирования превышают допустимый размер.'}); return }
     if (/\/organizations\/[0-9a-f-]+\/events(?:\/|$)/.test(request.path)) { response.status(413).json({ code: 'EVENT_BODY_TOO_LARGE', message: 'Данные события превышают допустимый размер.' }); return }
     if (/\/organizations\/[0-9a-f-]+\/documents$/.test(request.path)) { response.status(413).json({ code: 'DOCUMENT_TOO_LARGE', message: `Файл должен весить не больше ${Math.ceil(MAX_DOCUMENT_BYTES / 1024 / 1024)} МБ.` }); return }
     const attachment = /\/requests\/[0-9a-f-]+\/attachments$/.test(request.path)

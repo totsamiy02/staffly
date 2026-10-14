@@ -1,0 +1,9 @@
+.schedule-section-header {display:grid;gap:20px;min-width:0;width:100%;margin-bottom:20px;grid-template-columns:minmax(0,1fr);>.staffly-segmented{width:fit-content;max-width:100%;min-width:0;justify-self:start;margin:0;}}
+.schedule-section-heading {display:flex;align-items:center;justify-content:space-between;gap:20px;min-width:0;>div:first-child{display:grid;gap:7px;min-width:0;}h1{margin:0;font-size:30px;font-weight:700;line-height:1.2;letter-spacing:-.8px;}p{margin:0;font-size:13px;line-height:1.6;color:#737b89;} }
+.schedule-section-actions {display:flex;align-items:center;gap:8px;flex-wrap:wrap;>button,>a,.schedule-header-actions>button{min-height:36px;padding:8px 13px;border-radius:7px;font-size:12px;font-weight:550;line-height:1.4;}}
+.team-planning>.schedule-section-header {margin-bottom:0;}
+@media(max-width:800px){.schedule-section-heading{align-items:stretch;flex-direction:column;gap:14px;} .schedule-section-heading h1{font-size:25px;} .schedule-section-actions{width:100%;}}
+.schedule-section-header .schedule-section-heading h1 {font-size:30px;line-height:1.2;font-weight:700;letter-spacing:-.8px;}
+.schedule-section-header .schedule-section-heading p {font-size:13px;font-weight:400;line-height:1.6;color:#737b89;}
+.schedule-section-header .schedule-section-actions>button,.schedule-section-header .schedule-section-actions .schedule-header-actions>button {font-size:12px;font-weight:550;}
+@media(max-width:800px){.schedule-section-header .schedule-section-heading h1{font-size:25px;}}

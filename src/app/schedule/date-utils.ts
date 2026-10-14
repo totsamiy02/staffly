@@ -83,3 +83,18 @@ export function shiftCoversDate(shift: WorkShift, day: string, timezone: string)
   const lastDay = end.time === '00:00' && end.date !== start.date ? addDays(end.date, -1) : end.date
   return day >= start.date && day <= lastDay
 }
+
+// Convert a form's wall-clock value in the point timezone, independently of the browser zone.
+export function localDateTimeIso(date: string, time: string, timezone: string) {
+  const wall = Date.parse(`${date}T${time}:00Z`)
+  if (!Number.isFinite(wall)) throw new Error('Укажите дату и время.')
+  let result = wall
+  for (let i=0;i<3;i++) {
+    const parts=zonedDateAndTime(new Date(result).toISOString(),timezone)
+    const offset=Date.parse(`${parts.date}T${parts.time}:00Z`)-result
+    result=wall-offset
+  }
+  const iso=new Date(result).toISOString(), actual=zonedDateAndTime(iso,timezone)
+  if(actual.date!==date||actual.time!==time) throw new Error('Это местное время не существует в часовом поясе точки.')
+  return iso
+}
