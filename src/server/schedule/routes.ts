@@ -1,3 +1,4 @@
+import { setShiftAttendance } from './service.ts'
 import { offerBody, offerModesBody, offerListQuery, offerActionBody, getOfferModes, saveOfferModes, offerCandidates, createOffer, listOffers, getOffer, actOnOffer } from './offer-service.ts'
 import { reportSickness, listAbsences, changeAbsence, absenceReportBody, absenceEditBody, absenceCancelBody, absenceListQuery } from './absence-service.ts'
 import { planningData, savePosition, saveTemplate, assignPositions, saveWorkload, positionBody, templateBody, assignmentBody, workloadBody } from './planning.ts'
@@ -42,7 +43,8 @@ router.get('/organizations/:organizationId/schedule/offers/:offerId', async (req
 })
 router.post('/organizations/:organizationId/schedule/offers/:offerId/action', mutationLimiter, async (request, response) => {
   const { organizationId, offerId } = parse(organizationParams.extend({ offerId: z.string().uuid() }), request.params)
-  response.json({ offer: await actOnOffer(auth(request).userId, organizationId, offerId, parse(offerActionBody, request.body).action) })
+  const body=parse(offerActionBody,request.body)
+  response.json({ offer: await actOnOffer(auth(request).userId, organizationId, offerId, body.action,body.acknowledgeWorkload) })
 })
 
 router.get('/organizations/:organizationId/schedule/history', async (request, response) => {
@@ -50,6 +52,7 @@ router.get('/organizations/:organizationId/schedule/history', async (request, re
   response.json(await listCancelledShifts(auth(request).userId, organizationId, parse(cancelledShiftsQuery, request.query)))
 })
 
+router.post('/organizations/:organizationId/schedule/shifts/:shiftId/attendance',mutationLimiter,async(q,s)=>{const {organizationId,shiftId}=parse(shiftParams,q.params);const b=parse(z.object({attendance:z.enum(['WORKED','PARTIAL','NO_SHOW']),reason:z.string().trim().min(3).max(500),startAt:z.iso.datetime().optional(),endAt:z.iso.datetime().optional()}),q.body);s.json({shift:await setShiftAttendance(auth(q).userId,organizationId,shiftId,b)})})
 router.get('/shift-notifications', async (request, response) => response.json({ notifications: await listShiftNotifications(auth(request).userId) }))
 router.post('/shift-notifications/:shiftId/read', async (request, response) => {
   const { shiftId } = parse(z.object({ shiftId: z.string().uuid() }), request.params)

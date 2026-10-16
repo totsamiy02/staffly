@@ -1,10 +1,14 @@
+import { vacationSettings, vacationSettingsBody } from './vacations.ts'
+import { amendVacation, completeRequestTask } from './service.ts'
+import { answerCampaign, createCampaign, listVacationPlanning, closeCampaign, vacationWarnings, campaignBody, vacationResponseBody } from './vacations.ts'
+import { submitRequest, returnRequest } from './service.ts'
 import express, { Router, type Request } from 'express'
 import { rateLimit } from 'express-rate-limit'
 import { z } from 'zod'
 import { requireAuth, type AuthenticatedRequest } from '../auth.ts'
 import { ApiError } from '../api-error.ts'
 import { addRequestAttachment, deleteRequestAttachment, downloadRequestAttachment, MAX_REQUEST_FILE_BYTES } from './attachment-service.ts'
-import { respondToStaffing, cancelRequest, createRequest, createRequestType, getRequest, listRequests, listRequestTypes, resolveRequest, updateRequest, updateRequestType } from './service.ts'
+import { respondToStaffing, cancelRequest, createRequest, createRequestType, deleteRequestType, getRequest, listRequests, listRequestTypes, resolveRequest, updateRequest, updateRequestType } from './service.ts'
 import { attachmentParams, createRequestBody, createRequestTypeBody, listRequestsQuery, organizationRequestParams, rejectRequestBody, requestParams, requestTypeParams, resolveRequestBody, updateRequestTypeBody } from './schemas.ts'
 
 const router = Router()
@@ -16,9 +20,21 @@ router.use(requireAuth)
 function auth(request: Request) { return (request as AuthenticatedRequest).auth! }
 function parse<T>(schema: z.ZodType<T>, value: unknown): T { const result = schema.safeParse(value); if (!result.success) throw new ApiError(400, 'VALIDATION_ERROR', 'Проверьте данные заявки.', z.flattenError(result.error).fieldErrors); return result.data }
 
+router.get('/organizations/:organizationId/vacation-settings',async(q,s)=>{const {organizationId}=parse(organizationRequestParams,q.params);s.json(await vacationSettings(auth(q).userId,organizationId))})
+router.put('/organizations/:organizationId/vacation-settings',mutationLimiter,async(q,s)=>{const {organizationId}=parse(organizationRequestParams,q.params);s.json(await vacationSettings(auth(q).userId,organizationId,parse(vacationSettingsBody,q.body)))})
+router.get('/organizations/:organizationId/vacations',async(q,s)=>{const {organizationId}=parse(organizationRequestParams,q.params);const {year}=parse(z.object({year:z.coerce.number().int().min(2020).max(2200)}),q.query);s.json(await listVacationPlanning(auth(q).userId,organizationId,year))})
+router.post('/organizations/:organizationId/vacation-campaigns',mutationLimiter,async(q,s)=>{const {organizationId}=parse(organizationRequestParams,q.params);s.status(201).json({campaign:await createCampaign(auth(q).userId,organizationId,parse(campaignBody,q.body))})})
+router.post('/organizations/:organizationId/vacation-campaigns/:requestId/answer',mutationLimiter,async(q,s)=>{const {organizationId,requestId}=parse(requestParams,q.params);s.json({requests:await answerCampaign(auth(q).userId,organizationId,requestId,parse(vacationResponseBody,q.body))})})
+router.post('/organizations/:organizationId/vacation-campaigns/:requestId/close',mutationLimiter,async(q,s)=>{const {organizationId,requestId}=parse(requestParams,q.params);s.json({campaign:await closeCampaign(auth(q).userId,organizationId,requestId)})})
+router.get('/organizations/:organizationId/vacation-warnings',async(q,s)=>{const {organizationId}=parse(organizationRequestParams,q.params);const {startDate,endDate,subjectMemberId}=parse(createRequestBody.pick({startDate:true,endDate:true,subjectMemberId:true}),q.query);if(!startDate||!endDate||startDate>endDate)throw new ApiError(400,'INVALID_PERIOD','Проверьте период.');s.json(await vacationWarnings(auth(q).userId,organizationId,startDate,endDate,subjectMemberId))})
+router.post('/organizations/:organizationId/requests/:requestId/submit',mutationLimiter,async(q,s)=>{const {organizationId,requestId}=parse(requestParams,q.params);s.json({request:await submitRequest(auth(q).userId,organizationId,requestId)})})
+router.post('/organizations/:organizationId/requests/:requestId/return',mutationLimiter,async(q,s)=>{const {organizationId,requestId}=parse(requestParams,q.params);const b=parse(z.object({comment:z.string().trim().min(3).max(1000),withdraw:z.boolean().default(false)}),q.body);s.json({request:await returnRequest(auth(q).userId,organizationId,requestId,b.comment,b.withdraw)})})
+router.post('/organizations/:organizationId/requests/:requestId/amend',mutationLimiter,async(q,s)=>{const {organizationId,requestId}=parse(requestParams,q.params);const b=parse(createRequestBody.pick({startDate:true,endDate:true,comment:true}),q.body);if(!b.startDate||!b.endDate||b.startDate>b.endDate||!b.comment?.trim())throw new ApiError(400,'INVALID_AMENDMENT','Укажите даты и причину переноса.');s.json({request:await amendVacation(auth(q).userId,organizationId,requestId,b.startDate,b.endDate,b.comment)})})
+router.post('/organizations/:organizationId/requests/:requestId/complete-task',mutationLimiter,async(q,s)=>{const {organizationId,requestId}=parse(requestParams,q.params);await completeRequestTask(auth(q).userId,organizationId,requestId);s.status(204).end()})
 router.get('/organizations/:organizationId/request-types', async (request, response) => { const { organizationId } = parse(organizationRequestParams, request.params); response.json({ types: await listRequestTypes(auth(request).userId, organizationId, request.query.includeInactive === 'true') }) })
 router.post('/organizations/:organizationId/request-types', mutationLimiter, async (request, response) => { const { organizationId } = parse(organizationRequestParams, request.params); response.status(201).json({ type: await createRequestType(auth(request).userId, organizationId, parse(createRequestTypeBody, request.body)) }) })
 router.patch('/organizations/:organizationId/request-types/:typeId', mutationLimiter, async (request, response) => { const { organizationId, typeId } = parse(requestTypeParams, request.params); response.json({ type: await updateRequestType(auth(request).userId, organizationId, typeId, parse(updateRequestTypeBody, request.body)) }) })
+router.delete('/organizations/:organizationId/request-types/:typeId', mutationLimiter, async (request, response) => { const { organizationId, typeId } = parse(requestTypeParams, request.params); response.json(await deleteRequestType(auth(request).userId, organizationId, typeId)) })
 
 for (const scope of ['mine', 'incoming', 'history', 'staffing'] as const) router.get(`/organizations/:organizationId/requests/${scope}`, async (request, response) => { const { organizationId } = parse(organizationRequestParams, request.params); response.json(await listRequests(auth(request).userId, organizationId, scope, parse(listRequestsQuery, request.query))) })
 router.post('/organizations/:organizationId/requests', mutationLimiter, async (request, response) => { const { organizationId } = parse(organizationRequestParams, request.params); response.status(201).json({ request: await createRequest(auth(request).userId, organizationId, parse(createRequestBody, request.body)) }) })

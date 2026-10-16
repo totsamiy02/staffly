@@ -146,7 +146,7 @@ export async function listDocuments(userId: string, organizationId: string, opti
   else if (!manager && !options.visibility && options.scope === 'workspace') where.visibility = {not:'PRIVATE_MEMBER'}
 
   if (options.fileType) {
-    const types = { pdf: ['application/pdf'], office: ['application/msword', 'application/vnd.ms-excel', 'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'], image: ['image/jpeg', 'image/png', 'image/webp'], text: ['text/plain', 'text/csv'] }
+    const types = { pdf: ['application/pdf'], office: ['application/msword', 'application/vnd.ms-excel', 'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'], image: ['image/jpeg', 'image/png', 'image/webp'], text: ['text/plain', 'text/csv', 'text/markdown'] }
     where.storedFile = { mimeType: { in: types[options.fileType] } }
   }
   if (options.scope === 'acknowledgements') where.acknowledgements = { some: { memberId: actor.id, cancelledAt: null } }
@@ -399,11 +399,11 @@ export async function previewDocumentAudience(userId: string, organizationId: st
     const locationId = metadataLocation(organizationId, data)
     if (!docPermission(actor, 'documents.access', locationId) && !docPermission(actor, 'documents.upload', locationId) && !docPermission(actor, 'documents.folders', locationId) && !docPermission(actor,'documents.assign',locationId) && !docPermission(actor,'documents.edit',locationId)) throw new ApiError(403, 'INSUFFICIENT_PERMISSIONS', 'Недостаточно прав для проверки аудитории.')
     await validateAudience(tx, organizationId, data)
-    const members = await tx.organizationMember.findMany({ where: { organizationId, leftAt: null, user: { deletedAt: null }, ...(!actor.owner && locationId ? {OR:[{role:'OWNER' as const},{accessRoleId:{not:null}},{locationMemberships:{some:{locationId,leftAt:null}}},{accessAssignments:{some:{locationId}}}]} : {}) }, include: { user: { select: { firstName: true, lastName: true, middleName: true, email: true } } } })
+    const members = await tx.organizationMember.findMany({ where: { organizationId, leftAt: null, user: { deletedAt: null }, ...(!actor.owner && locationId ? {OR:[{role:'OWNER' as const},{accessRoleId:{not:null}},{locationMemberships:{some:{locationId,leftAt:null}}},{accessAssignments:{some:{locationId}}}]} : {}) }, include: { user: { select: { firstName: true, lastName: true, middleName: true, email: true, avatarFileId: true } } } })
     const result = await Promise.all(members.map(async m => {
       const recipient = await getMembership(m.userId, organizationId, tx)
       const allowed = canReadDocument(recipient, { ...data, targetMemberId:data.targetMemberId??null, organizationId, locationId, deletedAt: null }) && (!data.folderId || await folderAncestorsReadable(tx, recipient, data.folderId))
-      return { id: m.id, name: memberName(m.user), allowed }
+      return { id: m.id, name: memberName(m.user), avatarUrl: mediaUrl(m.user.avatarFileId), allowed }
     }))
     return { members: result }
   })

@@ -1,7 +1,8 @@
+import FilePreview from '../../../component/ui/file-preview/file-preview.tsx'
 import DocumentActionsMenu from './document-actions-menu.tsx'
 import { liveQueryOptions } from '../../../app/live-query.ts'
 import { useToast } from '../../../component/ui/toast/toast-context.ts'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { useAuth } from '../../../app/auth/auth-context.tsx'
 import Avatar from '../../../component/ui/avatar/avatar.tsx'
@@ -13,51 +14,35 @@ import DocumentDialog from './document-dialog.tsx'
 function FileIcon() {
   return <svg viewBox="0 0 32 40" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M5 2h14l8 8v28H5V2Z" /><path d="M19 2v9h8M10 20h12M10 26h12" /></svg>
 }
-function formatDescription(extension: string) {
-  if (['xls', 'xlsx', 'csv'].includes(extension)) return { title: extension === 'csv' ? 'Таблица CSV' : 'Файл Excel', hint: 'Скачайте файл, чтобы открыть таблицу на устройстве.' }
-  if (['doc', 'docx'].includes(extension)) return { title: 'Файл Word', hint: 'Скачайте файл, чтобы открыть документ на устройстве.' }
-  if (['ppt', 'pptx'].includes(extension)) return { title: 'Презентация PowerPoint', hint: 'Скачайте файл, чтобы открыть презентацию на устройстве.' }
-  return { title: 'Файл без предпросмотра', hint: 'Скачайте файл, чтобы открыть его на устройстве.' }
-}
 export default function DocumentDrawer({ organizationId, documentId, manager, pointId, onClose, onEdit, onAssign, onDelete, onRevision, folders = [] }: { organizationId: string; documentId: string; manager: boolean; pointId?: string | null; folders?: Folder[]; onRevision?: (item: DocumentItem) => void; onClose: () => void; onEdit?: (item: DocumentItem) => void; onAssign?: (item: DocumentItem) => void; onDelete?: (item: DocumentItem) => void }) {
   const toast = useToast()
   const { locationId, apiRequest, previewFile, downloadFile } = useAuth(), refresh = useDocumentRefresh()
   const path = documentPath(organizationId, documentId) + (pointId ? `?locationId=${pointId}` : '')
   const doc = useQuery({ ...liveQueryOptions, queryKey: ['document', organizationId, documentId, pointId ?? locationId], queryFn: () => apiRequest<{ document: DocumentItem }>(path), retry: false })
-  const [preview, setPreview] = useState(''), [text, setText] = useState(''), [previewLoaded, setPreviewLoaded] = useState(false)
-  const [error, setError] = useState(''), [fileAction, setFileAction] = useState<'preview' | 'download' | null>(null)
+  const [error, setError] = useState(''), [fileAction, setFileAction] = useState<'download' | null>(null)
   const [showRecipients, setShowRecipients] = useState(false), [progressPage, setProgressPage] = useState(1), [confirmCancel, setConfirmCancel] = useState<string | null>(null)
   const fileBusy = fileAction !== null
-  useEffect(() => () => { if (preview) URL.revokeObjectURL(preview) }, [preview])
   const progress = useQuery({ ...liveQueryOptions, queryKey: ['document-progress', organizationId, documentId, progressPage, locationId], queryFn: () => apiRequest<{ recipients: Recipient[]; pagination: { pages: number; total: number } }>(`${documentPath(organizationId, documentId)}/progress?page=${progressPage}${pointId ? `&locationId=${pointId}` : ''}`), enabled: manager && Boolean(doc.data?.document.canControl) && showRecipients && Boolean(doc.data), retry: false })
   const ack = useMutation({ mutationFn: () => apiRequest(`${documentPath(organizationId, documentId)}/acknowledge`, { method: 'POST' }), onSuccess: async () => { await refresh(); toast('Ознакомление подтверждено.') } })
   const cancel = useMutation({ mutationFn: (id: string) => apiRequest(`${documentPath(organizationId, documentId)}/acknowledgements/${id}/cancel`, { method: 'POST' }), onSuccess: async () => { setConfirmCancel(null); await refresh() } })
-  async function openFile(action: 'preview' | 'download') {
+  async function openFile() {
     if (fileBusy) return
-    setFileAction(action); setError('')
-    try {
-      if (action === 'download') await downloadFile(`${documentPath(organizationId, documentId)}/content?action=download${pointId ? `&locationId=${pointId}` : ''}`, doc.data!.document.fileName, 'POST')
-      else {
-        const blob = await previewFile(`${documentPath(organizationId, documentId)}/content?action=preview${pointId ? `&locationId=${pointId}` : ''}`, 'POST')
-        if (blob.type.startsWith('text/plain')) setText(await blob.text())
-        else setPreview(URL.createObjectURL(blob))
-        setPreviewLoaded(true)
-      }
-      // The successful delivery is committed after streaming finishes.
-      if (doc.data?.document.acknowledgement && !doc.data.document.acknowledgement.openedAt && !doc.data.document.acknowledgement.cancelledAt) {
-        for (let attempt = 0; attempt < 10; attempt++) {
-          const result = await doc.refetch(), current = result.data?.document.acknowledgement
-          if (current?.openedAt || current?.cancelledAt || current?.acknowledgedAt) break
-          await new Promise(resolve => window.setTimeout(resolve, 150))
-        }
-      }
-      await refresh()
-    } catch (failure) { setError(failure instanceof Error ? failure.message : 'Не удалось открыть документ.') }
+    setFileAction('download'); setError('')
+    try { await downloadFile(`${documentPath(organizationId, documentId)}/content?action=download${pointId ? `&locationId=${pointId}` : ''}`, doc.data!.document.fileName, 'POST'); await refresh() }
+    catch (failure) { setError(failure instanceof Error ? failure.message : 'Не удалось скачать документ.') }
     finally { setFileAction(null) }
+  }
+  async function previewDelivered() {
+    // The response's finish hook commits delivery. Refresh the same detail after that commit.
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const result = await doc.refetch(), current = result.data?.document.acknowledgement
+      if (!current || current.openedAt || current.cancelledAt || current.acknowledgedAt) break
+      await new Promise(resolve => window.setTimeout(resolve, 150))
+    }
+    await refresh()
   }
   const item = doc.data?.document, own = item?.acknowledgement
   const extension = item?.fileName.split('.').at(-1)?.toLowerCase() ?? ''
-  const description = formatDescription(extension)
   const activeProgress = item?.progress
 
   if (showRecipients && item && manager && item.canControl) return <DocumentDialog key="recipients" title="Ознакомление сотрудников" onClose={() => setShowRecipients(false)} onEscape={() => setShowRecipients(false)} className="document-recipients-dialog">
@@ -75,7 +60,7 @@ export default function DocumentDrawer({ organizationId, documentId, manager, po
 
   return <DocumentDialog key="viewer" viewer title={item?.displayName ?? 'Документ'} onClose={onClose} className={item?.previewable ? 'document-viewer--preview' : 'document-viewer--compact'} headerContent={<header className="document-viewer-header">
     <div className="document-viewer-heading"><span className="document-viewer-file-icon"><FileIcon /></span><div><h2>{item?.displayName ?? 'Документ'}</h2>{item && <p>{extension.toUpperCase()} · {sizeLabel(item.size)}</p>}</div></div>
-    <div className="document-viewer-header__actions">{item && item.canDownload !== false && <button className="app-primary" disabled={fileBusy} onClick={() => void openFile('download')}>{fileAction === 'download' ? 'Скачиваем…' : 'Скачать'}</button>}
+    <div className="document-viewer-header__actions">{item && item.canDownload !== false && <button className="app-primary" disabled={fileBusy} onClick={() => void openFile()}>{fileAction === 'download' ? 'Скачиваем…' : 'Скачать'}</button>}
       {manager && item?.canManage && item && !item.deletedAt && <DocumentActionsMenu label="Действия с документом">
         {onEdit && item.canEdit && <><button onClick={() => onEdit(item)}>Переименовать</button><button onClick={() => onEdit(item)}>Переместить</button></>}
         {onEdit && item.canAccess && <button onClick={() => onEdit(item)}>Изменить доступ</button>}
@@ -87,8 +72,10 @@ export default function DocumentDrawer({ organizationId, documentId, manager, po
   </header>}>
     {doc.isLoading ? <div className="app-state document-viewer-state" role="status"><span className="app-spinner" />Загружаем документ…</div> : doc.isError || !item ? <div className="app-state document-viewer-state" role="alert"><p>{doc.error instanceof Error ? doc.error.message : 'Документ недоступен.'}</p><button className="app-secondary" onClick={() => void doc.refetch()}>Повторить</button></div> : <div className="document-viewer-body">
       <section className="document-viewer-main" aria-label="Содержимое документа">
-        {fileAction === 'preview' ? <div className="document-viewer-placeholder" role="status"><span className="app-spinner" /><p>Загружаем предпросмотр…</p></div> : !item.previewable ? <div className="document-viewer-placeholder"><span className="document-viewer-placeholder__icon"><FileIcon /></span><h3>{description.title}</h3><p>{description.hint}</p></div> : previewLoaded ? item.mimeType.startsWith('image/') ? <img className="document-preview-image" src={preview} alt={item.displayName} /> : item.mimeType === 'application/pdf' ? <iframe className="document-preview-pdf" src={preview} title={`Предпросмотр: ${item.displayName}`} /> : <pre className="document-preview-text">{text}</pre> : <div className="document-viewer-placeholder"><span className="document-viewer-placeholder__icon"><FileIcon /></span><h3>Просмотр документа</h3><p>Откройте файл, чтобы прочитать его в Staffly.</p><button className="app-secondary" disabled={fileBusy} onClick={() => void openFile('preview')}>Открыть предпросмотр</button></div>}
-        {error && <div className="document-viewer-error" role="alert"><p>{error}</p><button className="app-secondary" disabled={fileBusy} onClick={() => void openFile(item.previewable && !previewLoaded ? 'preview' : 'download')}>Повторить</button></div>}
+        <FilePreview key={`${organizationId}:${documentId}:${pointId ?? locationId}`} sourceKey={`${documentId}:${item.fileName}`} name={item.fileName}
+          load={() => previewFile(`${documentPath(organizationId, documentId)}/content?action=preview${pointId ? `&locationId=${pointId}` : ''}`, 'POST')}
+          onLoaded={() => { void previewDelivered().catch(() => undefined) }} />
+        {error && <div className="document-viewer-error" role="alert"><p>{error}</p><button className="app-secondary" disabled={fileBusy} onClick={() => void openFile()}>Повторить скачивание</button></div>}
       </section>
       <aside className="document-viewer-sidebar" aria-label="Сведения и управление документом">
         {item.deletedAt && <p className="app-alert">Документ удалён. История сохранена.</p>}

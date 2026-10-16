@@ -167,7 +167,7 @@ export async function locationOverview(userId: string, organizationId: string) {
     const parts = new Intl.DateTimeFormat('en-CA', { timeZone: point.timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date())
     const today = ['year', 'month', 'day'].map(type => parts.find(part => part.type === type)?.value).join('-')
     const from = startOfZonedDate(today, point.timezone), to = startOfZonedDate(addCalendarDays(today, 1), point.timezone)
-    const shifts = await prisma.workShift.findMany({ where: { organizationId, locationId: point.id, status: 'SCHEDULED', scheduledStartAt: { lt: to }, scheduledEndAt: { gt: from } }, include: { member: { include: { user: { select: { firstName: true, lastName: true, middleName: true, email: true, avatarFileId: true } } } } }, orderBy: { scheduledStartAt: 'asc' } })
+    const shifts = await prisma.workShift.findMany({ where: { organizationId, locationId: point.id, status: 'SCHEDULED',attendance:{not:'NO_SHOW'}, scheduledStartAt: { lt: to }, scheduledEndAt: { gt: from } }, include: { member: { include: { user: { select: { firstName: true, lastName: true, middleName: true, email: true, avatarFileId: true } } } } }, orderBy: { scheduledStartAt: 'asc' } })
     return { ...point, today, todayMemberCount: new Set(shifts.map(shift => shift.memberId)).size, shifts: shifts.map(shift => ({ id: shift.id, memberId: shift.memberId, name: [shift.member.user.lastName, shift.member.user.firstName, shift.member.user.middleName].filter(Boolean).join(' ') || shift.member.user.email, avatarUrl: mediaUrl(shift.member.user.avatarFileId), startAt: shift.scheduledStartAt, endAt: shift.scheduledEndAt, position: shift.positionNameSnapshot })) }
   }))
 }

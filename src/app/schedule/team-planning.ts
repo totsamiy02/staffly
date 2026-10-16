@@ -3,8 +3,8 @@ import { useAuth } from '../auth/auth-context.tsx'
 import { liveQueryOptions } from '../live-query.ts'
 import type { TeamPlanningSettings, DemandData, CoverageDay, DraftSummary, DraftDetail, DraftValidation } from './team-planning-types.ts'
 export function useTeamSettings(organizationId:string) {
-  const {locationId,apiRequest}=useAuth()
-  return useQuery({...liveQueryOptions,queryKey:['team-planning-settings',organizationId,locationId],queryFn:()=>apiRequest<TeamPlanningSettings>(`/organizations/${organizationId}/schedule/team-settings`)})
+  const {apiRequest}=useAuth()
+  return useQuery({...liveQueryOptions,queryKey:['team-planning-settings',organizationId],queryFn:()=>apiRequest<TeamPlanningSettings>(`/organizations/${organizationId}/schedule/team-settings`)})
 }
 export function useDemand(organizationId:string,enabled=true) {
   const {locationId,apiRequest}=useAuth()

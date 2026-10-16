@@ -1,6 +1,6 @@
 import type { OrganizationRole } from '../organizations/types.ts'
 
-export type WorkShift = { positionId?: string | null; positionName?: string | null;
+export type WorkShift = { attendance?:'UNCONFIRMED'|'WORKED'|'PARTIAL'|'NO_SHOW';attendanceReason?:string|null; positionId?: string | null; positionName?: string | null;
   activeOffer?: { id: string; kind: 'TRANSFER' | 'SWAP'; status: 'PENDING' | 'AWAITING_APPROVAL' } | null
   id: string
   memberId: string

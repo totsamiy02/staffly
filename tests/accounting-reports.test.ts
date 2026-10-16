@@ -62,15 +62,15 @@ after(async () => {
   await prisma.user.deleteMany({ where: { id: { in: Object.values(people).map(person => person.id) } } }); await prisma.$disconnect()
 })
 describe('accounting export rules and security', { concurrency: false }, () => {
-  it('matches the reference: four shifts, 1890 minutes, planned-only and paid breaks', async () => {
+  it('matches the reference: four shifts, 1710 minutes, actual time and paid breaks', async () => {
     const report = await buildReport(people.owner.id, orgId, input(), now)
-    assert.deepEqual(report.metrics, { employees: 2, shifts: 4, minutes: 1890, hours: 31.5, futureShifts: 2, futureHours: 16 })
-    assert.deepEqual(report.rows.summary.filter(row => row.memberId === people.anna.memberId).map(row => row.hours), [8, 8])
+    assert.deepEqual(report.metrics, { employees: 2, shifts: 4, minutes: 1710, hours: 28.5, futureShifts: 2, futureHours: 16 })
+    assert.deepEqual(report.rows.summary.filter(row => row.memberId === people.anna.memberId).map(row => row.hours).sort((a,b)=>Number(a)-Number(b)), [5, 8])
     assert.equal(report.rows.summary.filter(row => row.memberId === people.anna.memberId).length, 2)
     assert.equal(report.rows.summary.find(row => row.memberId === people.ivan.memberId)?.hours, 15.5)
     assert.equal(report.rows.absences.length, 2); assert.equal(report.rows.absences.find(row => row.memberId === people.anna.memberId)?.days, 3); assert.equal(report.rows.absences.find(row => row.memberId === people.ivan.memberId)?.days, 1)
     assert.equal(report.rows.absences.find(row => row.memberId === people.ivan.memberId)?.type, 'Отгул')
-    assert.equal(report.rows.shifts[0].minutes, 480); assert.equal(report.rows.shifts[0].position, 'Бариста (снимок)')
+    assert.ok(report.rows.shifts.some(row=>row.memberId===people.anna.memberId&&row.minutes===300&&row.position==='Бариста (снимок)'))
   })
   it('includes night shifts only in their start month and uses each location timezone', async () => {
     const october = await buildReport(people.owner.id, orgId, input(), now)
@@ -168,7 +168,7 @@ describe('accounting export rules and security', { concurrency: false }, () => {
     const summary = workbook.getWorksheet('Сводка')!
     assert.deepEqual(Array.from(summary.getRow(1).values as unknown[]).slice(1), ['=Код', '+Сотрудник', '-Смен', '@Часы', 'Заведение'])
     assert.equal(summary.getCell('A2').value, '0041'); assert.equal(summary.getCell('A3').value, '0042')
-    assert.equal(summary.getCell('D5').value, 31.5); assert.equal(summary.getCell('D2').numFmt, '0.00')
+    assert.equal(summary.getCell('D5').value, 28.5); assert.equal(summary.getCell('D2').numFmt, '0.00')
     assert.equal(summary.views[0].state, 'frozen'); assert.ok(summary.autoFilter)
     assert.ok(workbook.getWorksheet('Смены')!.getCell('F2').value instanceof Date)
     assert.equal(workbook.getWorksheet('Смены')!.getCell('F2').numFmt, 'dd.mm.yyyy hh:mm')
@@ -186,7 +186,7 @@ describe('accounting export rules and security', { concurrency: false }, () => {
       assert.equal(report.rows.summary.length, 3)
       assert.equal(report.metrics.employees, 2)
       assert.equal(new Set(report.rows.summary.map(row => row.name)).size, 2)
-      assert.equal(report.rows.summary.reduce((sum, row) => sum + Number(row.hours), 0), 31.5)
+      assert.equal(report.rows.summary.reduce((sum, row) => sum + Number(row.hours), 0), 28.5)
       assert.equal(new Set(report.rows.summary.map(row => `${row.memberId}:${row.locationId}`)).size, 3)
       const config = defaultReportConfig()
       config.sheets[0].columns = config.sheets[0].columns.filter(column => column.key !== 'locations')
@@ -225,9 +225,9 @@ describe('accounting export rules and security', { concurrency: false }, () => {
       const report = await buildReport(people.owner.id, orgId, input(), now), preview = previewReport(report), workbook = new ExcelJS.Workbook()
       assert.equal(preview.sheets[1].rows.length, 20); assert.equal(preview.sheets[1].total, 27)
       await workbook.xlsx.load(new Uint8Array(await reportWorkbook(report)).buffer); assert.equal(workbook.getWorksheet('Смены')!.rowCount, 37)
-      assert.equal(report.metrics.minutes, 1913)
+      assert.equal(report.metrics.minutes, 1733)
     } finally { await prisma.workShift.deleteMany({ where: { id: { in: created } } }) }
-    assert.equal((await buildReport(people.owner.id, orgId, input(), now)).metrics.minutes, 1890)
+    assert.equal((await buildReport(people.owner.id, orgId, input(), now)).metrics.minutes, 1710)
   })
   it('creates empty included sheets with headers and suppresses totals when disabled', async () => {
     const config = defaultReportConfig(); config.totals = false; config.sheets[2].enabled = false

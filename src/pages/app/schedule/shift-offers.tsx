@@ -97,8 +97,9 @@ function OfferCard({ offer, ownMemberId, detail = false, busy, onOpen, onAction 
   </article>
 }
 
-export function ShiftOffersPanel({ organization, offerId, onClose, onOffer }: { organization: OrganizationSummary; offerId: string | null; onClose: () => void; onOffer: (id: string | null) => void }) {
+export function ShiftOffersPanel({ organization, offerId, onClose, onOffer, embedded = false }: { organization: OrganizationSummary; offerId: string | null; onClose: () => void; onOffer: (id: string | null) => void; embedded?: boolean }) {
   const { apiRequest, locationId } = useAuth(), cache = useQueryClient()
+  const [workloadWarning,setWorkloadWarning]=useState(false),[acknowledgeWorkload,setAcknowledgeWorkload]=useState(false)
   const [tab, setTab] = useState<OfferTab>('mine'), [page, setPage] = useState(1), [busy, setBusy] = useState(false), [error, setError] = useState('')
   const list = useOffers(organization.id, tab, page), query = useOffer(organization.id, offerId)
   const ownMemberId = organization.viewerMemberId
@@ -108,19 +109,22 @@ export function ShiftOffersPanel({ organization, offerId, onClose, onOffer }: { 
     if (!offer || busy) return
     setBusy(true); setError('')
     try {
-      const updated = await apiRequest<{ offer: ShiftOffer }>(`/organizations/${organization.id}/schedule/offers/${offer.id}/action`, { method: 'POST', body: { action: value } })
+      const updated = await apiRequest<{ offer: ShiftOffer }>(`/organizations/${organization.id}/schedule/offers/${offer.id}/action`, { method: 'POST', body: { action: value,acknowledgeWorkload:value==='approve'&&acknowledgeWorkload } })
       cache.setQueryData(['shift-offer', organization.id, locationId, offer.id], updated); await invalidateOrganizationWork(cache, organization.id)
 
-    } catch (failure) { setError(failure instanceof Error ? failure.message : 'Действие не выполнено.'); await invalidateOrganizationWork(cache, organization.id) }
+    } catch (failure) { if((failure as {code?:string}).code==='WORKLOAD_WARNING')setWorkloadWarning(true);setError(failure instanceof Error ? failure.message : 'Действие не выполнено.'); await invalidateOrganizationWork(cache, organization.id) }
     finally { setBusy(false) }
   }
-  function selectOffer(id: string | null) { setError(''); onOffer(id) }
-  return <AnimatedOverlay variant="modal" className="shift-offer-overlay" onClose={onClose} dismissible={!busy}>{close => <DocumentDialog key={`${offerId ?? 'list'}:${offer?.status ?? 'loading'}`} title={offerId ? offer?.kind === 'SWAP' ? 'Предложение обмена' : 'Предложение смены' : 'Предложения смен'} eyebrow="" className={`shift-offer-dialog${!offerId ? ' shift-offer-dialog--list' : ''}`} busy={busy} onClose={close}>
+  function selectOffer(id: string | null) { setWorkloadWarning(false);setAcknowledgeWorkload(false);setError(''); onOffer(id) }
+  const content = (close: () => void) => <>
     {offerId ? <><button type="button" className="app-back" disabled={busy} onClick={() => selectOffer(null)}>Все предложения</button>{query.isLoading ? <div className="app-state"><span className="app-spinner" />Загружаем предложение…</div> : offer ? <><OfferCard offer={offer} ownMemberId={ownMemberId} detail busy={busy} onAction={v => void action(v)} />{offer.status === 'COMPLETED' && <Link className="app-secondary offer-open-shift" onClick={close} to={`/app/organizations/${organization.id}/schedule?location=${offer.location.id}&month=${zonedDateAndTime(offer.source.startAt, offer.source.timezone).date.slice(0, 7)}&shift=${offer.target && offer.initiator.id === ownMemberId ? offer.target.id : offer.source.id}`}>Открыть смену</Link>}</> : <div className="app-state" role="alert">{query.error?.message ?? 'Предложение недоступно.'}<button className="app-secondary" onClick={() => void query.refetch()}>Повторить</button></div>}</> : <>
       <SegmentedNav variant="underline" label="Разделы предложений">{([['mine', 'Мне'], ['available', 'Доступные'], ['sent', 'Отправленные'], ...(canManage ? [['approval', 'Согласование']] : [])] as Array<[OfferTab, string]>).map(([value, label]) => <button type="button" key={value} aria-pressed={tab === value} onClick={() => { setTab(value); setPage(1) }}>{label}{value !== 'sent' && !!list.data?.counts[value as keyof typeof list.data.counts] && <span className="offer-count">{list.data.counts[value as keyof typeof list.data.counts]}</span>}</button>)}</SegmentedNav>
       {list.isLoading ? <div className="app-state"><span className="app-spinner" />Загружаем предложения…</div> : list.isError ? <div className="app-state" role="alert">Не удалось загрузить предложения.<button className="app-secondary" onClick={() => void list.refetch()}>Повторить</button></div> : <><div className="shift-offer-list">{list.data?.offers.map(item => <OfferCard key={item.id} offer={item} ownMemberId={ownMemberId} onOpen={() => selectOffer(item.id)} />)}</div>{!list.data?.offers.length && <div className="offer-empty"><span className="offer-empty__icon"><OfferIcon kind="calendar" /></span><strong>{tab === 'mine' ? 'Входящих предложений пока нет' : tab === 'available' ? 'Доступных смен пока нет' : tab === 'sent' ? 'Вы ещё не предлагали смены' : 'Нет предложений для согласования'}</strong><p>{tab === 'sent' ? 'Откройте свою будущую смену и выберите «Передать или обменять».' : 'Новые предложения появятся здесь.'}</p></div>}{list.data && list.data.pagination.pages > 1 && <nav className="shift-history__pagination" aria-label="Страницы предложений"><button disabled={page === 1 || list.isFetching} onClick={() => setPage(p => p - 1)}>Назад</button><span>{page} из {list.data.pagination.pages}</span><button disabled={page === list.data.pagination.pages || list.isFetching} onClick={() => setPage(p => p + 1)}>Далее</button></nav>}</>}
     </>}
-    {error && <p className="form-inline-error" role="alert">{error}</p>}{busy && <p role="status" className="offer-note">Сохраняем и проверяем расписание…</p>}
+    {workloadWarning&&offer?.canApprove&&<label className="planning-checkbox"><input type="checkbox" checked={acknowledgeWorkload} onChange={e=>setAcknowledgeWorkload(e.target.checked)}/><span>Подтверждаю назначение с превышением месячной нормы</span></label>}{error && <p className="form-inline-error" role="alert">{error}</p>}{busy && <p role="status" className="offer-note">Сохраняем и проверяем расписание…</p>}
+  </>
+  if (embedded) return <section className="shift-offers-page">{content(() => onOffer(null))}</section>
+  return <AnimatedOverlay variant="modal" className="shift-offer-overlay" onClose={onClose} dismissible={!busy}>{close => <DocumentDialog key={`${offerId ?? 'list'}:${offer?.status ?? 'loading'}`} title={offerId ? offer?.kind === 'SWAP' ? 'Предложение обмена' : 'Предложение смены' : 'Предложения смен'} eyebrow="" className={`shift-offer-dialog${!offerId ? ' shift-offer-dialog--list' : ''}`} busy={busy} onClose={close}>{content(close)}
   </DocumentDialog>}</AnimatedOverlay>
 }
 

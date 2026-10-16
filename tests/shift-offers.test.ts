@@ -66,6 +66,11 @@ describe('shift transfer and swap lifecycle', { concurrency: false }, () => {
     await assert.rejects(scope(() => saveOfferModes(accounts.alice.id, orgId, { transferMode: 'AUTO', swapMode: 'AUTO' })), code('INSUFFICIENT_PERMISSIONS'))
     assert.equal(offerBody.safeParse({ sourceShiftId: s.id, kind: 'SWAP' }).success, false)
   })
+  it('routes automatic acceptance over the monthly norm to independent approval',async()=>{
+    await prisma.organizationLocation.update({where:{id:point},data:{monthlyWorkMinutes:300}})
+    try{const s=await shift(),o=await create(s.id);assert.equal((await action(o.id,'accept')).status,'AWAITING_APPROVAL');await assert.rejects(action(o.id,'approve','admin'),code('WORKLOAD_WARNING'));await scope(()=>actOnOffer(accounts.admin.id,orgId,o.id,'approve',true));assert.equal((await offerRow(o.id)).status,'COMPLETED')}
+    finally{await prisma.organizationLocation.update({where:{id:point},data:{monthlyWorkMinutes:null}})}
+  })
   it('transfers an addressed shift and refreshes owner lists, hours, history and notices once', async () => {
     const s = await shift(); const o = await create(s.id)
     assert.equal((await current(s.id)).memberId, accounts.alice.memberId)
@@ -89,7 +94,7 @@ describe('shift transfer and swap lifecycle', { concurrency: false }, () => {
     assert.equal(await notices(o.id, 'SHIFT_OFFER_CREATED'), 1); assert.equal(await notices(o.id, 'SHIFT_OFFER_RESULT'), 2)
     assert.equal(await prisma.shiftOfferReservation.count(), 0)
     const history = await scope(() => listNotificationHistory(accounts.bob.id, accounts.bob.email, { organizationId: orgId, locationId: point, category: 'SHIFT', limit: 50 }))
-    assert.ok(history.notifications.some(n => n.shiftOfferId === o.id && n.href?.includes(`offer=${o.id}`) && n.href.includes(`location=${point}`)))
+    assert.ok(history.notifications.some(n => n.shiftOfferId === o.id && n.href?.includes(`/requests?tab=offers&offer=${o.id}`) && n.href.includes(`location=${point}`)))
   })
   it('offers to qualified point staff only and lets exactly one concurrent claimant accept', async () => {
     const s = await shift(); const o = await create(s.id, { recipientMemberId: null })
@@ -204,7 +209,7 @@ describe('shift transfer and swap lifecycle', { concurrency: false }, () => {
   it('checks both swap qualifications and both participants absences', async () => {
     const a = await shift(), b = await shift('bob', '2038-10-13')
     await prisma.employeeAbsence.create({ data: { organizationId: orgId, memberId: accounts.alice.memberId, type: 'VACATION', startDate: new Date('2038-10-13'), endDate: new Date('2038-10-13') } })
-    await assert.rejects(create(a.id, { kind: 'SWAP', targetShiftId: b.id }), code('EMPLOYEE_ABSENT'))
+    await assert.rejects(create(a.id, { kind: 'SWAP', targetShiftId: b.id }), code('VACATION_CONFLICT'))
   })
   it('rejects started, cancelled and actual-time shifts without moving actual hours', async () => {
     const past = await shift('alice', '2020-01-01'); await assert.rejects(create(past.id), code('SHIFT_STARTED'))

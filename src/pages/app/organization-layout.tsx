@@ -23,7 +23,7 @@ import Avatar from '../../component/ui/avatar/avatar.tsx'
 import { useDocuments } from '../../app/documents/queries.ts'
 import './app.scss'
 
-const modulePermissions:Record<string,Permission[]> = {employees:['members.view'],schedule:['coverage.view','drafts.view','schedule.own','schedule.view','statistics.own','statistics.view','reports.preview','reports.export'],requests:['requests.own','requests.view','staffing.respond','staffing.create'],documents:['documents.view'],events:['events.view','events.create','events.edit','events.cancel'],settings:['coverage.manage','organization.edit','schedule.settings','schedule.templates','positions.manage','offers.settings','locations.edit','locations.create','requestTypes.manage']}
+const modulePermissions:Record<string,Permission[]> = {employees:['members.view'],schedule:['coverage.view','drafts.view','schedule.own','schedule.view','statistics.own','statistics.view','reports.preview','reports.export'],requests:['offers.accept','offers.approve','offers.transfer','offers.swap','vacations.view','vacations.collect','requests.own','requests.view','staffing.respond','staffing.create'],documents:['documents.view'],events:['events.view','events.create','events.edit','events.cancel'],settings:['coverage.manage','organization.edit','schedule.settings','schedule.templates','positions.manage','offers.settings','locations.edit','locations.create','requestTypes.manage']}
 const navigation = [
   ['', 'Главная'], ['employees', 'Сотрудники'], ['schedule', 'Расписание'], ['requests', 'Заявки'], ['events', 'События'], ['documents', 'Документы'], ['settings', 'Настройки'],
 ] as const

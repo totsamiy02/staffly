@@ -35,3 +35,6 @@ docs
 /.claude/
 /.windsurf/
 /skills-lock.json
+
+# Generated local PDF.js fonts, CMaps and WASM (copied before dev/build).
+/public/pdfjs/

@@ -8,9 +8,10 @@ export async function lockShift(tx: Prisma.TransactionClient, shiftId: string) {
 
 async function cancelProposal(tx: Prisma.TransactionClient, request: { id: string; organizationId: string; createdByMemberId: string; updatedAt: Date }, actorMemberId: string | null, reason: string) {
   const now = new Date()
-  const changed = await tx.organizationRequest.updateMany({ where: { id: request.id, status: 'PENDING', updatedAt: request.updatedAt }, data: { status: 'CANCELLED', cancelledAt: now, resolutionComment: reason } })
+  const status=reason.includes('истекло')?'EXPIRED':reason.includes('отменена')||reason.includes('отменён')?'CANCELLED':'INVALID'
+  const changed = await tx.organizationRequest.updateMany({ where: { id: request.id, status: 'PENDING', updatedAt: request.updatedAt }, data: { status, cancelledAt: now, resolutionComment: reason } })
   if (!changed.count) return
-  await tx.requestEvent.create({ data: { requestId: request.id, actorMemberId: actorMemberId ?? request.createdByMemberId, type: 'CANCELLED', comment: reason } })
+  await tx.requestEvent.create({ data: { requestId: request.id, actorMemberId: actorMemberId ?? request.createdByMemberId, type: status, comment: reason,changes:{automatic:true,before:{status:'PENDING'},after:{status}} } })
   await tx.accountNotification.updateMany({ where: { requestId: request.id, type: 'REQUEST_CREATED', readAt: null }, data: { readAt: now } })
   const creator = await tx.organizationMember.findUniqueOrThrow({ where: { id: request.createdByMemberId }, select: { userId: true } })
   await tx.accountNotification.create({ data: { userId: creator.userId, organizationId: request.organizationId, requestId: request.id, type: 'REQUEST_CANCELLED', title: 'Заявка автоматически отменена', message: reason } })

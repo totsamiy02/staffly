@@ -34,14 +34,15 @@ async function demandData(tx: DB, organizationId: string, locationId: string) {
 }
 export async function getTeamSettings(userId: string, organizationId: string) {
   const actor = await getMembership(userId, organizationId)
-  return { coverageEnabled: actor.location.coverageEnabled, discussionEnabled: actor.location.discussionEnabled, discussionHours: actor.location.discussionHours }
+  return { coverageEnabled: actor.organization.coverageEnabled, discussionEnabled: actor.organization.discussionEnabled, discussionHours: 24 }
 }
 export async function saveTeamSettings(userId: string, organizationId: string, input: z.infer<typeof schemas.teamSettingsBody>) {
   return prisma.$transaction(async tx => {
     await organizationLock(tx, organizationId)
-    const actor = await getMembership(userId, organizationId, tx); requirePermission(actor, 'schedule.settings')
-    if (!input.discussionEnabled && await tx.scheduleDraft.count({ where: { organizationId, locationId: actor.locationId, status: { in: [...activeStatuses] } } })) throw new ApiError(409, 'ACTIVE_DISCUSSION', 'Сначала примените или явно отмените незавершённые предварительные графики. История сохранится.')
-    return tx.organizationLocation.update({ where: { id: actor.locationId }, data: input, select: { coverageEnabled: true, discussionEnabled: true, discussionHours: true } })
+    const actor = await getMembership(userId, organizationId, tx); requirePermission(actor, 'schedule.settings', null)
+    if (!input.discussionEnabled && await tx.scheduleDraft.count({ where: { organizationId, status: { in: [...activeStatuses] } } })) throw new ApiError(409, 'ACTIVE_DISCUSSION', 'Сначала примените или отмените незавершённые графики во всех заведениях организации. История сохранится.')
+    const saved = await tx.organization.update({ where: { id: organizationId }, data: { coverageEnabled: input.coverageEnabled, discussionEnabled: input.discussionEnabled }, select: { coverageEnabled: true, discussionEnabled: true } })
+    return { ...saved, discussionHours: 24 }
   })
 }
 export async function getDemand(userId: string, organizationId: string) {
@@ -52,7 +53,7 @@ export async function saveDemand(userId: string, organizationId: string, input: 
   return prisma.$transaction(async tx => {
     await organizationLock(tx, organizationId)
     const actor = await getMembership(userId, organizationId, tx); requirePermission(actor, 'coverage.manage')
-    if (!actor.location.coverageEnabled) throw new ApiError(409, 'COVERAGE_DISABLED', 'Включите потребность и покрытие в настройках расписания.')
+    if (!actor.organization.coverageEnabled) throw new ApiError(409, 'COVERAGE_DISABLED', 'Включите потребность и покрытие в настройках расписания.')
     const data = await demandData(tx, organizationId, actor.locationId)
     const intervals = 'days' in input ? input.days.flatMap(day => day ?? []) : input.intervals ?? []
     const ids = [...new Set(intervals.map(i => i.positionId))]
@@ -75,7 +76,7 @@ export async function saveDemand(userId: string, organizationId: string, input: 
   })
 }
 async function coverageFor(tx: DB, actor: Actor, from: string, to: string, shifts?: PublicShift[]) {
-  if (!actor.location.coverageEnabled || !hasPermission(actor, 'coverage.view')) return []
+  if (!actor.organization.coverageEnabled || !hasPermission(actor, 'coverage.view')) return []
   const data = await demandData(tx, actor.organizationId, actor.locationId)
   const positions = await tx.organizationPosition.findMany({ where: { organizationId: actor.organizationId }, select: { id: true, name: true } })
   const assigned = shifts ?? await tx.workShift.findMany({ where: { organizationId: actor.organizationId, locationId: actor.locationId, status: 'SCHEDULED', scheduledStartAt: { lt: startOfZonedDate(to, actor.organization.timezone) }, scheduledEndAt: { gt: startOfZonedDate(from, actor.organization.timezone) } } })
@@ -89,7 +90,7 @@ export async function saveDemandDates(userId: string, organizationId: string, in
   return prisma.$transaction(async tx => {
     await organizationLock(tx, organizationId)
     const actor = await getMembership(userId, organizationId, tx); requirePermission(actor, 'coverage.manage')
-    if (!actor.location.coverageEnabled) throw new ApiError(409, 'COVERAGE_DISABLED', 'Включите потребность в настройках расписания.')
+    if (!actor.organization.coverageEnabled) throw new ApiError(409, 'COVERAGE_DISABLED', 'Включите потребность в настройках расписания.')
     if (input.dates.some(day => day.date < localToday(actor.organization.timezone))) throw new ApiError(400, 'DEMAND_PAST', 'Выберите сегодняшние или будущие даты.')
     if (input.repeat && input.repeat.effectiveFrom < localToday(actor.organization.timezone)) throw new ApiError(400, 'DEMAND_PAST', 'Повторение начинается с сегодняшней или будущей даты.')
     const ids = [...new Set([...input.dates.flatMap(day => day.intervals ?? []), ...(input.repeat?.days.flatMap(day => day ?? []) ?? [])].map(row => row.positionId))]
@@ -157,7 +158,7 @@ export async function createDraft(userId: string, organizationId: string, input:
   return prisma.$transaction(async tx => {
     await organizationLock(tx, organizationId)
     const actor = await getMembership(userId, organizationId, tx); requirePermission(actor,'drafts.edit')
-    if (!actor.location.discussionEnabled) throw new ApiError(409, 'DISCUSSION_DISABLED', 'Включите предварительное согласование в настройках расписания.')
+    if (!actor.organization.discussionEnabled) throw new ApiError(409, 'DISCUSSION_DISABLED', 'Включите предварительное согласование в настройках расписания.')
     if (actor.location.archivedAt) throw new ApiError(409, 'LOCATION_ARCHIVED', 'Точка закрыта.')
     const existing = await tx.scheduleDraft.findFirst({ where: { organizationId, locationId: actor.locationId, status: { in: [...activeStatuses] }, fromDate: { lte: new Date(input.toDate) }, toDate: { gte: new Date(input.fromDate) } } })
     if (existing) throw new ApiError(409, 'DRAFT_PERIOD_OVERLAP', 'В этом периоде уже есть незавершённый график: «' + existing.title + '».', { draftId: existing.id })
@@ -349,7 +350,7 @@ export async function actOnDraft(userId:string,organizationId:string,id:string,i
       if(d.status!=='PREPARING')throw new ApiError(409,'DRAFT_PUBLISHED','Обсуждение уже объявлено.')
       const validation=await validateDraftIn(tx,actor,d)
       if(validation.errors.length)throw new ApiError(409,'DRAFT_CONFLICTS',validation.errors.map(e=>e.message).join(' '),validation)
-      deadline=input.deadline?new Date(input.deadline):new Date(+now+actor.location.discussionHours*3600000)
+      deadline=input.deadline?new Date(input.deadline):new Date(+now+24*3600000)
       if(deadline<=now)throw new ApiError(400,'DEADLINE_PAST','Срок окончания должен быть в будущем.')
       status='OPEN'
     }

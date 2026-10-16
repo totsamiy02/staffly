@@ -1,3 +1,4 @@
+import { documentMime } from '../file-preview/formats.ts'
 import { useLocation } from 'react-router-dom'
 import { postAuthJson as postJson, requestWithSession } from './session-transport.ts'
 import { useQueryClient } from '@tanstack/react-query'
@@ -132,7 +133,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refresh])
 
   const uploadFile = useCallback(async <T,>(path: string, file: File): Promise<T> => {
-    const execute = (token: string | null) => fetch(`/api${path}`, { method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': file.type || ({ pdf: 'application/pdf', doc: 'application/msword', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', xls: 'application/vnd.ms-excel', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', ppt: 'application/vnd.ms-powerpoint', pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', csv: 'text/csv', txt: 'text/plain', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp' } as Record<string, string>)[file.name.split('.').at(-1)?.toLowerCase() ?? ''] || 'application/octet-stream', 'X-File-Name': encodeURIComponent(file.name), ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: file })
+    const execute = (token: string | null) => fetch(`/api${path}`, { method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': documentMime(file.name) || file.type || 'application/octet-stream', 'X-File-Name': encodeURIComponent(file.name), ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: file })
     const response = await requestWithSession(execute, () => tokenRef.current, refresh)
     return readJson<T>(response)
   }, [refresh])

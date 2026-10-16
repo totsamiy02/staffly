@@ -1,0 +1,19 @@
+.document-audience { display: grid; gap: 12px; }
+.document-audience-preview {
+  border: 1px solid #e5e5eb; border-radius: 12px; background: #fafafb; overflow: hidden;
+  > summary { display: flex; align-items: center; gap: 8px; padding: 14px 16px; color: #333; font-size: 13px; font-weight: 600; list-style: none; cursor: pointer; min-width: 0;
+    &::-webkit-details-marker { display: none; }
+    &:focus-visible { outline: 2px solid #777; outline-offset: -3px; border-radius: 12px; }
+  }
+  &__count { margin-left: auto; padding: 4px 8px; border-radius: 6px; color: #73737e; background: #eeeef2; font-size: 11px; white-space: nowrap; font-weight: 500; }
+  &__chevron { color: #868690; font-size: 18px; line-height: 1; transition: transform .15s; }
+  &[open] > summary .document-audience-preview__chevron { transform: rotate(180deg); }
+  > ul { list-style: none; margin: 0; padding: 0 16px 8px; max-height: 240px; overflow-y: auto;
+    > li { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid #ededf0; font-size: 13px;
+      > .app-avatar { width: 32px; height: 32px; flex: 0 0 32px; }
+    }
+  }
+  &__name { flex: 1; min-width: 0; overflow-wrap: anywhere; font-weight: 500; }
+  &__status { color: #888891; font-size: 11px; white-space: nowrap; &.is-allowed { color: #487361; background: #eaf3ed; border-radius: 6px; padding: 4px 7px; } }
+}
+@media (max-width: 480px) { .document-audience-preview { > summary { flex-wrap: wrap; padding: 12px; } &__count { font-size: 10px; } > ul { padding-inline: 12px; } > ul > li { flex-wrap: wrap; } &__status { margin-left: auto; } } }

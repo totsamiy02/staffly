@@ -1,3 +1,5 @@
+import { checkMonthlyWorkload } from './workload.ts'
+import { locationContext } from '../organizations/location-context.ts'
 import { hasPermission, requirePermission, permissionRecipients } from '../organizations/access.ts'
 import { z } from 'zod'
 import type { Prisma, ShiftOffer, WorkShift } from '../../generated/prisma/client.ts'
@@ -11,7 +13,7 @@ import { assertNoApprovedAbsence } from './service.ts'
 export const offerModesBody = z.object({ transferMode: z.enum(['DISABLED', 'AUTO', 'APPROVAL']), swapMode: z.enum(['DISABLED', 'AUTO', 'APPROVAL']) })
 export const offerBody = z.object({ sourceShiftId: z.string().uuid(), kind: z.enum(['TRANSFER', 'SWAP']), recipientMemberId: z.string().uuid().nullable().default(null), targetShiftId: z.string().uuid().nullable().default(null), comment: z.string().trim().max(500).nullable().default(null) }).refine(v => v.kind === 'SWAP' ? !!v.recipientMemberId && !!v.targetShiftId && v.targetShiftId !== v.sourceShiftId : !v.targetShiftId, 'Выберите коллегу и его смену для обмена.')
 export const offerListQuery = z.object({ tab: z.enum(['mine', 'available', 'sent', 'approval']).default('mine'), page: z.coerce.number().int().min(1).default(1), limit: z.coerce.number().int().min(1).max(50).default(20) })
-export const offerActionBody = z.object({ action: z.enum(['accept', 'reject', 'cancel', 'approve', 'decline']) })
+export const offerActionBody = z.object({ action: z.enum(['accept', 'reject', 'cancel', 'approve', 'decline']),acknowledgeWorkload:z.boolean().default(false) })
 const active = ['PENDING', 'AWAITING_APPROVAL'] as const
 const isActive = (offer: ShiftOffer) => active.some(s => s === offer.status)
 const personInclude = { user: { select: { firstName: true, lastName: true, middleName: true, email: true, avatarFileId: true } } } as const
@@ -236,7 +238,12 @@ export async function getOffer(userId: string, organizationId: string, offerId: 
     return { ...response, acceptanceReason }
   })
 }
-async function complete(tx: Prisma.TransactionClient, offer: ShiftOffer, source: WorkShift, target: WorkShift | null, accepterId: string, reviewerId: string | null) {
+async function offerWorkload(tx:Prisma.TransactionClient,offer:ShiftOffer,source:WorkShift,target:WorkShift|null,accepterId:string,acknowledged:boolean){
+  const warnings=[]
+  for(const [shift,memberId] of [[source,accepterId],...(target?[[target,offer.initiatorMemberId]]:[])] as Array<[WorkShift,string]>){const location=await tx.organizationLocation.findUniqueOrThrow({where:{id:shift.locationId}});warnings.push(...await locationContext.run({organizationId:offer.organizationId,locationId:shift.locationId},()=>checkMonthlyWorkload(tx,offer.organizationId,memberId,location.timezone,location.monthlyWorkMinutes,[{start:shift.scheduledStartAt,end:shift.scheduledEndAt}],[source.id,...(target?[target.id]:[])],acknowledged)))}return warnings
+}
+async function complete(tx: Prisma.TransactionClient, offer: ShiftOffer, source: WorkShift, target: WorkShift | null, accepterId: string, reviewerId: string | null, acknowledgeWorkload=false) {
+  await offerWorkload(tx,offer,source,target,accepterId,!!reviewerId&&acknowledgeWorkload)
   const participants = await tx.organizationMember.findMany({ where: { id: { in: [offer.initiatorMemberId, accepterId, ...(reviewerId ? [reviewerId] : [])] } }, include: personInclude })
   const participantName = (id: string) => name(participants.find(member => member.id === id)!.user)
   // Close before shift UPDATE so the invalidation trigger ignores our own operation.
@@ -254,7 +261,7 @@ async function complete(tx: Prisma.TransactionClient, offer: ShiftOffer, source:
   await tx.$executeRaw`SET CONSTRAINTS work_shifts_no_overlap IMMEDIATE`
   return updated
 }
-export async function actOnOffer(userId: string, organizationId: string, offerId: string, action: z.infer<typeof offerActionBody>['action']) {
+export async function actOnOffer(userId: string, organizationId: string, offerId: string, action: z.infer<typeof offerActionBody>['action'],acknowledgeWorkload=false) {
   const result = await transaction(organizationId, async tx => {
     const actor = await getMembership(userId, organizationId, tx)
     const offer = await tx.shiftOffer.findFirst({ where: { id: offerId, organizationId } })
@@ -289,16 +296,17 @@ export async function actOnOffer(userId: string, organizationId: string, offerId
       if (!await tx.locationMember.findFirst({where:{memberId:actor.id,locationId:offer.locationId,leftAt:null}}) && !actor.owner) throw new ApiError(409,'MEMBER_NOT_IN_LOCATION','Сотрудник больше не состоит в точке.')
       requirePermission(actor, 'offers.accept', offer.locationId)
       await eligible(tx, source, actor.id, [source.id, ...(target ? [target.id] : [])])
-      if (offer.mode === 'APPROVAL') {
+      const workload=await offerWorkload(tx,offer,source,target,actor.id,true)
+      if (offer.mode === 'APPROVAL'||workload.length) {
         const reviewers = (await managers(tx, organizationId, offer.locationId)).filter(m => m.id !== offer.initiatorMemberId && m.id !== actor.id)
         if (!reviewers.length) fail('NO_REVIEWER', 'В точке нет независимого администратора для согласования. Обратитесь к владельцу.')
-        const pending = await tx.shiftOffer.update({ where: { id: offer.id }, data: { status: 'AWAITING_APPROVAL', acceptedByMemberId: actor.id, acceptedAt: new Date() } })
+        const pending = await tx.shiftOffer.update({ where: { id: offer.id }, data: { status: 'AWAITING_APPROVAL', acceptedByMemberId: actor.id, acceptedAt: new Date(),...(workload.length?{resolutionReason:'Требуется подтверждение превышения месячной нормы.'}:{}) } })
         await tx.accountNotification.updateMany({ where: { shiftOfferId: offer.id, type: 'SHIFT_OFFER_CREATED', readAt: null }, data: { readAt: new Date() } })
         await notice(tx, pending, 'SHIFT_OFFER_APPROVAL', reviewers.map(m => m.id), 'Нужно согласовать смены', 'Коллега принял предложение. До согласования назначения остаются прежними.')
       } else await complete(tx, offer, source, target, actor.id, null)
     } else {
       if (offer.status !== 'AWAITING_APPROVAL' || !offer.acceptedByMemberId) fail('OFFER_NOT_ACCEPTED', 'Сначала дождитесь согласия коллеги.')
-      await complete(tx, offer, source, target, offer.acceptedByMemberId, actor.id)
+      await complete(tx, offer, source, target, offer.acceptedByMemberId, actor.id,acknowledgeWorkload)
     }
     return { id: offer.id }
   })
@@ -308,3 +316,5 @@ export async function actOnOffer(userId: string, organizationId: string, offerId
   const actor = await getMembership(userId, organizationId)
   return publicOffer(await prisma.shiftOffer.findUniqueOrThrow({ where: { id: result.id }, include }), actor)
 }
+
+export async function maintainShiftOffers(){const locations=await prisma.organizationLocation.findMany({where:{archivedAt:null,organization:{deletedAt:null}},select:{id:true,organizationId:true}});for(const l of locations)await transaction(l.organizationId,tx=>reconcile(tx,l.organizationId,l.id))}

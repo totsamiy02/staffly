@@ -31,12 +31,19 @@ it('accepts an OOXML package but refuses arbitrary ZIP, macros, traversal and co
   const corrupt = zip(wordParts); corrupt[45] ^= 0xff
   await assert.rejects(() => validateDocumentFile(corrupt, documentMimeTypes.docx, 'policy.docx'))
 })
-it('rejects fake legacy Office headers and bounds text preview', async () => {
+it('rejects fake legacy Office headers and recognizes all supported preview formats', async () => {
   const fake = Buffer.alloc(1024); Buffer.from('d0cf11e0a1b11ae1', 'hex').copy(fake); fake.write('WordDocument', 200, 'utf16le')
   await assert.rejects(() => validateDocumentFile(fake, documentMimeTypes.doc, 'fake.doc'))
-  assert.equal(supportsPreview('text/plain', 1024 * 1024 + 1), false)
-  assert.equal(supportsPreview(documentMimeTypes.docx, 1000), false)
+  assert.equal(supportsPreview('text/plain', 1024 * 1024 + 1), true)
+  assert.equal(supportsPreview(documentMimeTypes.docx, 1000), true)
   assert.equal(supportsPreview('application/pdf', 2000), true)
   assert.equal(metadataSchema.safeParse({ displayName: 'Private', visibility: 'PRIVATE_MEMBER' }).success, false)
   assert.equal(assignSchema.safeParse({ recipients: 'all', deadline: '2026-02-30' }).success, false)
+})
+
+it('accepts Markdown text and canonicalizes browser MIME variants', async () => {
+  for (const mime of ['text/markdown', 'text/plain', 'text/x-markdown']) assert.equal((await validateDocumentFile(Buffer.from('# Правила\n- Первый пункт'), mime, 'guide.md')).mimeType, 'text/markdown')
+  await assert.rejects(() => validateDocumentFile(Buffer.from('<script>alert(1)</script>'), 'text/markdown', 'guide.md'))
+  assert.equal(supportsPreview('application/zip', 100), false)
+  for (const mime of Object.values(documentMimeTypes)) assert.equal(supportsPreview(mime, 2000), true)
 })

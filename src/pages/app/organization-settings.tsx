@@ -41,7 +41,7 @@ export default function OrganizationSettings({ organization }: { organization: O
   const [phone, setPhone] = useState(formatRussianPhone(organization.phone ?? ''))
   const [website, setWebsite] = useState(organization.website ?? '')
   const [address, setAddress] = useState(organization.address ?? '')
-  const planningAllowed = ['coverage.manage','schedule.settings','schedule.templates','positions.manage','offers.settings'].some(key=>organization.owner || organization.permissions?.includes(key))
+  const planningAllowed = organization.organizationPermissions?.includes('schedule.settings') || ['coverage.manage','schedule.settings','schedule.templates','positions.manage','offers.settings'].some(key=>organization.owner || organization.permissions?.includes(key))
   const canEditProfile = canAccess(organization, 'organization.edit')
 
   useToastFeedback(message, error)

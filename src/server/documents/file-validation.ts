@@ -6,12 +6,8 @@ import { ApiError } from '../api-error.ts'
 const configuredLimit = Number(process.env.DOCUMENT_MAX_BYTES ?? 25 * 1024 * 1024)
 if (!Number.isSafeInteger(configuredLimit) || configuredLimit < 1 || configuredLimit > 100 * 1024 * 1024) throw new Error('DOCUMENT_MAX_BYTES must be between 1 and 104857600')
 export const MAX_DOCUMENT_BYTES = configuredLimit
-export const documentMimeTypes = {
-  pdf: 'application/pdf', doc: 'application/msword', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  xls: 'application/vnd.ms-excel', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  ppt: 'application/vnd.ms-powerpoint', pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-  csv: 'text/csv', txt: 'text/plain', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp',
-} as const
+export { documentMimeTypes } from '../../app/file-preview/formats.ts'
+import { documentMimeTypes } from '../../app/file-preview/formats.ts'
 function invalid(): never { throw new ApiError(415, 'INVALID_DOCUMENT_FILE', 'Формат, расширение и содержимое файла должны совпадать. Исполняемые файлы, архивы и активные форматы запрещены.') }
 
 // Inspect the ZIP central directory and every entry with bounded decompression.
@@ -33,9 +29,10 @@ function validateOffice(contents: Buffer, extension: 'docx' | 'xlsx' | 'pptx') {
     if (next > end || flags & 1 || ![0, 8].includes(method) || size > 40 * 1024 * 1024 || (inflated += size) > 100 * 1024 * 1024 || local + 30 > centralStart) invalid()
     const expectedCrc = contents.readUInt32LE(cursor + 16)
     const name = contents.subarray(cursor + 46, cursor + 46 + nameLength).toString('utf8')
-    if (!name || names.has(name) || /(^\/|\\|(^|\/)\.\.(\/|$)|\x00|vbaproject|activex|\.exe$|\.js$|\.html?$|\.svg$|embeddings\/)/i.test(name)) invalid()
+    if (!name || names.has(name) || /(^\/|\\|(^|\/)\.\.(\/|$)|\x00|vbaproject|activex|\.exe$|\.js$|\.html?$|\.svg$)/i.test(name)) invalid()
     const root = { docx: 'word/', xlsx: 'xl/', pptx: 'ppt/' }[extension]
-    if (name !== '[Content_Types].xml' && name !== '_rels/.rels' && !name.startsWith('docProps/') && !name.startsWith(root)) invalid()
+    if (name !== '[Content_Types].xml' && name !== '_rels/.rels' && name !== '_rels/' && !name.startsWith('docProps/') && !name.startsWith(root)) invalid()
+    if (name.endsWith('/') && size !== 0 || /embeddings\//i.test(name) && !name.endsWith('/')) invalid()
     names.add(name)
     if (contents.readUInt32LE(local) !== 0x04034b50 || contents.readUInt16LE(local + 8) !== method || contents.readUInt16LE(local + 6) !== flags) invalid()
     const localNameLength = contents.readUInt16LE(local + 26), localExtra = contents.readUInt16LE(local + 28), start = local + 30 + localNameLength + localExtra
@@ -95,7 +92,7 @@ export async function validateDocumentFile(input: unknown, mime: string, encoded
   if (!name || name.length > 255 || /[\x00-\x1f\x7f/\\]/.test(name) || name.startsWith('.')) invalid()
   const ext = name.split('.').at(-1)?.toLowerCase() as keyof typeof documentMimeTypes
   const canonical = documentMimeTypes[ext]
-  if (!canonical || mime !== canonical) invalid()
+  if (!canonical || mime !== canonical && !(ext === 'md' && ['text/plain', 'text/x-markdown'].includes(mime))) invalid()
   const contents = input
   if (ext === 'pdf') { if (!contents.subarray(0, 5).equals(Buffer.from('%PDF-')) || !contents.subarray(-2048).includes(Buffer.from('%%EOF'))) invalid() }
   else if (['jpg', 'jpeg', 'png', 'webp'].includes(ext)) {
@@ -112,4 +109,4 @@ export async function validateDocumentFile(input: unknown, mime: string, encoded
   }
   return { contents, fileName: name.trim(), extension: ext === 'jpeg' ? 'jpg' : ext, mimeType: canonical }
 }
-export function supportsPreview(mime: string, size: number) { return mime === 'application/pdf' || mime.startsWith('image/') || (mime === 'text/plain' && size <= 1024 * 1024) }
+export function supportsPreview(mime: string, size: number) { return size > 0 && size <= MAX_DOCUMENT_BYTES && (Object.values(documentMimeTypes) as string[]).includes(mime) }

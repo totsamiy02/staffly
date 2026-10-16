@@ -10,36 +10,53 @@
     "dev:all": "concurrently -k \"npm run dev:server\" \"npm run dev\"",
     "start:server": "NODE_ENV=production tsx --env-file=src/server/.env src/server/index.ts",
     "prestart:server": "prisma generate",
-    "prebuild": "prisma generate",
+    "prebuild": "node scripts/copy-pdf-assets.mjs && prisma generate",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
     "test:setup": "node --env-file=src/server/.env scripts/setup-test-db.mjs && PRISMA_ENV_FILE=src/server/.env.test prisma migrate deploy",
     "test": "NODE_ENV=test node --env-file=src/server/.env.test scripts/run-tests.mjs",
-    "storage:audit": "node --env-file=src/server/.env --import tsx scripts/storage-audit.ts"
+    "storage:audit": "node --env-file=src/server/.env --import tsx scripts/storage-audit.ts",
+    "predev": "node scripts/copy-pdf-assets.mjs"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
     "@tanstack/react-query": "^5.103.2",
     "argon2": "^0.45.1",
+    "cfb": "^1.2.2",
     "cookie-parser": "^1.4.7",
+    "csv-parse": "^7.0.3",
+    "docx-preview": "^0.4.1",
     "exceljs": "^4.4.0",
     "express": "^5.2.1",
     "express-rate-limit": "^8.7.0",
     "helmet": "^8.3.0",
     "jose": "^6.2.12",
+    "jszip": "^3.10.2",
     "nodemailer": "^10.0.10",
+    "pdfjs-dist": "^6.4.299",
     "pg": "^8.23.0",
+    "pptx-preview": "^1.0.7",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
+    "react-markdown": "^10.1.0",
     "react-router-dom": "^7.18.4",
+    "remark-gfm": "^4.0.1",
+    "saxes": "^6.0.0",
     "sharp": "^0.35.4",
+    "ssf": "^0.11.2",
+    "word-extractor": "^1.0.4",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
     "zod": "^4.6.5"
   },
   "overrides": {
     "exceljs": {
       "uuid": "^11.1.1"
+    },
+    "pptx-preview": {
+      "uuid": "^11.1.1",
+      "echarts": "^6.1.0"
     }
   },
   "devDependencies": {

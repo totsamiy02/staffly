@@ -1,3 +1,5 @@
+import { definitionOf, processLabel } from '../../app/requests/workflow.ts'
+import { lockRequest, validateDefinition, validateAnswers, ensureReviewers, stageReviewers, notifyStage, canReadCustom } from './workflow.ts'
 import { hasPermission, requirePermission, locationsFor, permissionRecipients } from '../organizations/access.ts'
 import { requireLocationManager } from '../organizations/location-service.ts'
 import { locationWhere, locationMemberWhere, scopedLocationId } from '../organizations/location-context.ts'
@@ -18,7 +20,7 @@ export const SYSTEM_REQUEST_TYPES = [
   { systemCode: 'SICK', name: 'Сообщить об отсутствии', description: 'Сообщение без согласования. Смены сохраняются, запись остаётся в истории заявок.', dateMode: 'RANGE', requiresComment: false, allowsAttachments: false },
   { systemCode: 'VACATION', name: 'Отпуск', description: 'Плановый период отсутствия', dateMode: 'RANGE', requiresComment: false, allowsAttachments: true },
   { systemCode: 'DAY_OFF', name: 'Отгул', description: 'Отсутствие в течение одного дня', dateMode: 'SINGLE', requiresComment: false, allowsAttachments: true },
-  { systemCode: 'ABSENCE', name: 'Отсутствие', description: 'Другое запланированное отсутствие', dateMode: 'RANGE', requiresComment: true, allowsAttachments: true },
+  { systemCode: 'ABSENCE', name: 'Освобождение от работы', description: 'Запрос на согласуемое освобождение от работы. Не является сообщением о невыходе или отпуском без оплаты.', dateMode: 'RANGE', requiresComment: true, allowsAttachments: true },
   { systemCode: 'SHIFT_PROPOSAL', name: 'Предложить смену', description: 'Предложение новой смены для себя. Добавляется в расписание после одобрения.', dateMode: 'NONE', requiresComment: true, allowsAttachments: false },
   { systemCode: 'SHIFT_CHANGE', name: 'Изменение смены', description: 'Запрос на изменение назначенной смены', dateMode: 'NONE', requiresComment: true, allowsAttachments: false },
   { systemCode: 'STAFFING', name: 'Нужен сотрудник на подмену', description: 'Открытая смена для сотрудников других точек. Отклик подтверждает принимающая точка.', dateMode: 'NONE', requiresComment: false, allowsAttachments: false },
@@ -37,35 +39,53 @@ export async function seedSystemRequestTypes(tx: Prisma.TransactionClient, organ
 
 async function ensureSystemTypes(organizationId: string) {
   await prisma.requestType.createMany({ data: SYSTEM_REQUEST_TYPES.map((item) => ({ ...item, organizationId })), skipDuplicates: true })
-  await prisma.requestType.updateMany({ where: { organizationId, systemCode: 'SICK', isActive: false }, data: { isActive: true } })
+
 }
 
 export async function listRequestTypes(userId: string, organizationId: string, includeInactive = false) {
-  const actor = await getMembership(userId, organizationId)
+  await getMembership(userId, organizationId)
   await ensureSystemTypes(organizationId)
-  return prisma.requestType.findMany({ where: { organizationId, OR: [{ systemCode: null }, { systemCode: { not: 'SICK_LEAVE' } }], ...(!includeInactive || !hasPermission(actor,'requestTypes.manage',null) ? { isActive: true } : {}) }, orderBy: [{ systemCode: 'asc' }, { name: 'asc' }] })
+  const types=await prisma.requestType.findMany({ where: { organizationId, deletedAt: null, OR: [{ systemCode: null }, { systemCode: { not: 'SICK_LEAVE' } }], ...(!includeInactive ? { isActive: true } : {}) }, orderBy: [{ systemCode: 'asc' }, { name: 'asc' }] })
+  return types
 }
 
-export async function createRequestType(userId: string, organizationId: string, input: { name: string; description?: string | null; dateMode: RequestDateMode; requiresComment: boolean; allowsAttachments: boolean }) {
+export async function createRequestType(userId: string, organizationId: string, input: { name: string; description?: string | null; dateMode: RequestDateMode; requiresComment: boolean; allowsAttachments: boolean; definition?: unknown }) {
   const actor = await getMembership(userId, organizationId)
   requirePermission(actor, 'requestTypes.manage', null)
-  return prisma.requestType.create({ data: { organizationId, name: input.name, description: input.description || null, dateMode: input.dateMode, requiresComment: input.requiresComment, allowsAttachments: input.allowsAttachments } })
+  const definition = await validateDefinition(prisma, organizationId, input.definition)
+  return prisma.requestType.create({ data: { definition, organizationId, name: input.name, description: input.description || null, dateMode: input.dateMode, requiresComment: input.requiresComment, allowsAttachments: input.allowsAttachments } })
 }
 
-export async function updateRequestType(userId: string, organizationId: string, typeId: string, input: { name: string; description?: string | null; dateMode: RequestDateMode; requiresComment: boolean; allowsAttachments: boolean; isActive: boolean }) {
+export async function updateRequestType(userId: string, organizationId: string, typeId: string, input: { name: string; description?: string | null; dateMode: RequestDateMode; requiresComment: boolean; allowsAttachments: boolean; isActive: boolean; definition?: unknown }) {
   const actor = await getMembership(userId, organizationId)
   requirePermission(actor, 'requestTypes.manage', null)
-  const type = await prisma.requestType.findFirst({ where: { id: typeId, organizationId } })
+  const type = await prisma.requestType.findFirst({ where: { id: typeId, organizationId, deletedAt: null } })
   if (!type) throw new ApiError(404, 'REQUEST_TYPE_NOT_FOUND', 'Тип заявки не найден.')
-  if (type.systemCode === 'SICK' && !input.isActive) throw new ApiError(409, 'MANDATORY_REQUEST_TYPE', 'Сообщение об отсутствии — обязательный тип заявки.')
+
   if (type.systemCode) {
     if (input.name !== type.name || input.description !== type.description || input.dateMode !== type.dateMode || input.requiresComment !== type.requiresComment || input.allowsAttachments !== type.allowsAttachments) throw new ApiError(409, 'SYSTEM_REQUEST_TYPE', 'У системного типа можно менять только доступность.')
     return prisma.requestType.update({ where: { id: type.id }, data: { isActive: input.isActive } })
   }
-  return prisma.requestType.update({ where: { id: type.id }, data: { ...input, description: input.description || null } })
+  return prisma.requestType.update({ where: { id: type.id }, data: { ...input, definition: await validateDefinition(prisma, organizationId, input.definition ?? type.definition), version: {increment:1}, description: input.description || null } })
 }
 
-type CreateInput = { staffingPositionId?: string | null; staffingPositionName?: string | null; requestTypeId: string; startDate?: string | null; endDate?: string | null; comment?: string | null; relatedShiftId?: string | null; proposedStartDate?: string | null; proposedStartTime?: string | null; proposedEndDate?: string | null; proposedEndTime?: string | null; absenceReason?: 'SICK' | 'PERSONAL' | 'OTHER' | null }
+export type CreateInput = { draft?: boolean; submissionKey?: string; subjectMemberId?: string; answers?: any; staffingPositionId?: string | null; staffingPositionName?: string | null; requestTypeId: string; startDate?: string | null; endDate?: string | null; comment?: string | null; relatedShiftId?: string | null; proposedStartDate?: string | null; proposedStartTime?: string | null; proposedEndDate?: string | null; proposedEndTime?: string | null; absenceReason?: 'SICK' | 'PERSONAL' | 'OTHER' | null }
+
+export async function deleteRequestType(userId: string, organizationId: string, typeId: string) {
+  const actor = await getMembership(userId, organizationId)
+  requirePermission(actor, 'requestTypes.manage', null)
+  return prisma.$transaction(async tx => {
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId}, 1))::text`
+    const type = await tx.requestType.findFirst({ where: { id: typeId, organizationId } })
+    if (!type) throw new ApiError(404, 'REQUEST_TYPE_NOT_FOUND', 'Тип заявки не найден.')
+    if (type.systemCode) throw new ApiError(409, 'SYSTEM_REQUEST_TYPE', 'Системный тип нельзя удалить. Можно отключить подачу.')
+    if (type.deletedAt) return { deleted: true }
+    const used = await tx.organizationRequest.count({ where: { organizationId, requestTypeId: typeId } })
+    if (used) await tx.requestType.update({ where: { id: typeId }, data: { isActive: false, deletedAt: new Date() } })
+    else await tx.requestType.delete({ where: { id: typeId } })
+    return { deleted: true }
+  })
+}
 
 function validateTypeFields(type: { dateMode: RequestDateMode; requiresComment: boolean; systemCode: RequestSystemCode | null }, input: CreateInput) {
   if (type.requiresComment && !input.comment?.trim()) throw new ApiError(400, 'REQUEST_COMMENT_REQUIRED', 'Для этого типа заявки нужен комментарий.')
@@ -80,14 +100,21 @@ function validateTypeFields(type: { dateMode: RequestDateMode; requiresComment: 
 }
 
 export async function createRequest(userId: string, organizationId: string, input: CreateInput) {
-  const actor = await getMembership(userId, organizationId)
+  const author = await getMembership(userId, organizationId)
+  let actor = author
+  if(input.subjectMemberId && input.subjectMemberId !== author.id){requirePermission(author,'requests.onBehalf');const target=await prisma.organizationMember.findFirst({where:{id:input.subjectMemberId,organizationId,leftAt:null,locationMemberships:{some:{locationId:author.locationId,leftAt:null}}}});if(!target)throw new ApiError(404,'MEMBER_NOT_FOUND','Сотрудник недоступен в этой точке.');actor=await getMembership(target.userId,organizationId)}
+  if(input.submissionKey){const previous=await prisma.organizationRequest.findFirst({where:{organizationId,submissionKey:input.submissionKey,authorMemberId:author.id}});if(previous)return previous}
   const actorUser = await prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { email: true, firstName: true, lastName: true, middleName: true } })
   await ensureSystemTypes(organizationId)
-  const type = await prisma.requestType.findFirst({ where: { id: input.requestTypeId, organizationId, isActive: true } })
+  const type = await prisma.requestType.findFirst({ where: { id: input.requestTypeId, organizationId, isActive: true, deletedAt: null } })
   if (!type) throw new ApiError(404, 'REQUEST_TYPE_NOT_FOUND', 'Активный тип заявки не найден.')
   if (type.systemCode === 'STAFFING_RESPONSE') throw new ApiError(400, 'STAFFING_RESPONSE_ONLY', 'Откликнитесь на открытую заявку на подмену.')
   if (type.systemCode === 'SICK_LEAVE') throw new ApiError(400, 'SICK_REPORT_ONLY', 'Используйте действие «Сообщить о болезни» без согласования.')
-  requirePermission(actor,type.systemCode==='STAFFING' ? 'staffing.create' : 'requests.create')
+  requirePermission(author,type.systemCode==='STAFFING' ? 'staffing.create' : 'requests.create')
+  if(author.id!==actor.id && type.systemCode && type.systemCode!=='VACATION')throw new ApiError(400,'ON_BEHALF_TYPE','За другого сотрудника можно оформить отпуск или пользовательское обращение.')
+  const definition=definitionOf(type.definition)
+  if(definition.submitRoleIds.length&&!author.owner){const roles=await prisma.accessRole.findMany({where:{organizationId,id:{in:definition.submitRoleIds}}});if(!roles.some(r=>author.accessRoleId===r.id||author.accessAssignments.some(a=>a.locationId===author.locationId&&a.roleId===r.id)||!author.accessConfigured&&r.systemCode===author.role))throw new ApiError(403,'SUBMISSION_FORBIDDEN','Роль не может подавать этот тип обращения.')}
+  const answers=await validateAnswers(prisma,organizationId,actor.locationId,definition,input.answers)
   validateTypeFields(type, input)
   if (scopedLocationId(organizationId) && !actor.assignedLocationId && actor.role !== 'OWNER' && type.systemCode !== 'STAFFING') throw new ApiError(403, 'MEMBER_NOT_IN_LOCATION', 'Для этой точки используйте отклик на заявку о подмене.')
   if (type.systemCode === 'STAFFING') await requireLocationManager(prisma, userId, organizationId, actor.locationId, 'staffing.create')
@@ -106,14 +133,18 @@ export async function createRequest(userId: string, organizationId: string, inpu
   const endDate = type.dateMode === 'SINGLE' ? startDate : dateValue(input.endDate)
   return prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId}, 1))::text`
+    if(input.submissionKey){const existing=await tx.organizationRequest.findFirst({where:{organizationId,submissionKey:input.submissionKey,authorMemberId:author.id}});if(existing)return existing}
+    if (!await tx.requestType.findFirst({ where: { id: type.id, organizationId, isActive: true, deletedAt: null } })) throw new ApiError(409, 'REQUEST_TYPE_NOT_FOUND', 'Этот тип больше недоступен для новых заявок.')
     if (type.systemCode === 'STAFFING') await requireLocationManager(tx, userId, organizationId, actor.locationId, 'staffing.create')
     if (shift) {
       await lockShift(tx, shift.id)
       const fresh = await tx.workShift.findUniqueOrThrow({ where: { id: shift.id } })
       if (fresh.status !== 'SCHEDULED' || fresh.memberId !== actor.id || fresh.scheduledStartAt <= new Date() || fresh.scheduledStartAt.getTime() !== shift.scheduledStartAt.getTime() || fresh.scheduledEndAt.getTime() !== shift.scheduledEndAt.getTime()) throw new ApiError(409, 'SHIFT_CHANGED_SINCE_REQUEST', 'Смена изменилась. Выберите её заново.')
     }
-    const request = await tx.organizationRequest.create({ data: { organizationId, locationId: actor.locationId, createdByMemberId: actor.id, requestTypeId: type.id, typeNameSnapshot: type.name, systemCodeSnapshot: type.systemCode, startDate, endDate, comment: input.comment?.trim() || null, relatedShiftId: input.relatedShiftId || null, originalStartAt: shift?.scheduledStartAt, originalEndAt: shift?.scheduledEndAt, proposedStartAt, proposedEndAt, ...(type.systemCode === 'STAFFING' ? { staffingPositionId: position?.id, staffingPositionName: position?.name ?? input.staffingPositionName } : {}) } })
+    const request = await tx.organizationRequest.create({ data: { organizationId, locationId: actor.locationId, createdByMemberId: actor.id, authorMemberId:author.id, submissionKey:input.submissionKey, formSnapshot:{...definition,dateMode:type.dateMode,requiresComment:type.requiresComment,allowsAttachments:type.allowsAttachments,version:type.version}, answers, status:input.draft?"DRAFT":"PENDING", dueAt:input.draft?null:new Date(Date.now()+definition.deadlineDays*86400000), requestTypeId: type.id, typeNameSnapshot: type.name, systemCodeSnapshot: type.systemCode, startDate, endDate, comment: input.comment?.trim() || null, relatedShiftId: input.relatedShiftId || null, originalStartAt: shift?.scheduledStartAt, originalEndAt: shift?.scheduledEndAt, proposedStartAt, proposedEndAt, ...(type.systemCode === 'STAFFING' ? { staffingPositionId: position?.id, staffingPositionName: position?.name ?? input.staffingPositionName } : {}) } })
     await tx.requestEvent.create({ data: { requestId: request.id, actorMemberId: actor.id, type: 'CREATED' } })
+    if(input.draft)return request
+    if(!type.systemCode || type.systemCode==='VACATION'){await ensureReviewers(tx,request);await notifyStage(tx,request)}
     if (type.systemCode === 'STAFFING') {
       const recipients = await tx.organizationMember.findMany({ where: { organizationId, leftAt: null, user: { deletedAt: null }, locationMemberships: { some: { leftAt: null, locationId: { not: actor.locationId }, location: { archivedAt: null } }, none: { locationId: actor.locationId, leftAt: null } } }, select: { userId: true } })
       if (recipients.length) await tx.accountNotification.createMany({ data: recipients.map(member => ({ organizationId, userId: member.userId, requestId: request.id, type: 'REQUEST_CREATED', title: 'Нужен сотрудник на подмену', message: `${actor.location.name} · ${position?.name ?? input.staffingPositionName}` })) })
@@ -127,17 +158,19 @@ export async function createRequest(userId: string, organizationId: string, inpu
 export async function updateRequest(userId: string, organizationId: string, requestId: string, input: CreateInput) {
   const actor = await getMembership(userId, organizationId)
   requirePermission(actor,'requests.edit')
-  const current = await prisma.organizationRequest.findFirst({ where: { id: requestId, organizationId, ...locationWhere(organizationId), createdByMemberId: actor.id } })
+  const current = await prisma.organizationRequest.findFirst({ where: { id: requestId, organizationId, ...locationWhere(organizationId), OR:[{createdByMemberId:actor.id},{authorMemberId:actor.id}] } })
   if (!current) throw new ApiError(404, 'REQUEST_NOT_FOUND', 'Заявка не найдена.')
   if (['STAFFING', 'STAFFING_RESPONSE'].includes(current.systemCodeSnapshot ?? '')) throw new ApiError(409, 'STAFFING_EDIT_LOCKED', 'Чтобы изменить условия подмены, отмените заявку и создайте новую. Отклики сохранятся в истории.')
-  const informational = current.systemCodeSnapshot === 'SICK' && current.status === 'APPROVED'
-  if (current.status !== 'PENDING' && !informational) throw new ApiError(409, 'REQUEST_ALREADY_RESOLVED', 'Изменить можно только заявку, ожидающую решения.')
-  const type = await prisma.requestType.findFirst({ where: { id: input.requestTypeId, organizationId, isActive: true } })
+  const informational = current.systemCodeSnapshot === 'SICK' && ['APPROVED','REGISTERED'].includes(current.status)
+  if (!['PENDING','DRAFT','RETURNED'].includes(current.status) && !informational) throw new ApiError(409, 'REQUEST_ALREADY_RESOLVED', 'Изменить можно только заявку, ожидающую решения.')
+  const type = await prisma.requestType.findFirst({ where: { id: input.requestTypeId, organizationId, ...(current.requestTypeId===input.requestTypeId?{}:{isActive:true,deletedAt:null}) } })
   if (!type) throw new ApiError(404, 'REQUEST_TYPE_NOT_FOUND', 'Выберите доступный тип заявки.')
+  if(type.id===current.requestTypeId){const snapshot=definitionOf(current.formSnapshot);type.dateMode=snapshot.dateMode??type.dateMode;type.requiresComment=snapshot.requiresComment??type.requiresComment;type.allowsAttachments=snapshot.allowsAttachments??type.allowsAttachments}
   if (type.systemCode === 'STAFFING') throw new ApiError(409, 'STAFFING_EDIT_LOCKED', 'Создайте отдельную заявку на подмену.')
   if (type.systemCode === 'STAFFING_RESPONSE') throw new ApiError(400, 'STAFFING_RESPONSE_ONLY', 'Откликнитесь на открытую заявку на подмену.')
   if (type.systemCode === 'SICK_LEAVE') throw new ApiError(400, 'SICK_REPORT_ONLY', 'Используйте действие «Сообщить о болезни».')
   if (informational && type.systemCode !== 'SICK') throw new ApiError(409, 'REQUEST_TYPE_LOCKED', 'У сообщения об отсутствии нельзя изменить тип.')
+  if(current.createdByMemberId!==actor.id)requirePermission(actor,'requests.onBehalf',current.locationId)
   validateTypeFields(type, input)
   if (type.systemCode === 'SICK') {
     if (await prisma.requestAttachment.count({ where: { requestId } })) throw new ApiError(409, 'REQUEST_HAS_ATTACHMENTS', 'Сначала удалите вложения.')
@@ -156,16 +189,25 @@ export async function updateRequest(userId: string, organizationId: string, requ
   const startDate = dateValue(input.startDate)
   const endDate = type.dateMode === 'SINGLE' ? startDate : dateValue(input.endDate)
   return prisma.$transaction(async (tx) => {
+    if (current.requestTypeId !== type.id) {
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId}, 1))::text`
+      if (!await tx.requestType.findFirst({ where: { id: type.id, organizationId, isActive: true, deletedAt: null } })) throw new ApiError(409, 'REQUEST_TYPE_NOT_FOUND', 'Этот тип больше недоступен. Выберите другой тип заявки.')
+    }
     if (shift) {
       await lockShift(tx, shift.id)
       const fresh = await tx.workShift.findUniqueOrThrow({ where: { id: shift.id } })
       if (fresh.status !== 'SCHEDULED' || fresh.memberId !== actor.id || fresh.scheduledStartAt <= new Date() || fresh.scheduledStartAt.getTime() !== shift.scheduledStartAt.getTime() || fresh.scheduledEndAt.getTime() !== shift.scheduledEndAt.getTime()) throw new ApiError(409, 'SHIFT_CHANGED_SINCE_REQUEST', 'Смена изменилась. Выберите её заново.')
     }
-    const changed = await tx.organizationRequest.updateMany({ where: { id: requestId, organizationId, ...locationWhere(organizationId), createdByMemberId: actor.id, status: 'PENDING', updatedAt: current.updatedAt }, data: { requestTypeId: type.id, typeNameSnapshot: type.name, systemCodeSnapshot: type.systemCode, startDate, endDate, comment: input.comment?.trim() || null, relatedShiftId: input.relatedShiftId || null, originalStartAt: shift?.scheduledStartAt ?? null, originalEndAt: shift?.scheduledEndAt ?? null, proposedStartAt, proposedEndAt } })
+    await lockRequest(tx,requestId)
+    const snapshot=current.requestTypeId===type.id?definitionOf(current.formSnapshot):definitionOf(type.definition)
+    const answers=await validateAnswers(tx,organizationId,current.locationId,snapshot,input.answers)
+    const changed = await tx.organizationRequest.updateMany({ where: { id: requestId, organizationId, ...locationWhere(organizationId), status: current.status, updatedAt: current.updatedAt }, data: { answers, approvalStep:0, formSnapshot:snapshot, requestTypeId: type.id, typeNameSnapshot: type.name, systemCodeSnapshot: type.systemCode, startDate, endDate, comment: input.comment?.trim() || null, relatedShiftId: input.relatedShiftId || null, originalStartAt: shift?.scheduledStartAt ?? null, originalEndAt: shift?.scheduledEndAt ?? null, proposedStartAt, proposedEndAt } })
     if (!changed.count) throw new ApiError(409, 'REQUEST_CHANGED', 'Заявка уже изменилась. Откройте её заново.')
-    await tx.requestEvent.create({ data: { requestId, actorMemberId: actor.id, type: 'EDITED' } })
+    await tx.requestEvent.create({ data: { requestId, actorMemberId: actor.id, type: 'EDITED', changes:{before:JSON.parse(JSON.stringify(current)),after:JSON.parse(JSON.stringify(input))} } })
+    if(current.status==='DRAFT'||current.status==='RETURNED')return tx.organizationRequest.findUniqueOrThrow({where:{id:requestId}})
     await tx.requestRead.deleteMany({ where: { requestId } })
     await tx.accountNotification.updateMany({ where: { requestId, type: 'REQUEST_CREATED', readAt: null }, data: { readAt: new Date() } })
+    if(!type.systemCode||type.systemCode==='VACATION'){const updated=await tx.organizationRequest.findUniqueOrThrow({where:{id:requestId}});await ensureReviewers(tx,updated);await notifyStage(tx,updated);return updated}
     const reviewers = await permissionRecipients(tx, organizationId, 'requests.resolve', actor.locationId)
     if (reviewers.length) await tx.accountNotification.createMany({ data: reviewers.map((reviewer) => ({ userId: reviewer.userId, organizationId, requestId, type: 'REQUEST_CREATED' as const, title: 'Заявка изменена', message: `${memberName(author)} · ${type.name}` })) })
     return tx.organizationRequest.findUniqueOrThrow({ where: { id: requestId } })
@@ -175,22 +217,26 @@ export async function updateRequest(userId: string, organizationId: string, requ
 const requestInclude = {
   location: { select: { id: true, name: true, timezone: true } },
   _count: { select: { staffingResponses: true } },
-  creator: { include: { locationMemberships: { where: { leftAt: null } }, user: { select: { email: true, firstName: true, lastName: true, middleName: true, avatarFileId: true } } } },
+  creator: { include: { accessRole:{select:{name:true}},accessAssignments:{include:{role:{select:{name:true}}}},locationMemberships: { where: { leftAt: null } }, user: { select: { email: true, firstName: true, lastName: true, middleName: true, avatarFileId: true } } } },
   resolvedBy: { include: { user: { select: { email: true, firstName: true, lastName: true, middleName: true } } } },
   relatedShift: true,
-  absence: { select: { reason: true } },
+  absence: { select: { id:true, reason: true, startDate:true,endDate:true,cancelledAt:true,updatedAt:true } },
   attachments: { include: { storedFile: { select: { mimeType: true, size: true } } }, orderBy: { createdAt: 'asc' } },
   events: { include: { actor: { include: { user: { select: { email: true, firstName: true, lastName: true, middleName: true } } } } }, orderBy: { createdAt: 'asc' } },
   reads: { orderBy: { readAt: 'asc' } },
 } as const
 
 function publicRequest(item: any, viewerMemberId?: string, actor?: Awaited<ReturnType<typeof getMembership>>) {
-  const {creator:_creator,resolvedBy:_resolvedBy,absence:_absence,location:_location,reads:_reads,_count,...fields}=item
-  const own=item.createdByMemberId===viewerMemberId, details=own || !actor || hasPermission(actor,'absences.details',item.locationId), contacts=own || !actor || hasPermission(actor,'members.contacts',item.locationId)
-  return { ...fields, ...(!details && item.systemCodeSnapshot==='SICK' ? {comment:null,events:[]} : {}), locationName: item.location?.name, timezone: item.location?.timezone, responseCount: item._count?.staffingResponses ?? 0, absenceReason: details ? item.absence?.reason ?? null : null, startDate: dateText(item.startDate), endDate: dateText(item.endDate), creatorName: memberName(item.creator.user), creatorRole: item.creator.role, creatorEmail: contacts ? item.creator.user.email : '', creatorAvatarUrl: mediaUrl(item.creator.user.avatarFileId), resolvedByName: item.resolvedBy ? memberName(item.resolvedBy.user) : null, firstReadAt: item.reads?.[0]?.readAt ?? null, readByViewer: viewerMemberId ? item.reads?.some((read: { memberId: string }) => read.memberId === viewerMemberId) : false, attachments: actor && !own && !hasPermission(actor,'requests.attachments',item.locationId) ? [] : item.attachments?.map((attachment: any) => ({ id: attachment.id, fileName: attachment.fileName, mimeType: attachment.storedFile.mimeType, size: attachment.storedFile.size, downloadUrl: `/api/organizations/${item.organizationId}/requests/${item.id}/attachments/${attachment.id}` })) ?? [], events: item.events?.map((event: any) => ({ id: event.id, type: event.type, comment: !details && item.systemCodeSnapshot==='SICK' ? null : event.comment, createdAt: event.createdAt, actorName: memberName(event.actor.user) })) ?? [] }
+  const {creator:_creator,resolvedBy:_resolvedBy,absence:_absence,location:_location,reads:_reads,relatedShift:_relatedShift,requestType:_requestType,_count,...fields}=item
+  if (item.requestType) {
+    const snapshot = definitionOf(item.formSnapshot)
+    fields.formSnapshot = { ...snapshot, dateMode: snapshot.dateMode ?? item.requestType.dateMode, requiresComment: snapshot.requiresComment ?? item.requestType.requiresComment, allowsAttachments: snapshot.allowsAttachments ?? item.requestType.allowsAttachments }
+  }
+  const own=item.createdByMemberId===viewerMemberId, details=item.systemCodeSnapshot!=='SICK'||own||item.authorMemberId===viewerMemberId || !actor || hasPermission(actor,'absences.details',item.locationId), contacts=own || !actor || hasPermission(actor,'members.contacts',item.locationId)
+  return { ...fields, isOwn:own, isAuthor:item.authorMemberId===viewerMemberId, processLabel:item.absence?.cancelledAt?'Отменён':processLabel({...item,startDate:dateText(item.absence?.startDate??item.startDate),endDate:dateText(item.absence?.endDate??item.endDate)}), activeAbsence:item.absence?{...item.absence,reason:details?item.absence.reason:null,startDate:dateText(item.absence.startDate),endDate:dateText(item.absence.endDate)}:null, ...(!details && item.systemCodeSnapshot==='SICK' ? {comment:null,events:[]} : {}), locationName: item.location?.name, timezone: item.location?.timezone, responseCount: item._count?.staffingResponses ?? 0, absenceReason: details ? item.absence?.reason ?? null : null, startDate: dateText(item.startDate), endDate: dateText(item.endDate), creatorName: memberName(item.creator.user), creatorRole: item.creator.role, creatorRoleName:item.creator.accessAssignments?.find((a:any)=>a.locationId===item.locationId)?.role.name??item.creator.accessRole?.name, creatorEmail: contacts ? item.creator.user.email : '', creatorAvatarUrl: mediaUrl(item.creator.user.avatarFileId), resolvedByName: item.resolvedBy ? memberName(item.resolvedBy.user) : null, firstReadAt: item.reads?.[0]?.readAt ?? null, readByViewer: viewerMemberId ? item.reads?.some((read: { memberId: string }) => read.memberId === viewerMemberId) : false, attachments: actor && !own && !hasPermission(actor,'requests.attachments',item.locationId) ? [] : item.attachments?.map((attachment: any) => ({ id: attachment.id, fileName: attachment.fileName, mimeType: attachment.storedFile.mimeType, size: attachment.storedFile.size, downloadUrl: `/api/organizations/${item.organizationId}/requests/${item.id}/attachments/${attachment.id}` })) ?? [], events: item.events?.map((event: any) => ({ id: event.id, type: event.type, comment: !details && item.systemCodeSnapshot==='SICK' ? null : event.comment, changes:details?event.changes:null, createdAt: event.createdAt, actorName: memberName(event.actor.user) })) ?? [] }
 }
 
-type ListOptions = { pointId?: string; page: number; pageSize: number; status?: RequestStatus; typeId?: string; memberId?: string; role?: OrganizationRole; from?: string; to?: string; search?: string }
+type ListOptions = { pointId?: string; page: number; pageSize: number; status?: RequestStatus; typeId?: string; memberId?: string; role?: OrganizationRole; roleId?:string; from?: string; to?: string; search?: string }
 
 export async function listRequests(userId: string, organizationId: string, scope: 'mine' | 'incoming' | 'history' | 'staffing', options: ListOptions) {
   const actor = await getMembership(userId, organizationId)
@@ -201,6 +247,9 @@ export async function listRequests(userId: string, organizationId: string, scope
   if (scope !== 'mine' && scope !== 'staffing' && options.pointId && options.pointId !== 'all') await requireLocationManager(prisma, userId, organizationId, options.pointId, 'requests.view')
   if (scope !== 'mine' && scope !== 'staffing' && !options.pointId) requirePermission(actor, 'requests.view')
   await reconcileShiftRequests(organizationId)
+  const custom=await prisma.organizationRequest.findMany({where:{organizationId,systemCodeSnapshot:null},select:{id:true,createdByMemberId:true,authorMemberId:true,locationId:true,formSnapshot:true,outcome:true}})
+  const denied:string[]=[];for(const r of custom)if(!await canReadCustom(prisma,actor,r))denied.push(r.id)
+  const selectedRole=options.roleId?await prisma.accessRole.findFirst({where:{organizationId,id:options.roleId},select:{systemCode:true}}):null
   const dateFilters: Prisma.OrganizationRequestWhereInput[] = []
   if (options.from || options.to) {
     const points = await prisma.organizationLocation.findMany({ where: { organizationId }, select: { id: true, timezone: true } })
@@ -210,10 +259,10 @@ export async function listRequests(userId: string, organizationId: string, scope
       { startDate: null, proposedStartAt: null, createdAt: { ...(options.from ? { gte: startOfZonedDate(options.from, actor.organization.timezone) } : {}), ...(options.to ? { lt: startOfZonedDate(addCalendarDays(options.to, 1), actor.organization.timezone) } : {}) } },
     ] })
   }
-  const where: Prisma.OrganizationRequestWhereInput = { organizationId, ...pointScope,
-    ...(scope === 'staffing' ? { systemCodeSnapshot: 'STAFFING', status: options.status ?? 'PENDING', proposedStartAt: { gt: new Date() } } : scope === 'mine' ? { createdByMemberId: actor.id, ...(options.status ? { status: options.status } : {}) } : scope === 'incoming' ? { status: 'PENDING' } : { status: options.status ? options.status : { in: ['APPROVED', 'REJECTED', 'CANCELLED'] } }),
+  const where: Prisma.OrganizationRequestWhereInput = { organizationId, id:{notIn:denied}, ...pointScope,
+    ...(scope === 'staffing' ? { systemCodeSnapshot: 'STAFFING', status: options.status ?? 'PENDING', proposedStartAt: { gt: new Date() } } : scope === 'mine' ? { OR:[{createdByMemberId:actor.id},{authorMemberId:actor.id},{outcome:{path:['assignees'],array_contains:[actor.id]}}], ...(options.status ? { status: options.status } : {}) } : scope === 'incoming' ? { status: 'PENDING' } : { status: options.status ? options.status : { in: ['APPROVED', 'REGISTERED', 'REJECTED', 'CANCELLED','EXPIRED','INVALID'] } }),
     ...(options.typeId ? { requestTypeId: options.typeId } : {}), ...(options.memberId && scope !== 'mine' ? { createdByMemberId: options.memberId } : {}),
-    ...(options.role && scope !== 'mine' ? { creator: { role: options.role } } : {}),
+    ...(options.roleId&&scope!=='mine'?{OR:[{creator:{accessRoleId:options.roleId}},...((options.pointId&&options.pointId!=='all')?[options.pointId]:locationsFor(actor,'requests.view')).map(locationId=>({locationId,creator:{OR:[{accessAssignments:{some:{locationId,roleId:options.roleId}}},...(selectedRole?.systemCode==='ADMIN'||selectedRole?.systemCode==='MEMBER'?[{accessConfigured:false,locationMemberships:{some:{locationId,leftAt:null,role:selectedRole.systemCode as 'ADMIN'|'MEMBER'}}}]:[])]}}))]}:options.role && scope !== 'mine' ? { creator: { role: options.role } } : {}),
     AND: [...dateFilters, ...(options.search ? options.search.trim().split(/\s+/).map((term) => ({ creator: { user: { OR: [{ email: { contains: term, mode: 'insensitive' as const } }, { firstName: { contains: term, mode: 'insensitive' as const } }, { lastName: { contains: term, mode: 'insensitive' as const } }, { middleName: { contains: term, mode: 'insensitive' as const } }] } } })) : [])],
   }
   const [total, rows] = await prisma.$transaction([prisma.organizationRequest.count({ where }), prisma.organizationRequest.findMany({ where, include: requestInclude, orderBy: { createdAt: 'desc' }, skip: (options.page - 1) * options.pageSize, take: options.pageSize })])
@@ -224,8 +273,10 @@ export async function listRequests(userId: string, organizationId: string, scope
 async function requestForAccess(userId: string, organizationId: string, requestId: string) {
   const actor = await getMembership(userId, organizationId)
   await reconcileShiftRequests(organizationId)
-  const item = await prisma.organizationRequest.findFirst({ where: { id: requestId, organizationId, ...locationWhere(organizationId) }, include: requestInclude })
-  if (!item || (!hasPermission(actor, 'requests.view') && item.createdByMemberId !== actor.id && item.systemCodeSnapshot !== 'STAFFING')) throw new ApiError(404, 'REQUEST_NOT_FOUND', 'Заявка не найдена.')
+  const item = await prisma.organizationRequest.findFirst({ where: { id: requestId, organizationId, ...locationWhere(organizationId) }, include: { ...requestInclude, requestType: { select: { dateMode: true, requiresComment: true, allowsAttachments: true } } } })
+  if (!item || (!hasPermission(actor, 'requests.view') && !(item?.systemCodeSnapshot==='VACATION'&&hasPermission(actor,'vacations.view',item.locationId)) && item.createdByMemberId !== actor.id && item.authorMemberId!==actor.id && !((item.outcome as {assignees?:string[]}|null)?.assignees?.includes(actor.id)&&hasPermission(actor,'requests.own')) && item.systemCodeSnapshot !== 'STAFFING')) throw new ApiError(404, 'REQUEST_NOT_FOUND', 'Заявка не найдена.')
+  if(!item.systemCodeSnapshot&&!await canReadCustom(prisma,actor,item))throw new ApiError(404,'REQUEST_NOT_FOUND','Обращение не найдено.')
+  if(item.status==='DRAFT'&&item.createdByMemberId!==actor.id&&item.authorMemberId!==actor.id)throw new ApiError(404,'REQUEST_NOT_FOUND','Заявка не найдена.')
   if (item.createdByMemberId === actor.id) requirePermission(actor, 'requests.own')
   if (item.systemCodeSnapshot==='STAFFING' && item.createdByMemberId!==actor.id && !hasPermission(actor,'requests.view')) requirePermission(actor,'staffing.respond')
   return { actor, item }
@@ -245,24 +296,35 @@ export async function getRequest(userId: string, organizationId: string, request
     if (!item.reads.some((entry) => entry.memberId === actor.id)) item.reads.push(read)
   }
   const staffingResponses = item.systemCodeSnapshot === 'STAFFING' && hasPermission(actor, 'requests.view') ? (await prisma.organizationRequest.findMany({ where: { organizationId, staffingRequestId: item.id }, include: requestInclude, orderBy: { createdAt: 'asc' } })).map(response => publicRequest(response, actor.id, actor)) : []
-  const ownResponse = item.systemCodeSnapshot === 'STAFFING' ? await prisma.organizationRequest.findFirst({ where: { staffingRequestId: item.id, createdByMemberId: actor.id }, select: { id: true } }) : null
+  const resolveKey=item.systemCodeSnapshot==='VACATION'?'vacations.resolve':['STAFFING','STAFFING_RESPONSE'].includes(item.systemCodeSnapshot??'')?'staffing.resolve':'requests.resolve'
+  const canReview=item.status==='PENDING'&&hasPermission(actor,resolveKey,item.locationId)&&(item.createdByMemberId!==actor.id||actor.owner||hasPermission(actor,'requests.selfResolve',item.locationId))&&((!item.systemCodeSnapshot||item.systemCodeSnapshot==='VACATION')?(await stageReviewers(prisma,item)).some(p=>p.id===actor.id):true)
+  const ownResponse = item.systemCodeSnapshot === 'STAFFING' ? await prisma.organizationRequest.findFirst({ where: { staffingRequestId: item.id, createdByMemberId: actor.id, status:{in:['PENDING','APPROVED']} }, select: { id: true } }) : null
   const memberships = item.systemCodeSnapshot === 'STAFFING' ? await prisma.locationMember.findMany({ where: { memberId: actor.id, leftAt: null, location: { archivedAt: null } }, select: { locationId: true } }) : []
-  return { staffingResponses, viewerResponseId: ownResponse?.id ?? null, viewerCanRespond: hasPermission(actor,'staffing.respond') && item.status === 'PENDING' && !!item.proposedStartAt && item.proposedStartAt > new Date() && !ownResponse && memberships.some(point => point.locationId !== item.locationId) && !memberships.some(point => point.locationId === item.locationId), request: { ...publicRequest(item, actor.id, actor), ...(!hasPermission(actor, 'requests.attachments') && item.createdByMemberId !== actor.id ? {attachments:[]} : {}), ...(!hasPermission(actor,'absences.details') && item.createdByMemberId !== actor.id ? {absenceReason:null} : {}) }, conflicts: await conflictsFor(item, actor.organization.timezone), absenceConflicts: item.status === 'PENDING' && item.systemCodeSnapshot && absenceCodes.includes(item.systemCodeSnapshot) && item.startDate && item.endDate ? (await prisma.employeeAbsence.findMany({ where: { organizationId, memberId: item.createdByMemberId, cancelledAt: null, startDate: { lte: item.endDate }, endDate: { gte: item.startDate } }, select: { id: true, type: true, startDate: true, endDate: true } })).map(a => ({ ...a, startDate: dateText(a.startDate), endDate: dateText(a.endDate) })) : [], otherAbsentEmployees: hasPermission(actor, 'requests.view') && item.startDate && item.endDate ? (await prisma.employeeAbsence.findMany({ where: { organizationId, member: locationMemberWhere(organizationId), memberId: { not: item.createdByMemberId }, cancelledAt: null, startDate: { lte: item.endDate }, endDate: { gte: item.startDate } }, distinct: ['memberId'], select: { memberId: true } })).length : 0 }
+  return { staffingResponses, viewerResponseId: ownResponse?.id ?? null, viewerCanRespond: hasPermission(actor,'staffing.respond') && !!await prisma.requestType.findFirst({where:{organizationId,systemCode:'STAFFING_RESPONSE',isActive:true}}) && item.status === 'PENDING' && !!item.proposedStartAt && item.proposedStartAt > new Date() && !ownResponse && memberships.some(point => point.locationId !== item.locationId) && !memberships.some(point => point.locationId === item.locationId), request: { ...publicRequest(item, actor.id, actor), canReview, ...(!hasPermission(actor, 'requests.attachments') && item.createdByMemberId !== actor.id ? {attachments:[]} : {}), ...(!hasPermission(actor,'absences.details') && item.createdByMemberId !== actor.id ? {absenceReason:null} : {}) }, conflicts: (await conflictsFor(item, actor.organization.timezone)).filter(shift=>hasPermission(actor,item.createdByMemberId===actor.id?'schedule.own':'schedule.view',shift.locationId)), absenceConflicts: item.status === 'PENDING' && item.systemCodeSnapshot && absenceCodes.includes(item.systemCodeSnapshot) && item.startDate && item.endDate ? (await prisma.employeeAbsence.findMany({ where: { organizationId, memberId: item.createdByMemberId, cancelledAt: null, startDate: { lte: item.endDate }, endDate: { gte: item.startDate } }, select: { id: true, type: true, startDate: true, endDate: true } })).map(a => ({ ...a,type:item.createdByMemberId===actor.id||hasPermission(actor,'absences.details',item.locationId)?a.type:'ABSENCE', startDate: dateText(a.startDate), endDate: dateText(a.endDate) })) : [], otherAbsentEmployees: hasPermission(actor, 'requests.view') && item.startDate && item.endDate ? (await prisma.employeeAbsence.findMany({ where: { organizationId, member: locationMemberWhere(organizationId), memberId: { not: item.createdByMemberId }, cancelledAt: null, startDate: { lte: item.endDate }, endDate: { gte: item.startDate } }, distinct: ['memberId'], select: { memberId: true } })).length : 0 }
 }
 
 export async function resolveRequest(userId: string, organizationId: string, requestId: string, decision: 'APPROVED' | 'REJECTED', comment: string | null | undefined, cancelConflictingShifts = false, acknowledgeWorkload = false, acknowledgeAbsence = false) {
   const actor = await getMembership(userId, organizationId)
-  if (!hasPermission(actor,'requests.resolve') && !hasPermission(actor,'staffing.resolve')) requirePermission(actor,'requests.resolve')
+  if (!hasPermission(actor,'requests.resolve') && !hasPermission(actor,'staffing.resolve')&&!hasPermission(actor,'vacations.resolve')) requirePermission(actor,'requests.resolve')
   await reconcileShiftRequests(organizationId)
   const current = await prisma.organizationRequest.findFirst({ where: { id: requestId, organizationId, ...locationWhere(organizationId) }, include: { creator: true } })
   if (!current) throw new ApiError(404, 'REQUEST_NOT_FOUND', 'Заявка не найдена.')
-  const resolveKey = ['STAFFING','STAFFING_RESPONSE'].includes(current.systemCodeSnapshot??'') ? 'staffing.resolve' as const : 'requests.resolve' as const
+  const resolveKey = current.systemCodeSnapshot==='VACATION'?'vacations.resolve' as const:['STAFFING','STAFFING_RESPONSE'].includes(current.systemCodeSnapshot??'') ? 'staffing.resolve' as const : 'requests.resolve' as const
   requirePermission(actor,resolveKey,current.locationId)
+  if(current.createdByMemberId===actor.id&&!actor.owner)requirePermission(actor,'requests.selfResolve',current.locationId)
+  if((!current.systemCodeSnapshot||current.systemCodeSnapshot==='VACATION')&&!(await stageReviewers(prisma,current)).some(p=>p.id===actor.id))throw new ApiError(403,'WRONG_REVIEWER','Этот этап должен рассмотреть назначенный согласующий.')
   if (current.systemCodeSnapshot === 'SICK') throw new ApiError(409, 'INFORMATIONAL_REQUEST', 'Сообщение об отсутствии не требует решения.')
   if (decision === 'REJECTED' && !comment?.trim()) throw new ApiError(400, 'RESOLUTION_COMMENT_REQUIRED', 'Укажите причину отклонения.')
   if (decision === 'APPROVED' && current.systemCodeSnapshot === 'STAFFING') throw new ApiError(409, 'STAFFING_RESPONSE_REQUIRED', 'Подтвердите отклик сотрудника, чтобы назначить подмену.')
   if (decision === 'APPROVED' && current.systemCodeSnapshot === 'SICK_LEAVE') throw new ApiError(409, 'SICK_REPORT_ONLY', 'Болезнь больше не требует одобрения. Сотруднику нужно сообщить о болезни через новое действие; старая заявка остаётся в истории.')
   const result = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId},1))::text`
+    const liveActor=await getMembership(userId,organizationId,tx);requirePermission(liveActor,resolveKey,current.locationId)
+    await lockRequest(tx,requestId)
+    const fresh=await tx.organizationRequest.findUniqueOrThrow({where:{id:requestId}})
+    if(fresh.status!=='PENDING')throw new ApiError(409,'REQUEST_ALREADY_RESOLVED','Заявка уже была обработана.');if(fresh.updatedAt.getTime()!==current.updatedAt.getTime())throw new ApiError(409,'REQUEST_CHANGED','Обращение уже изменилось.')
+    const definition=definitionOf(current.formSnapshot)
+    if(decision==='APPROVED'&&current.approvalStep+1<definition.stages.length){const next=await tx.organizationRequest.update({where:{id:requestId},data:{approvalStep:{increment:1}}});await ensureReviewers(tx,next);await tx.requestEvent.create({data:{requestId,actorMemberId:actor.id,type:'STAGE_APPROVED',comment,changes:{step:current.approvalStep}}});await tx.requestRead.deleteMany({where:{requestId}});await notifyStage(tx,next);return next}
     if (scopedLocationId(organizationId)) { await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId}, 1))::text`; await requireLocationManager(tx, userId, organizationId, actor.locationId, resolveKey) }
     const liveConflicts = decision === 'APPROVED' ? await conflictsFor(current, actor.organization.timezone, tx) : []
     if (cancelConflictingShifts) for (const locationId of new Set(liveConflicts.map(shift => shift.locationId))) await requireLocationManager(tx, userId, organizationId, locationId, 'schedule.cancel')
@@ -316,14 +378,25 @@ export async function resolveRequest(userId: string, organizationId: string, req
       await cancelShiftRequests(tx, organizationId, [shift.id], actor.id, 'Исходная смена перенесена по другой заявке.', requestId)
     }
     if (decision === 'APPROVED' && current.systemCodeSnapshot && absenceCodes.includes(current.systemCodeSnapshot) && current.startDate && current.endDate) {
-      await assertAbsencePeriod(tx, organizationId, current.createdByMemberId, current.startDate, current.endDate)
-      await tx.employeeAbsence.create({ data: { organizationId, memberId: current.createdByMemberId, sourceRequestId: current.id, updatedByMemberId: actor.id, type: current.systemCodeSnapshot, startDate: current.startDate, endDate: current.endDate } })
+      if(current.systemCodeSnapshot==='VACATION'&&liveConflicts.length&&!cancelConflictingShifts)throw new ApiError(409,'UNRESOLVED_SHIFTS','Сначала освободите пересекающиеся смены или подтвердите их отмену.')
+      const previous=current.amendmentOfId?await tx.employeeAbsence.findUnique({where:{sourceRequestId:current.amendmentOfId}}):null
+      if(current.amendmentOfId&&(!previous||previous.cancelledAt))throw new ApiError(409,'VACATION_CHANGED','Исходный отпуск уже отменён.')
+      if(previous&&previous.startDate<=new Date())throw new ApiError(409,'VACATION_STARTED','Перенос начавшегося отпуска оформляет руководитель отдельным действием.')
+      await assertAbsencePeriod(tx, organizationId, current.createdByMemberId, current.startDate, current.endDate,previous?.id)
+      if(previous){await tx.employeeAbsence.update({where:{id:previous.id},data:{startDate:current.startDate,endDate:current.endDate,updatedByMemberId:actor.id}});await tx.requestEvent.create({data:{requestId:current.amendmentOfId!,actorMemberId:actor.id,type:'CHANGED',comment:current.comment,changes:{before:{startDate:dateText(previous.startDate),endDate:dateText(previous.endDate)},after:{startDate:dateText(current.startDate),endDate:dateText(current.endDate)},requestId:current.id,employeeConsent:true}}})}
+      else await tx.employeeAbsence.create({ data: { organizationId, memberId: current.createdByMemberId, sourceRequestId: current.id, updatedByMemberId: actor.id, type: current.systemCodeSnapshot, startDate: current.startDate, endDate: current.endDate } })
       if (cancelConflictingShifts && liveConflicts.length) await tx.workShift.updateMany({ where: { id: { in: liveConflicts.map((shift) => shift.id) }, status: 'SCHEDULED', scheduledEndAt: { gt: new Date() } }, data: { status: 'CANCELLED', cancelledAt: new Date(), cancelledByMemberId: actor.id, cancellationReason: `Одобрено отсутствие по заявке ${requestId}` } })
       for (const conflict of cancelConflictingShifts ? liveConflicts : []) {
         const cancelled = await tx.workShift.findUniqueOrThrow({ where: { id: conflict.id }, include: { member: true } })
         await recordShiftNotification(tx, cancelled, 'SHIFT_CANCELLED', actor.organization.timezone)
       }
       if (cancelConflictingShifts) await cancelShiftRequests(tx, organizationId, liveConflicts.map(shift => shift.id), actor.id, 'Исходная смена отменена из-за одобренного отсутствия.', requestId)
+    }
+    if(decision==='APPROVED'&&!current.systemCodeSnapshot){
+      const outcome={kind:definition.action,status:definition.action==='TASK'?'OPEN':'DONE',text:current.comment??current.typeNameSnapshot,createdAt:new Date().toISOString(),assignees:definition.recipientMemberIds}
+      await tx.organizationRequest.update({where:{id:requestId},data:{outcome}})
+      const recipients=await tx.organizationMember.findMany({where:{organizationId,id:{in:definition.recipientMemberIds},leftAt:null}})
+      if(recipients.length)await tx.accountNotification.createMany({data:recipients.map(p=>({organizationId,userId:p.userId,requestId,type:'REQUEST_APPROVED',title:definition.action==='TASK'?'Назначена задача по обращению':'Результат обращения',message:current.typeNameSnapshot}))})
     }
     await tx.requestEvent.create({ data: { requestId, actorMemberId: actor.id, type: decision, comment: comment?.trim() || null } })
     await tx.accountNotification.updateMany({ where: { requestId, type: 'REQUEST_CREATED', readAt: null }, data: { readAt: new Date() } })
@@ -336,7 +409,7 @@ export async function resolveRequest(userId: string, organizationId: string, req
     if (error && typeof error === 'object' && 'code' in error && error.code === 'P2034') throw new ApiError(409, 'REQUEST_CONFLICT', 'Расписание изменилось одновременно с решением. Проверьте заявку и повторите действие.')
     throw error
   })
-  if (current.creator.userId !== userId) {
+  if (result.status!=='PENDING' && current.creator.userId !== userId) {
     const creator = await prisma.user.findUnique({ where: { id: current.creator.userId }, select: { email: true } })
     if (creator) void deliverRequestDecision(creator.email, organizationId, actor.organization.name, requestId, current.typeNameSnapshot, decision, comment, current.locationId).catch(error => console.error('Request-decision email failed:', error))
   }
@@ -348,7 +421,7 @@ export async function cancelRequest(userId: string, organizationId: string, requ
   const current = await prisma.organizationRequest.findFirst({ where: { id: requestId, organizationId, ...locationWhere(organizationId) } })
   if (!current || current.createdByMemberId !== actor.id) throw new ApiError(404, 'REQUEST_NOT_FOUND', 'Заявка не найдена.')
   const changed = await prisma.$transaction(async (tx) => {
-    const updated = await tx.organizationRequest.updateMany({ where: { id: requestId, updatedAt: current.updatedAt, status: current.systemCodeSnapshot === 'SICK' ? 'APPROVED' : 'PENDING' }, data: { status: 'CANCELLED', cancelledAt: new Date(), resolutionComment: systemReason || null } })
+    const updated = await tx.organizationRequest.updateMany({ where: { id: requestId, updatedAt: current.updatedAt, status: current.systemCodeSnapshot === 'SICK' ? {in:['APPROVED','REGISTERED']} : {in:['PENDING','DRAFT','RETURNED']} }, data: { status: 'CANCELLED', cancelledAt: new Date(), resolutionComment: systemReason || null } })
     if (!updated.count) throw new ApiError(409, 'REQUEST_ALREADY_RESOLVED', 'Обработанную заявку нельзя отменить.')
     if (current.systemCodeSnapshot === 'SICK') await tx.employeeAbsence.updateMany({ where: { sourceRequestId: requestId, organizationId, cancelledAt: null }, data: { cancelledAt: new Date(), cancelledByMemberId: actor.id, updatedByMemberId: actor.id, cancellationReason: systemReason || 'Сообщение отменено автором' } })
     if (current.systemCodeSnapshot === 'STAFFING') await cancelStaffingResponses(tx, requestId, actor.id)
@@ -365,7 +438,7 @@ export async function cancelRequest(userId: string, organizationId: string, requ
 
 export async function assertRequestFileAccess(userId: string, organizationId: string, requestId: string) {
   const result = await requestForAccess(userId, organizationId, requestId)
-  if (result.item.createdByMemberId !== result.actor.id) requirePermission(result.actor, 'requests.attachments')
+  if (result.item.createdByMemberId !== result.actor.id && result.item.authorMemberId!==result.actor.id) requirePermission(result.actor, 'requests.attachments')
   return result
 }
 
@@ -378,22 +451,24 @@ async function saveAbsenceRequest(userId: string, organizationId: string, type: 
   const startDate = dateValue(parsed.data.startDate)!, endDate = dateValue(parsed.data.endDate)!
   const reason = input.absenceReason ?? 'SICK'
   return prisma.$transaction(async tx => {
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId},1))::text`
+    if(input.submissionKey&&!current){const saved=await tx.organizationRequest.findFirst({where:{organizationId,submissionKey:input.submissionKey,createdByMemberId:actor.id}});if(saved)return saved}
     const existing = current ? await tx.employeeAbsence.findUnique({ where: { sourceRequestId: current.id } }) : null
-    if (current && ((current.status === 'APPROVED' && !existing) || existing?.cancelledAt)) throw new ApiError(409, 'ABSENCE_CHANGED', 'Отсутствие уже изменено или отменено.')
+    if (current && ((['APPROVED','REGISTERED'].includes(current.status) && !existing) || existing?.cancelledAt)) throw new ApiError(409, 'ABSENCE_CHANGED', 'Отсутствие уже изменено или отменено.')
     await assertAbsencePeriod(tx, organizationId, actor.id, startDate, endDate, existing?.id)
     const data = { startDate, endDate, comment: input.comment?.trim() || null }
     let request
     if (current) {
-      const changed = await tx.organizationRequest.updateMany({ where: { id: current.id, organizationId, createdByMemberId: actor.id, status: current.status, updatedAt: current.updatedAt }, data: { ...data, requestTypeId: type.id, typeNameSnapshot: type.name, systemCodeSnapshot: 'SICK', status: 'APPROVED', resolvedAt: current.status === 'PENDING' ? new Date() : undefined, relatedShiftId: null, originalStartAt: null, originalEndAt: null, proposedStartAt: null, proposedEndAt: null } })
+      const changed = await tx.organizationRequest.updateMany({ where: { id: current.id, organizationId, createdByMemberId: actor.id, status: current.status, updatedAt: current.updatedAt }, data: { ...data, requestTypeId: type.id, typeNameSnapshot: type.name, systemCodeSnapshot: 'SICK', status: 'REGISTERED', resolvedAt: current.status === 'PENDING' ? new Date() : undefined, relatedShiftId: null, originalStartAt: null, originalEndAt: null, proposedStartAt: null, proposedEndAt: null } })
       if (!changed.count) throw new ApiError(409, 'REQUEST_CHANGED', 'Сообщение уже изменилось. Откройте его заново.')
       request = await tx.organizationRequest.findUniqueOrThrow({ where: { id: current.id } })
       if (existing) await tx.employeeAbsence.update({ where: { id: existing.id }, data: { ...data, reason, type: reason === 'SICK' ? 'SICK' : 'ABSENCE', updatedByMemberId: actor.id } })
       else await tx.employeeAbsence.create({ data: { ...data, organizationId, memberId: actor.id, sourceRequestId: request.id, type: reason === 'SICK' ? 'SICK' : 'ABSENCE', reason, updatedByMemberId: actor.id } })
     } else {
-      request = await tx.organizationRequest.create({ data: { ...data, organizationId, locationId: actor.locationId, createdByMemberId: actor.id, requestTypeId: type.id, typeNameSnapshot: type.name, systemCodeSnapshot: 'SICK', status: 'APPROVED', resolvedAt: new Date() } })
+      request = await tx.organizationRequest.create({ data: { ...data, organizationId, locationId: actor.locationId, createdByMemberId: actor.id,authorMemberId:actor.id,submissionKey:input.submissionKey, requestTypeId: type.id, typeNameSnapshot: type.name, systemCodeSnapshot: 'SICK', status: 'REGISTERED', resolvedAt: new Date() } })
       await tx.employeeAbsence.create({ data: { ...data, organizationId, memberId: actor.id, sourceRequestId: request.id, type: reason === 'SICK' ? 'SICK' : 'ABSENCE', reason, updatedByMemberId: actor.id } })
     }
-    await tx.requestEvent.create({ data: { requestId: request.id, actorMemberId: actor.id, type: current ? 'EDITED' : 'CREATED' } })
+    await tx.requestEvent.create({ data: { requestId: request.id, actorMemberId: actor.id, type: current ? 'EDITED' : 'CREATED', changes:current?{after:{startDate:parsed.data.startDate,endDate:parsed.data.endDate,reason,comment:input.comment??null}}:undefined } })
     const absence = await tx.employeeAbsence.findUniqueOrThrow({ where: { sourceRequestId: request.id } })
     const reviewers = await permissionRecipients(tx, organizationId, 'absences.view', actor.locationId)
     await tx.accountNotification.updateMany({ where: { requestId: request.id, readAt: null }, data: { readAt: new Date() } })
@@ -423,11 +498,52 @@ export async function respondToStaffing(userId: string, organizationId: string, 
     if (!memberships.some(item => item.locationId !== offer.locationId) || memberships.some(item => item.locationId === offer.locationId)) throw new ApiError(403, 'STAFFING_OTHER_LOCATION', 'Эта заявка предназначена для сотрудников других точек.')
     await assertNoApprovedAbsence(organizationId, actor.id, offer.proposedStartAt, offer.proposedEndAt, offer.location.timezone, tx)
     if (await tx.workShift.findFirst({ where: { organizationId, memberId: actor.id, status: 'SCHEDULED', scheduledStartAt: { lt: offer.proposedEndAt }, scheduledEndAt: { gt: offer.proposedStartAt } } })) throw new ApiError(409, 'SHIFT_OVERLAP', 'В это время у вас уже есть смена.')
+    if(await tx.organizationRequest.findFirst({where:{staffingRequestId:requestId,createdByMemberId:actor.id,status:{in:['PENDING','APPROVED']}}}))throw new ApiError(409,'ALREADY_RESPONDED','У вас уже есть активный отклик.')
     const type = await tx.requestType.findFirstOrThrow({ where: { organizationId, systemCode: 'STAFFING_RESPONSE' } })
+    if(!type.isActive)throw new ApiError(409,'REQUEST_TYPE_DISABLED','Новые отклики отключены в настройках.')
     const response = await tx.organizationRequest.create({ data: { organizationId, locationId: offer.locationId, createdByMemberId: actor.id, requestTypeId: type.id, typeNameSnapshot: type.name, systemCodeSnapshot: 'STAFFING_RESPONSE', staffingRequestId: offer.id, staffingPositionId: offer.staffingPositionId, staffingPositionName: offer.staffingPositionName, proposedStartAt: offer.proposedStartAt, proposedEndAt: offer.proposedEndAt, comment: comment?.trim() || null } })
     await tx.requestEvent.create({ data: { requestId: response.id, actorMemberId: actor.id, type: 'CREATED' } })
     const reviewers = await permissionRecipients(tx, organizationId, 'staffing.resolve', offer.locationId)
     if (reviewers.length) await tx.accountNotification.createMany({ data: reviewers.map(item => ({ organizationId, userId: item.userId, requestId: response.id, type: 'REQUEST_CREATED', title: 'Отклик на подмену', message: `${offer.location.name} · ${offer.staffingPositionName}` })) })
     return response
   }, { isolationLevel: 'ReadCommitted' }).catch(error => { if (error?.code === 'P2002') throw new ApiError(409, 'ALREADY_RESPONDED', 'Вы уже откликнулись на эту подмену.'); throw error })
+}
+
+export async function submitRequest(userId:string,organizationId:string,requestId:string){
+  const actor=await getMembership(userId,organizationId);requirePermission(actor,'requests.edit')
+  return prisma.$transaction(async tx=>{
+    await lockRequest(tx,requestId)
+    const item=await tx.organizationRequest.findFirst({where:{id:requestId,organizationId,...locationWhere(organizationId),OR:[{createdByMemberId:actor.id},{authorMemberId:actor.id}]},include:{requestType:true,attachments:true}})
+    if(!item)throw new ApiError(404,'REQUEST_NOT_FOUND','Обращение не найдено.')
+    if(item.createdByMemberId!==actor.id)requirePermission(actor,'requests.onBehalf',item.locationId)
+    if(item.status==='PENDING')return item
+    if(!['DRAFT','RETURNED'].includes(item.status))throw new ApiError(409,'REQUEST_CLOSED','Обращение уже закрыто.')
+    const d=definitionOf(item.formSnapshot)
+    await validateAnswers(tx,organizationId,item.locationId,d,item.answers)
+    if(d.fields.some(f=>f.kind==='FILE'&&f.required)&&!item.attachments.length)throw new ApiError(400,'FILE_REQUIRED','Добавьте обязательное вложение.')
+    const result=await tx.organizationRequest.update({where:{id:requestId},data:{status:'PENDING',approvalStep:0,dueAt:new Date(Date.now()+d.deadlineDays*86400000),remindedAt:null}})
+    if(!item.systemCodeSnapshot||item.systemCodeSnapshot==='VACATION'){await ensureReviewers(tx,result);await notifyStage(tx,result)}
+    else {const people=await permissionRecipients(tx,organizationId,item.systemCodeSnapshot==='STAFFING'?'staffing.resolve':'requests.resolve',item.locationId);if(people.length)await tx.accountNotification.createMany({data:people.map(p=>({organizationId,userId:p.userId,requestId,type:'REQUEST_CREATED',title:'Новая заявка',message:item.typeNameSnapshot}))})}
+    await tx.requestRead.deleteMany({where:{requestId}})
+    await tx.requestEvent.create({data:{requestId,actorMemberId:actor.id,type:'SUBMITTED'}})
+    return result
+  },{isolationLevel:'Serializable'})
+}
+export async function returnRequest(userId:string,organizationId:string,requestId:string,comment:string,withdraw=false){
+  const {actor,item}=await requestForAccess(userId,organizationId,requestId)
+  if(withdraw){if(item.createdByMemberId!==actor.id)throw new ApiError(403,'NOT_AUTHOR','Отозвать может сотрудник.');requirePermission(actor,'requests.edit')}
+  else {requirePermission(actor,item.systemCodeSnapshot==='VACATION'?'vacations.resolve':'requests.resolve',item.locationId);if(item.createdByMemberId===actor.id&&!actor.owner)requirePermission(actor,'requests.selfResolve');if(!(await stageReviewers(prisma,item)).some(p=>p.id===actor.id))throw new ApiError(403,'WRONG_REVIEWER','Вы не назначены на этот этап.')}
+  if(item.systemCodeSnapshot&&item.systemCodeSnapshot!=='VACATION')throw new ApiError(409,'RETURN_NOT_SUPPORTED','Для этого процесса используйте отмену.')
+  return prisma.$transaction(async tx=>{await lockRequest(tx,requestId);const changed=await tx.organizationRequest.updateMany({where:{id:requestId,status:'PENDING',updatedAt:item.updatedAt},data:{status:'RETURNED',resolutionComment:comment}});if(!changed.count)throw new ApiError(409,'REQUEST_CHANGED','Заявка уже изменена.');await tx.requestEvent.create({data:{requestId,actorMemberId:actor.id,type:'RETURNED',comment}});await tx.accountNotification.updateMany({where:{requestId,readAt:null},data:{readAt:new Date()}});await tx.accountNotification.create({data:{organizationId,userId:item.creator.userId,requestId,type:'REQUEST_CREATED',title:withdraw?'Заявка отозвана на редактирование':'Заявка возвращена на доработку',message:comment}});return tx.organizationRequest.findUniqueOrThrow({where:{id:requestId}})})
+}
+
+export async function amendVacation(userId:string,org:string,id:string,startDate:string,endDate:string,comment:string){
+  const {actor,item}=await requestForAccess(userId,org,id);requirePermission(actor,'requests.create')
+  if(item.createdByMemberId!==actor.id||item.systemCodeSnapshot!=='VACATION'||item.status!=='APPROVED'||!item.absence||item.absence.cancelledAt)throw new ApiError(409,'VACATION_UNAVAILABLE','Перенос доступен автору действующего отпуска.')
+  return prisma.$transaction(async tx=>{await lockRequest(tx,id);if(await tx.organizationRequest.findFirst({where:{amendmentOfId:id,status:'PENDING'}}))throw new ApiError(409,'AMENDMENT_EXISTS','Перенос уже на рассмотрении.');const r=await tx.organizationRequest.create({data:{organizationId:org,locationId:item.locationId,createdByMemberId:actor.id,authorMemberId:actor.id,requestTypeId:item.requestTypeId,typeNameSnapshot:'Перенос отпуска',systemCodeSnapshot:'VACATION',amendmentOfId:id,formSnapshot:item.formSnapshot as Prisma.InputJsonValue,startDate:new Date(startDate),endDate:new Date(endDate),comment}});await ensureReviewers(tx,r);await notifyStage(tx,r);await tx.requestEvent.create({data:{requestId:r.id,actorMemberId:actor.id,type:'SUBMITTED',changes:{originalRequestId:id}}});return r})
+}
+export async function completeRequestTask(userId:string,org:string,id:string){
+  const {actor,item}=await requestForAccess(userId,org,id),outcome=item.outcome as {kind?:string;status?:string;assignees?:string[]}|null
+  if(outcome?.kind!=='TASK'||!outcome.assignees?.includes(actor.id)&&!hasPermission(actor,'requests.resolve',item.locationId))throw new ApiError(403,'TASK_FORBIDDEN','Вы не назначены исполнителем.')
+  return prisma.$transaction(async tx=>{await lockRequest(tx,id);await tx.organizationRequest.update({where:{id},data:{outcome:{...outcome,status:'DONE'}}});await tx.requestEvent.create({data:{requestId:id,actorMemberId:actor.id,type:'CHANGED',comment:'Задача выполнена.'}})})
 }

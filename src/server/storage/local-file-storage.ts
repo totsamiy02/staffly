@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto'
 
 if (process.env.NODE_ENV === 'test' && (!process.env.LOCAL_STORAGE_ROOT || path.resolve(process.env.LOCAL_STORAGE_ROOT) === path.resolve('storage'))) throw new Error('Test storage must use an isolated LOCAL_STORAGE_ROOT')
 export const storageRoot = path.resolve(process.env.LOCAL_STORAGE_ROOT || path.join(process.cwd(), 'storage'))
-const objectKeyPattern = /^[a-z0-9-]+(?:\/[a-z0-9-]+)*\/[a-f0-9-]+\.(?:webp|jpg|png|pdf|doc|docx|xls|xlsx|csv|txt|ppt|pptx)$/
+const objectKeyPattern = /^[a-z0-9-]+(?:\/[a-z0-9-]+)*\/[a-f0-9-]+\.(?:webp|jpg|png|pdf|doc|docx|xls|xlsx|csv|txt|md|ppt|pptx)$/
 
 function objectPath(objectKey: string) {
   if (!objectKeyPattern.test(objectKey)) throw new Error('Invalid local storage object key')

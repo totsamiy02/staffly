@@ -1,3 +1,4 @@
+import { needsPreparedPreview, preparePreview, readPreviewSource } from '../file-preview/service.ts'
 import express, { Router, type Request } from 'express'
 import { z } from 'zod'
 import { rateLimit } from 'express-rate-limit'
@@ -28,10 +29,19 @@ router.put(base, upload, body, async (request, response) => {
 router.get(`${base}/:documentId`, async (request, response) => { const { organizationId, documentId } = parse(paramsSchema, request.params); response.json({ document: await getDocument(user(request), organizationId, documentId!) }) })
 router.patch(`${base}/:documentId`, mutate, async (request, response) => { const { organizationId, documentId } = parse(paramsSchema, request.params); await updateDocument(user(request), organizationId, documentId!, parse(metadataSchema, request.body)); response.status(204).end() })
 router.delete(`${base}/:documentId`, mutate, async (request, response) => { const { organizationId, documentId } = parse(paramsSchema, request.params); await deleteDocument(user(request), organizationId, documentId!); response.status(204).end() })
-router.post(`${base}/:documentId/content`, async (request, response) => {
+router.post(`${base}/:documentId/content`, mutate, async (request, response) => {
   const { organizationId, documentId } = parse(paramsSchema, request.params)
   const { action } = parse(z.object({ action: z.enum(['preview', 'download']) }), request.query)
   const actor = user(request), file = await deliverDocument(actor, organizationId, documentId!, action)
+  if (action === 'preview' && needsPreparedPreview(file.fileName)) {
+    const prepared = await preparePreview(await readPreviewSource(file.stream), file.fileName, organizationId)
+    // Parsing/queue can take time. Re-authorize against current membership, folder and audience.
+    await getDocument(actor, organizationId, documentId!)
+    response.set({ 'Content-Type': prepared.mime, 'Content-Length': String(prepared.bytes.length), 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "sandbox; default-src 'none'" })
+    response.once('finish', () => { void recordDocumentOpened(actor, organizationId, documentId!).catch(error => console.error('Document preview status failed:', error)) })
+    response.send(prepared.bytes)
+    return
+  }
   const ascii = file.fileName.replace(/[^a-zA-Z0-9._ -]/g, '_')
   response.set({ 'Content-Type': file.mimeType === 'text/plain' ? 'text/plain; charset=utf-8' : file.mimeType, 'Content-Length': String(file.size), 'Content-Disposition': `${action === 'preview' ? 'inline' : 'attachment'}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(file.fileName).replace(/['()*]/g, value => '%' + value.charCodeAt(0).toString(16))}`, 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "sandbox; default-src 'none'" })
   // No GET/HEAD content endpoint: link prefetches cannot mark documents opened.

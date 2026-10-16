@@ -14,7 +14,7 @@ export async function checkMonthlyWorkload(tx: Prisma.TransactionClient, organiz
     const from = startOfZonedDate(month + '-01', timezone)
     const [year, number] = month.split('-').map(Number)
     const next = new Date(Date.UTC(year, number, 1)).toISOString().slice(0, 10)
-    const shifts = await tx.workShift.findMany({ where: { organizationId, memberId, status: 'SCHEDULED', id: { notIn: excludedIds }, scheduledStartAt: { gte: from, lt: startOfZonedDate(next, timezone) } } })
+    const shifts = await tx.workShift.findMany({ where: { organizationId, memberId, status: 'SCHEDULED',attendance:{not:'NO_SHOW'}, id: { notIn: excludedIds }, scheduledStartAt: { gte: from, lt: startOfZonedDate(next, timezone) } } })
     const minutes = shifts.reduce((sum, shift) => sum + Math.floor(((shift.actualEndAt ?? shift.scheduledEndAt).getTime() - (shift.actualStartAt ?? shift.scheduledStartAt).getTime()) / 60000), 0)
       + additions.filter(item => monthOf(item.start) === month).reduce((sum, item) => sum + Math.floor((item.end.getTime() - item.start.getTime()) / 60000), 0)
     if (minutes > limit) warnings.push({ month, minutes, limit })

@@ -1,3 +1,5 @@
+import { documentAccept } from '../../../app/file-preview/formats.ts'
+import FilePicker from '../../../component/ui/file-picker/file-picker.tsx'
 import { useAccessRoles } from '../../../app/access/queries.ts'
 import DocumentAudience, { type Audience } from './document-audience.tsx'
 import { useLocations, useOrganization } from '../../../app/organizations/queries.ts'
@@ -14,7 +16,7 @@ import { documentPath, sizeLabel, visibilityLabels } from '../../../app/document
 import DocumentDialog from './document-dialog.tsx'
 
 export function DocumentForm({ organizationId, folders, folderId, item, revision, onClose, onSaved, targetMemberId, onBusy, uploadMaxBytes, personal = false }: { organizationId: string; folders: Folder[]; folderId: string; item?: DocumentItem; revision?: DocumentItem; targetMemberId?: string; onClose: () => void; onSaved: (id?: string) => Promise<unknown>; uploadMaxBytes?: number; personal?: boolean; onBusy: (busy: boolean) => void }) {
-  const { apiRequest, uploadFile } = useAuth(); const toast = useToast(); const fileInput = useRef<HTMLInputElement>(null)
+  const { apiRequest, uploadFile } = useAuth(); const toast = useToast();
   const organization = useOrganization(organizationId)
   const owner = (organization.data?.organization.owner || organization.data?.organization.organizationPermissions?.includes('documents.shared'))
   const points = useLocations(organizationId)
@@ -28,7 +30,7 @@ export function DocumentForm({ organizationId, folders, folderId, item, revision
   const [visibility, setVisibility] = useState<Visibility>(initial?.visibility ?? (targetMemberId || personal ? 'PRIVATE_MEMBER' : 'ORGANIZATION'))
   const [audience,setAudience] = useState<Audience>({audienceRoleIds:initial?.audienceRoleIds??[],audienceMemberIds:initial?.audienceMemberIds??[],inheritAccess:initial?.inheritAccess??!!folderId})
   const [target, setTarget] = useState(initial?.targetMemberId ?? targetMemberId ?? ''), [folder, setFolder] = useState(initial ? initial.folderId ?? '' : folderId)
-  const [assignAfterUpload, setAssignAfterUpload] = useState(false), [created, setCreated] = useState<DocumentItem | null>(null), [uploadedId, setUploadedId] = useState(''), [dragging, setDragging] = useState(false)
+  const [assignAfterUpload, setAssignAfterUpload] = useState(false), [created, setCreated] = useState<DocumentItem | null>(null), [uploadedId, setUploadedId] = useState('')
   const [busy, setBusy] = useState(false), [error, setError] = useState(''); const lock = useRef(false)
   useEffect(() => { onBusy(busy); return () => onBusy(false) }, [busy, onBusy])
   function chooseFile(selected: File | null) {
@@ -37,7 +39,6 @@ export function DocumentForm({ organizationId, folders, folderId, item, revision
     if (uploadedId) return
     setFile(selected);
     if (selected && (!name || name === file?.name)) setName(selected.name)
-    if (fileInput.current) fileInput.current.value = ''
   }
   async function submit(event: FormEvent) {
     event.preventDefault(); if (lock.current) return; lock.current = true; setBusy(true); setError('')
@@ -59,7 +60,7 @@ export function DocumentForm({ organizationId, folders, folderId, item, revision
   if (created) return <AssignmentForm item={created} onClose={onClose} onSaved={onSaved} onBusy={onBusy} />
   return <DocumentDialog busy={busy} title={item ? 'Параметры документа' : revision ? 'Новая редакция документа' : 'Загрузить документ'} onClose={onClose}><form onSubmit={submit}>
     {revision && <p className="request-form-note">Новая редакция сохранится отдельным документом. Прежний файл и его история ознакомления сохранятся; для новой редакции ознакомление назначается заново.</p>}
-    {!item && <div className={`document-file-picker${dragging ? ' is-dragging' : ''}`} onDragOver={event => { event.preventDefault(); if (!busy) setDragging(true) }} onDragLeave={() => setDragging(false)} onDrop={event => { event.preventDefault(); setDragging(false); if (!busy) { if (event.dataTransfer.files.length !== 1) setError('Перетащите один файл.'); else chooseFile(event.dataTransfer.files[0]) } }}><input ref={fileInput} type="file" hidden tabIndex={-1} accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.jpg,.jpeg,.png,.webp,.ppt,.pptx" disabled={busy || Boolean(uploadedId)} onChange={event => chooseFile(event.target.files?.[0] ?? null)} />{file ? <><span className="document-row__format" aria-hidden="true">{file.name.split('.').at(-1)?.toUpperCase()}</span><strong>{file.name}</strong><small>{sizeLabel(file.size)}</small><div className="image-upload__actions"><button type="button" className="app-secondary" disabled={busy || Boolean(uploadedId)} onClick={() => fileInput.current?.click()}>Выбрать другой</button><button type="button" className="app-secondary" disabled={busy || Boolean(uploadedId)} onClick={() => chooseFile(null)}>Убрать файл</button></div></> : <><span>Перетащите файл сюда или</span><button type="button" className="app-secondary" disabled={busy || Boolean(uploadedId)} onClick={() => fileInput.current?.click()}>Выберите файл</button></>}<small>PDF, Office, CSV, TXT и изображения.{uploadMaxBytes ? ` До ${sizeLabel(uploadMaxBytes)} на файл.` : ''}</small></div>}
+    {!item && <FilePicker label={revision ? 'Новая редакция' : 'Файл документа'} value={file ? [file] : []} onChange={files => chooseFile(files[0] ?? null)} accept={documentAccept} maxBytes={uploadMaxBytes} disabled={busy || Boolean(uploadedId)} hint={`PDF, Word, Excel, PowerPoint, CSV, TXT, Markdown и изображения.${uploadMaxBytes ? ` До ${sizeLabel(uploadMaxBytes)} на файл.` : ''}`}/>}
 
     <label><span>Название</span><input value={name} required maxLength={255} disabled={busy || Boolean(uploadedId) || !!item && !item.canEdit} onChange={event => setName(event.target.value)} /></label>
     <label><span>Точка документа</span><Select value={pointId} disabled={busy || Boolean(uploadedId) || !!item && (!item.canEdit || !item.canAccess)} onChange={event => { setPointId(event.target.value); setFolder(''); setTarget('') }}>{(owner || organization.data?.organization.organizationPermissions?.includes('documents.shared')) && <option value="">Общий для организации</option>}{points.data?.locations.filter(point => !point.archivedAt && (organization.data?.organization.owner || point.id===item?.locationId || point.permissions?.includes(item?'documents.edit':'documents.upload'))).map(point => <option key={point.id} value={point.id}>{point.name}</option>)}</Select></label>

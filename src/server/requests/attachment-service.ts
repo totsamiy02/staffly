@@ -1,3 +1,5 @@
+import { definitionOf } from '../../app/requests/workflow.ts'
+import { lockRequest,notifyStage } from './workflow.ts'
 import { requirePermission } from '../organizations/access.ts'
 import { createHash, randomUUID } from 'node:crypto'
 import sharp from 'sharp'
@@ -40,9 +42,10 @@ async function validateContents(input: Buffer, mimeType: string) {
 export async function addRequestAttachment(userId: string, organizationId: string, requestId: string, input: unknown, mimeType: string, originalName?: string) {
   const { actor, item } = await assertRequestFileAccess(userId, organizationId, requestId)
   requirePermission(actor,'requests.edit')
-  if (item.createdByMemberId !== actor.id || item.status !== 'PENDING') throw new ApiError(403, 'ATTACHMENT_FORBIDDEN', 'Вложения может добавлять автор до рассмотрения заявки.')
+  if(item.createdByMemberId!==actor.id)requirePermission(actor,'requests.onBehalf',item.locationId)
+  if (item.createdByMemberId !== actor.id && item.authorMemberId!==actor.id || !['PENDING','DRAFT','RETURNED'].includes(item.status)) throw new ApiError(403, 'ATTACHMENT_FORBIDDEN', 'Вложения может добавлять автор до рассмотрения заявки.')
   const type = await prisma.requestType.findUniqueOrThrow({ where: { id: item.requestTypeId } })
-  if (!type.allowsAttachments) throw new ApiError(400, 'ATTACHMENTS_NOT_ALLOWED', 'Этот тип заявки не поддерживает вложения.')
+  if (!(definitionOf(item.formSnapshot).allowsAttachments??type.allowsAttachments)) throw new ApiError(400, 'ATTACHMENTS_NOT_ALLOWED', 'Этот тип заявки не поддерживает вложения.')
   const count = await prisma.requestAttachment.count({ where: { requestId } })
   if (count >= 5) throw new ApiError(409, 'ATTACHMENT_LIMIT', 'К одной заявке можно добавить не больше пяти файлов.')
   if (!Buffer.isBuffer(input)) throw new ApiError(400, 'EMPTY_ATTACHMENT', 'Выберите файл для загрузки.')
@@ -53,8 +56,20 @@ export async function addRequestAttachment(userId: string, organizationId: strin
   const staged = await stageStoredFile({ objectKey, mimeType, size: input.length, checksumSha256: createHash('sha256').update(input).digest('hex'), purpose: 'REQUEST_ATTACHMENT', uploadedByUserId: userId, organizationId }, input)
   try {
     return await prisma.$transaction(async (tx) => {
+      await lockRequest(tx,requestId)
+      const fresh=await tx.organizationRequest.findFirst({where:{id:requestId,organizationId,OR:[{createdByMemberId:actor.id},{authorMemberId:actor.id}],status:{in:['PENDING','DRAFT','RETURNED']}},include:{requestType:true}})
+      if(!fresh)throw new ApiError(409,'REQUEST_ALREADY_RESOLVED','Обращение уже рассмотрено.')
+      if(!(definitionOf(fresh.formSnapshot).allowsAttachments??fresh.requestType.allowsAttachments))throw new ApiError(400,'ATTACHMENTS_NOT_ALLOWED','Вложения недоступны.')
+      const duplicate=await tx.requestAttachment.findFirst({where:{requestId,fileName,storedFile:{checksumSha256:staged.checksumSha256}},include:{storedFile:true}})
+      if(duplicate)return duplicate
+      if(await tx.requestAttachment.count({where:{requestId}})>=5)throw new ApiError(409,'ATTACHMENT_LIMIT','Можно добавить не больше пяти файлов.')
       const file = await tx.storedFile.update({ where: { id: staged.id }, data: { pendingDeletionAt: null } })
-      return tx.requestAttachment.create({ data: { requestId, storedFileId: file.id, fileName }, include: { storedFile: true } })
+      const attachment=await tx.requestAttachment.create({ data: { requestId, storedFileId: file.id, fileName }, include: { storedFile: true } })
+      const updated=await tx.organizationRequest.update({where:{id:requestId},data:{approvalStep:0,updatedAt:new Date()}})
+      await tx.requestEvent.create({data:{requestId,actorMemberId:actor.id,type:'EDITED',comment:`Добавлен файл: ${fileName}`}})
+      await tx.requestRead.deleteMany({where:{requestId}})
+      if(updated.status==='PENDING')await notifyStage(tx,updated)
+      return attachment
     })
   } catch (error) { await deletePendingFile(staged.id); throw error }
 }
@@ -72,13 +87,19 @@ export async function downloadRequestAttachment(userId: string, organizationId: 
 export async function deleteRequestAttachment(userId: string, organizationId: string, requestId: string, attachmentId: string) {
   const { actor, item } = await assertRequestFileAccess(userId, organizationId, requestId)
   requirePermission(actor,'requests.edit')
-  if (item.createdByMemberId !== actor.id || item.status !== 'PENDING') throw new ApiError(403, 'ATTACHMENT_FORBIDDEN', 'Удалить вложение может автор до рассмотрения заявки.')
+  if(item.createdByMemberId!==actor.id)requirePermission(actor,'requests.onBehalf',item.locationId)
+  if (item.createdByMemberId !== actor.id && item.authorMemberId!==actor.id || !['PENDING','DRAFT','RETURNED'].includes(item.status)) throw new ApiError(403, 'ATTACHMENT_FORBIDDEN', 'Удалить вложение может автор до рассмотрения заявки.')
   const fileId = await prisma.$transaction(async (tx) => {
-    const request = await tx.organizationRequest.findFirst({ where: { id: requestId, organizationId, createdByMemberId: actor.id, status: 'PENDING' }, select: { id: true } })
+    await lockRequest(tx,requestId)
+    const request = await tx.organizationRequest.findFirst({ where: { id: requestId, organizationId, OR:[{createdByMemberId:actor.id},{authorMemberId:actor.id}], status: {in:['PENDING','DRAFT','RETURNED']} }, select: { id: true } })
     if (!request) throw new ApiError(409, 'REQUEST_ALREADY_RESOLVED', 'Обработанную заявку нельзя изменить.')
-    const attachment = await tx.requestAttachment.findFirst({ where: { id: attachmentId, requestId }, select: { storedFileId: true } })
+    const attachment = await tx.requestAttachment.findFirst({ where: { id: attachmentId, requestId }, select: { storedFileId: true,fileName:true } })
     if (!attachment) throw new ApiError(404, 'ATTACHMENT_NOT_FOUND', 'Вложение не найдено.')
     await tx.requestAttachment.delete({ where: { id: attachmentId } })
+    const updated=await tx.organizationRequest.update({where:{id:requestId},data:{approvalStep:0,updatedAt:new Date()}})
+    await tx.requestEvent.create({data:{requestId,actorMemberId:actor.id,type:'EDITED',comment:`Удалён файл: ${attachment.fileName}`}})
+    await tx.requestRead.deleteMany({where:{requestId}})
+    if(updated.status==='PENDING')await notifyStage(tx,updated)
     await tx.storedFile.update({ where: { id: attachment.storedFileId }, data: { pendingDeletionAt: new Date() } })
     return attachment.storedFileId
   }, { isolationLevel: 'Serializable' })

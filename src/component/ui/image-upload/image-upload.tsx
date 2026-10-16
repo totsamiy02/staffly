@@ -1,6 +1,8 @@
-import { useRef, useState, type ChangeEvent } from 'react'
+import { useState } from 'react'
 import { useAuth } from '../../../app/auth/auth-context.tsx'
 import Avatar from '../avatar/avatar.tsx'
+import FilePicker from '../file-picker/file-picker.tsx'
+import HelpTip from '../help-tip/help-tip.tsx'
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024
 const acceptedTypes = new Set(['image/jpeg', 'image/png', 'image/webp'])
@@ -18,12 +20,9 @@ type ImageUploadProps = {
 
 export default function ImageUpload({ endpoint, imageUrl, name, avatarClassName, disabled = false, onChange, onMessage, onError }: ImageUploadProps) {
   const { apiRequest, uploadImage } = useAuth()
-  const inputRef = useRef<HTMLInputElement>(null)
   const [busy, setBusy] = useState(false)
 
-  async function selectFile(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0]
-    event.target.value = ''
+  async function selectFile(file: File | undefined) {
     if (!file) return
     onError(''); onMessage('')
     if (!acceptedTypes.has(file.type)) { onError('Выберите изображение JPEG, PNG или WebP.'); return }
@@ -54,10 +53,9 @@ export default function ImageUpload({ endpoint, imageUrl, name, avatarClassName,
   return <div className="image-upload">
     <div className="image-upload__preview"><Avatar url={imageUrl} name={name} className={avatarClassName} eager /></div>
     {!disabled && <><div className="image-upload__actions">
-      <input ref={inputRef} type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => void selectFile(event)} disabled={busy} />
-      <button className="app-secondary" type="button" disabled={busy} onClick={() => inputRef.current?.click()}>{busy ? 'Обрабатываем…' : imageUrl ? 'Заменить фото' : 'Загрузить фото'}</button>
+<FilePicker compact value={[]} label="Фотография" buttonLabel={busy ? 'Обрабатываем…' : imageUrl ? 'Заменить фото' : 'Загрузить фото'} accept="image/jpeg,image/png,image/webp" maxBytes={MAX_IMAGE_BYTES} disabled={busy} onChange={files => void selectFile(files[0])}/>
       {imageUrl && <button className="image-upload__remove" type="button" disabled={busy} onClick={() => void remove()}>Удалить</button>}
     </div>
-    <small>JPEG, PNG или WebP, до 8 МБ. Фото будет обрезано до квадрата.</small></>}
+    <HelpTip label="Требования к фотографии">JPEG, PNG или WebP, до 8 МБ. Фото будет обрезано до квадрата.</HelpTip></>}
   </div>
 }

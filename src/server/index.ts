@@ -1,3 +1,4 @@
+import { startRequestMaintenance } from './requests/worker.ts'
 import teamPlanningRouter from './schedule/team-planning-routes.ts'
 import express from 'express'
 import { ZodError } from 'zod'
@@ -29,6 +30,9 @@ app.use('/api/organizations/:organizationId/documents/:documentId/assign', expre
 app.use('/api/organizations/:organizationId/events', express.json({ limit: '64kb' }))
 app.use('/api/organizations/:organizationId/statistics/reports', express.json({ limit: '128kb' }))
 app.use('/api/organizations/:organizationId/schedule', express.json({ limit: '192kb' }))
+app.use('/api/organizations/:organizationId/requests',express.json({limit:'96kb'}))
+app.use('/api/organizations/:organizationId/request-types',express.json({limit:'64kb'}))
+app.use('/api/organizations/:organizationId/vacation-campaigns',express.json({limit:'64kb'}))
 app.use(express.json({ limit: '16kb' }))
 app.use(cookieParser())
 app.use('/api', (request, response, next) => {
@@ -101,7 +105,8 @@ app.use((error: unknown, request: express.Request, response: express.Response, _
 
 const port = Number(process.env.PORT || 3001)
 const stopStorageCleanup = startStorageCleanup()
+const stopRequestMaintenance = startRequestMaintenance()
 const stopEventNotifications = startEventNotifications()
 app.listen(port, () => console.log(`Staffly API: http://localhost:${port}`))
 
-process.on('SIGTERM', () => { stopStorageCleanup(); stopEventNotifications(); void prisma.$disconnect() })
+process.on('SIGTERM', () => { stopStorageCleanup(); stopEventNotifications(); stopRequestMaintenance(); void prisma.$disconnect() })

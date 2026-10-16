@@ -10,8 +10,8 @@ export function ReportIcon({ kind }: { kind: 'download' | 'copy' | 'clock' | 'br
 }
 
 export function ReportRules({ compact = false }: { compact?: boolean }) {
-  const rules = [ ['clock', 'Только часы по графику'], ['break', 'Перерыв включён'], ['cancel', 'Отменённые смены исключены'], ['calendar', 'Будущие смены включены'], ['night', 'Ночная смена относится к местной дате начала в часовом поясе точки'], ['document', 'Отсутствия не уменьшают часы'] ] as const
-  return compact ? <div className="report-rules-inline"><ReportIcon kind="info" /><p>Часы только по графику · Перерыв включён · Отменённые смены исключены · Будущие смены входят в отчёт.<br />Ночная смена относится к местной дате начала в часовом поясе точки. Отсутствия не уменьшают часы.</p></div> : <section className="report-rules"><h3>Правила расчёта</h3><ul>{rules.map(([kind, text]) => <li key={kind}><ReportIcon kind={kind} /><span>{text}</span></li>)}</ul></section>
+  const rules = [ ['clock', 'Фактическое время, иначе план'], ['break', 'Перерыв включён'], ['cancel', 'Отменённые смены исключены'], ['calendar', 'Будущие смены включены'], ['night', 'Ночная смена относится к местной дате начала в часовом поясе точки'], ['document', 'Неявка даёт 0 часов; отсутствие требует обработки смен'] ] as const
+  return compact ? <div className="report-rules-inline"><ReportIcon kind="info" /><p>Фактические часы, иначе план · Перерыв включён · Отменённые смены исключены · Будущие смены входят в отчёт.<br />Ночная смена относится к местной дате начала в часовом поясе точки. Неявка даёт 0 часов; отсутствие требует обработки смен.</p></div> : <section className="report-rules"><h3>Правила расчёта</h3><ul>{rules.map(([kind, text]) => <li key={kind}><ReportIcon kind={kind} /><span>{text}</span></li>)}</ul></section>
 }
 
 export function ReportSheets({ config, selected, onSelect, onToggle }: { config: ReportConfig; selected: ReportSheet; onSelect: (key: ReportSheet) => void; onToggle: (key: ReportSheet, enabled: boolean) => void }) {
@@ -19,7 +19,7 @@ export function ReportSheets({ config, selected, onSelect, onToggle }: { config:
 }
 
 export function ReportMetrics({ result }: { result?: ReportPreview }) {
-  return <div className="report-metrics" aria-label="Итоги всего отчёта"><span><strong>{result?.metrics.employees ?? '—'}</strong> сотрудников</span><span><strong>{result?.metrics.shifts ?? '—'}</strong> смен</span><span><strong>{result ? reportNumber(result.metrics.hours) : '—'} ч</strong> по графику</span></div>
+  return <div className="report-metrics" aria-label="Итоги всего отчёта"><span><strong>{result?.metrics.employees ?? '—'}</strong> сотрудников</span><span><strong>{result?.metrics.shifts ?? '—'}</strong> смен</span><span><strong>{result ? reportNumber(result.metrics.hours) : '—'} ч</strong> учтено</span></div>
 }
 
 export function ReportChecks({ result }: { result: ReportPreview }) {

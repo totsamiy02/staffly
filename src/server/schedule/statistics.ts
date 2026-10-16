@@ -47,13 +47,13 @@ async function aggregate(organizationId: string, timezone: string, options: Pick
       CASE WHEN m.role = 'OWNER' OR ${scopedLocationId(organizationId) ?? null}::uuid IS NULL THEN m.role::text ELSE COALESCE(lm.role::text, 'MEMBER') END AS role,
       COALESCE(lm.joined_at, m.joined_at) AS "joinedAt",
       CASE WHEN ${scopedLocationId(organizationId) ?? null}::uuid IS NULL THEN m.left_at WHEN m.left_at IS NOT NULL THEN m.left_at WHEN lm.member_id IS NOT NULL THEN lm.left_at WHEN EXISTS (SELECT 1 FROM location_transfers t WHERE t.member_id = m.id AND t.to_location_id = ${scopedLocationId(organizationId) ?? null}::uuid AND t.temporary AND t.end_at > NOW()) THEN NULL ELSE m.joined_at END AS "leftAt",
-      COALESCE(SUM(CASE WHEN s.id IS NOT NULL AND s.status = 'SCHEDULED' AND COALESCE(s.actual_end_at, s.scheduled_end_at) <= NOW()
+      COALESCE(SUM(CASE WHEN s.id IS NOT NULL AND s.status = 'SCHEDULED' AND s.attendance <> 'NO_SHOW' AND COALESCE(s.actual_end_at, s.scheduled_end_at) <= NOW()
         THEN GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (COALESCE(s.actual_end_at, s.scheduled_end_at) - COALESCE(s.actual_start_at, s.scheduled_start_at))) / 60)::bigint) ELSE 0 END), 0)::bigint AS "workedMinutes",
-      COUNT(s.id) FILTER (WHERE s.status = 'SCHEDULED' AND COALESCE(s.actual_end_at, s.scheduled_end_at) <= NOW()
+      COUNT(s.id) FILTER (WHERE s.status = 'SCHEDULED' AND s.attendance <> 'NO_SHOW' AND COALESCE(s.actual_end_at, s.scheduled_end_at) <= NOW()
         AND COALESCE(s.actual_end_at, s.scheduled_end_at) > COALESCE(s.actual_start_at, s.scheduled_start_at))::bigint AS "workedShifts",
-      COALESCE(SUM(CASE WHEN s.id IS NOT NULL AND s.status = 'SCHEDULED' AND COALESCE(s.actual_end_at, s.scheduled_end_at) > NOW()
+      COALESCE(SUM(CASE WHEN s.id IS NOT NULL AND s.status = 'SCHEDULED' AND s.attendance <> 'NO_SHOW' AND COALESCE(s.actual_end_at, s.scheduled_end_at) > NOW()
         THEN GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (COALESCE(s.actual_end_at, s.scheduled_end_at) - COALESCE(s.actual_start_at, s.scheduled_start_at))) / 60)::bigint) ELSE 0 END), 0)::bigint AS "plannedMinutes",
-      COUNT(s.id) FILTER (WHERE s.status = 'SCHEDULED' AND COALESCE(s.actual_end_at, s.scheduled_end_at) > NOW())::bigint AS "plannedShifts"
+      COUNT(s.id) FILTER (WHERE s.status = 'SCHEDULED' AND s.attendance <> 'NO_SHOW' AND COALESCE(s.actual_end_at, s.scheduled_end_at) > NOW())::bigint AS "plannedShifts"
     FROM organization_members m
     JOIN users u ON u.id = m.user_id
     LEFT JOIN location_members lm ON lm.member_id = m.id AND lm.location_id = ${scopedLocationId(organizationId) ?? null}::uuid
@@ -135,7 +135,7 @@ async function memberRows(userId: string, organizationId: string, memberId: stri
   const mapShift = (shift: typeof history[number]) => {
     const start = shift.actualStartAt ?? shift.scheduledStartAt
     const end = shift.actualEndAt ?? shift.scheduledEndAt
-    return { id: shift.id, scheduledStartAt: shift.scheduledStartAt, scheduledEndAt: shift.scheduledEndAt, actualStartAt: shift.actualStartAt, actualEndAt: shift.actualEndAt, status: shift.status, minutes: countedMinutes(start, end), plannedMinutes: countedMinutes(shift.scheduledStartAt, shift.scheduledEndAt), actualMinutes: shift.actualStartAt && shift.actualEndAt ? countedMinutes(shift.actualStartAt, shift.actualEndAt) : null, breakMinutes: shift.breakMinutes, actualBreakMinutes: shift.actualBreakMinutes, cancellationReason: shift.cancellationReason, adjusted: shift._count.adjustments > 0, description: shift.description }
+    return { id: shift.id, scheduledStartAt: shift.scheduledStartAt, scheduledEndAt: shift.scheduledEndAt, actualStartAt: shift.actualStartAt, actualEndAt: shift.actualEndAt, status: shift.status, attendance:shift.attendance, minutes: shift.attendance==='NO_SHOW'?0:countedMinutes(start, end), plannedMinutes: countedMinutes(shift.scheduledStartAt, shift.scheduledEndAt), actualMinutes: shift.actualStartAt && shift.actualEndAt ? countedMinutes(shift.actualStartAt, shift.actualEndAt) : null, breakMinutes: shift.breakMinutes, actualBreakMinutes: shift.actualBreakMinutes, cancellationReason: shift.cancellationReason, adjusted: shift._count.adjustments > 0, description: shift.description }
   }
   return {
     member: { avatarUrl: mediaUrl(target.user.avatarFileId), id: target.id, name: [target.user.lastName, target.user.firstName, target.user.middleName].filter(Boolean).join(' ') || target.user.email.split('@')[0], role: allTime?.role ?? target.role, active: allTime ? !allTime.leftAt : !target.leftAt },

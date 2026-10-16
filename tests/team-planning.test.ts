@@ -3,6 +3,7 @@ import { before, after, describe, it } from 'node:test'
 import { randomUUID } from 'node:crypto'
 import { prisma } from '../src/server/db.ts'
 import { createOrganization } from '../src/server/organizations/organization-service.ts'
+import { saveLocation } from '../src/server/organizations/location-service.ts'
 import { locationContext } from '../src/server/organizations/location-context.ts'
 import { saveAccessRole, saveMemberAccess } from '../src/server/organizations/access-service.ts'
 import { listNotificationHistory } from '../src/server/organizations/notification-service.ts'
@@ -62,19 +63,41 @@ after(async()=>{
   await prisma.$disconnect()
 })
 describe('optional demand and draft schedule lifecycle',{concurrency:false},()=>{
-  it('starts disabled, isolates points and prevents unauthorized settings changes',async()=>{
+  it('starts disabled and enables both features for the entire organization from either point',async()=>{
     assert.deepEqual(await at(()=>team.getTeamSettings(owner(),org)),{coverageEnabled:false,discussionEnabled:false,discussionHours:24})
     await assert.rejects(makeDraft(),code('DISCUSSION_DISABLED'))
     await assert.rejects(at(()=>team.saveTeamSettings(people.employee.id,org,{coverageEnabled:true,discussionEnabled:true,discussionHours:24})),code('INSUFFICIENT_PERMISSIONS'))
     await at(()=>team.saveTeamSettings(owner(),org,{coverageEnabled:true,discussionEnabled:true,discussionHours:24}))
-    assert.equal((await at(()=>team.getTeamSettings(owner(),org),second)).coverageEnabled,false)
+    assert.deepEqual(await at(()=>team.getTeamSettings(owner(),org),second),{coverageEnabled:true,discussionEnabled:true,discussionHours:24})
+    assert.equal((await team.getTeamSettings(people.alien.id,foreign)).coverageEnabled,false)
     assert.deepEqual((await at(()=>team.getCoverage(owner(),org,'2038-01-01','2038-01-02'))).days[0].source,'unconfigured')
+  })
+  it('includes newly created locations without another feature toggle',async()=>{
+    const location=await saveLocation(owner(),org,null,{name:'Новая точка',city:'Москва',address:'Тест',timezone:'Europe/Moscow',teamNames:[]})
+    assert.equal((await at(()=>team.getTeamSettings(owner(),org),location.id)).coverageEnabled,true)
+    assert.equal((await at(()=>team.getTeamSettings(owner(),org),location.id)).discussionEnabled,true)
+    assert.equal((await at(()=>team.getDemand(owner(),org),location.id)).versions.length,0)
+  })
+  it('requires organization-wide settings permission rather than a role at one location',async()=>{
+    const role=await saveAccessRole(owner(),org,null,{name:'Настройки расписания',description:'',permissions:['schedule.settings']})
+    const settings={coverageEnabled:true,discussionEnabled:true,discussionHours:24}
+    try {
+      await saveMemberAccess(owner(),org,people.outsider.memberId,{organizationRoleId:null,assignments:[{locationId:second,roleId:role.id}]})
+      await assert.rejects(at(()=>team.saveTeamSettings(people.outsider.id,org,settings),second),code('INSUFFICIENT_PERMISSIONS'))
+      await saveMemberAccess(owner(),org,people.outsider.memberId,{organizationRoleId:role.id,assignments:[]})
+      await at(()=>team.saveTeamSettings(people.outsider.id,org,settings),second)
+      assert.equal((await at(()=>team.getTeamSettings(owner(),org))).discussionEnabled,true)
+    } finally {
+      await prisma.accessAssignment.deleteMany({where:{memberId:people.outsider.memberId}})
+      await prisma.organizationMember.update({where:{id:people.outsider.memberId},data:{accessConfigured:false,accessRoleId:null}})
+    }
   })
   it('keeps effective template versions and replaces/reset date exceptions without altering shifts',async()=>{
     const days=Array.from({length:7},()=>[{positionId:position,startTime:'08:00',endTime:'16:00',endDayOffset:0,needed:1}])
     await at(()=>team.saveDemand(owner(),org,{effectiveFrom:'2038-01-01',days}))
     await at(()=>team.saveDemand(owner(),org,{effectiveFrom:'2038-02-01',days:days.map(day=>day.map(row=>({...row,needed:2})))}))
     assert.equal((await at(()=>team.getDemand(owner(),org))).versions.length,2)
+    assert.equal((await at(()=>team.getDemand(owner(),org),second)).versions.length,0)
     await at(()=>team.saveDemand(owner(),org,{date:'2038-01-03',intervals:[]}))
     const exception=(await at(()=>team.getCoverage(owner(),org,'2038-01-03','2038-01-04'))).days[0]
     assert.equal(exception.noDemand,true);assert.equal(exception.source,'exception')
@@ -114,7 +137,8 @@ describe('optional demand and draft schedule lifecycle',{concurrency:false},()=>
     const d=await makeDraft(false,'2038-03-10')
     await assert.rejects(makeDraft(false,d.fromDate),code('DRAFT_PERIOD_OVERLAP'))
     await assert.rejects(at(()=>team.saveTeamSettings(owner(),org,{coverageEnabled:true,discussionEnabled:false,discussionHours:24})),code('ACTIVE_DISCUSSION'))
-    const other=await at(()=>team.saveTeamSettings(owner(),org,{coverageEnabled:false,discussionEnabled:true,discussionHours:24}),second)
+    await assert.rejects(at(()=>team.saveTeamSettings(owner(),org,{coverageEnabled:true,discussionEnabled:false,discussionHours:24}),second),code('ACTIVE_DISCUSSION'))
+    const other=await at(()=>team.saveTeamSettings(owner(),org,{coverageEnabled:true,discussionEnabled:true,discussionHours:24}),second)
     assert.equal(other.discussionEnabled,true)
     await at(()=>team.createDraft(owner(),org,schema.draftCreateBody.parse({title:'Другой график',fromDate:d.fromDate,toDate:d.toDate})),second)
   })
@@ -300,7 +324,8 @@ describe('optional demand and draft schedule lifecycle',{concurrency:false},()=>
     assert.equal((await at(()=>team.getCoverage(owner(),org,date,addDays(date,1)))).days[0].segments[0].assigned,0)
     await at(()=>resolveRequest(owner(),org,response.id,'APPROVED',null))
     assert.equal((await at(()=>team.getCoverage(owner(),org,date,addDays(date,1)))).days[0].segments[0].assigned,1)
-    assert.equal((await at(()=>team.getCoverage(owner(),org,date,addDays(date,1)),second)).days.length,0)
+    const otherCoverage=await at(()=>team.getCoverage(owner(),org,date,addDays(date,1)),second)
+    assert.equal(otherCoverage.days[0].source,'unconfigured');assert.deepEqual(otherCoverage.days[0].segments,[])
   })
   it('saves a single selected week without changing demand on any other dates',async()=>{
     const days=Array.from({length:7},(_,index)=>addDays('2041-01-07',index))
@@ -361,9 +386,12 @@ describe('optional demand and draft schedule lifecycle',{concurrency:false},()=>
     const count=await prisma.workShift.count({where:{organizationId:org}})
     await act(d.id,'CANCEL',{confirm:true,explanation:'Период планирования изменён'})
     assert.equal(await prisma.workShift.count({where:{organizationId:org}}),count);assert.equal((await detail(d.id)).status,'CANCELLED')
-    for(const row of (await at(()=>team.listDrafts(owner(),org))).drafts.filter(d=>['PREPARING','OPEN','CLOSED'].includes(d.status)))await act(row.id,'CANCEL',{confirm:true,explanation:'Завершаем тестовый процесс'})
+    for(const point of [first,second])for(const row of (await at(()=>team.listDrafts(owner(),org),point)).drafts.filter(d=>['PREPARING','OPEN','CLOSED'].includes(d.status))) {
+      await at(()=>team.actOnDraft(owner(),org,row.id,schema.draftActionBody.parse({revision:row.revision,action:'CANCEL',confirm:true,explanation:'Завершаем тестовый процесс'})),point)
+    }
     await at(()=>team.saveTeamSettings(owner(),org,{coverageEnabled:false,discussionEnabled:false,discussionHours:24}))
     assert.deepEqual((await at(()=>team.getCoverage(owner(),org,d.fromDate,addDays(d.toDate,1)))).days,[])
+    assert.deepEqual(await at(()=>team.getTeamSettings(owner(),org),second),{coverageEnabled:false,discussionEnabled:false,discussionHours:24})
     assert.ok((await at(()=>team.getDemand(owner(),org))).versions.length>0)
     assert.equal((await detail(d.id)).status,'CANCELLED')
   })

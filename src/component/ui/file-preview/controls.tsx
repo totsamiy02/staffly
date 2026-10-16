@@ -1,0 +1,7 @@
+import type { ReactNode } from 'react'
+export function PageControls({ page, count, onChange, noun = 'Страница' }: { page: number; count: number; onChange: (page: number) => void; noun?: string }) {
+  return <div className="file-preview-pages"><button type="button" aria-label={noun === 'Слайд' ? 'Предыдущий слайд' : 'Предыдущая страница'} disabled={page <= 1} onClick={() => onChange(page - 1)}>‹</button><label>{noun} <input aria-label={`Номер: ${noun.toLowerCase()}`} type="number" min={1} max={count} value={page} onChange={e => { const value = Number(e.target.value); if (Number.isInteger(value) && value >= 1 && value <= count) onChange(value) }} /> / {count}</label><button type="button" aria-label={noun === 'Слайд' ? 'Следующий слайд' : 'Следующая страница'} disabled={page >= count} onClick={() => onChange(page + 1)}>›</button></div>
+}
+export function ZoomControls({ zoom, setZoom, children }: { zoom: number; setZoom: (value: number) => void; children?: ReactNode }) {
+  return <div className="file-preview-zoom"><button type="button" aria-label="Уменьшить" disabled={zoom <= .5} onClick={() => setZoom(Math.max(.5, zoom - .25))}>−</button><span>{Math.round(zoom * 100)}%</span><button type="button" aria-label="Увеличить" disabled={zoom >= 3} onClick={() => setZoom(Math.min(3, zoom + .25))}>+</button><button type="button" onClick={() => setZoom(1)}>По ширине</button>{children}</div>
+}

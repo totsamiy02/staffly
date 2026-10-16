@@ -56,6 +56,7 @@ before(async () => {
   await prisma.requestEvent.deleteMany()
   await prisma.requestAttachment.deleteMany()
   await prisma.organizationRequest.deleteMany()
+  await prisma.vacationCampaign.deleteMany()
   await prisma.requestType.deleteMany()
   await prisma.workShiftAdjustment.deleteMany()
   await prisma.workShift.deleteMany()
@@ -153,7 +154,7 @@ describe('requests workflow, privacy and schedule integration', { concurrency: f
     assert.equal((await prisma.workShift.findUniqueOrThrow({ where: { id: conflict.id } })).status, 'CANCELLED')
     assert.ok(await prisma.employeeAbsence.findUnique({ where: { sourceRequestId: request.id } }))
     await expectCode(() => resolveRequest(admin.id, organization.id, request.id, 'REJECTED', 'Поздно'), 'REQUEST_ALREADY_RESOLVED')
-    await expectCode(() => createShift(owner.id, organization.id, { memberId: employeeMembership.id, startDate: '2028-02-12', startTime: '10:00', endDate: '2028-02-12', endTime: '17:00', breakMinutes: 0, description: null }), 'EMPLOYEE_ABSENT')
+    await expectCode(() => createShift(owner.id, organization.id, { memberId: employeeMembership.id, startDate: '2028-02-12', startTime: '10:00', endDate: '2028-02-12', endTime: '17:00', breakMinutes: 0, description: null }), 'VACATION_CONFLICT')
     const dayOffType = (await listRequestTypes(member.id, organization.id)).find((type) => type.systemCode === 'DAY_OFF')!
     const dayOff = await createRequest(member.id, organization.id, { requestTypeId: dayOffType.id, startDate: '2028-03-10' })
     await resolveRequest(owner.id, organization.id, dayOff.id, 'APPROVED', null)
@@ -217,7 +218,7 @@ describe('requests workflow, privacy and schedule integration', { concurrency: f
     const stale = await createRequest(member.id, organization.id, { requestTypeId: shiftType.id, relatedShiftId: shift.id, proposedStartDate: '2032-05-05', proposedStartTime: '10:00', proposedEndDate: '2032-05-05', proposedEndTime: '19:00', comment: 'Перенос' })
     await updateShift(owner.id, organization.id, shift.id, { memberId: memberRecord.id, startDate: '2032-05-03', startTime: '09:00', endDate: '2032-05-03', endTime: '18:00', breakMinutes: 0, description: null })
     await expectCode(() => resolveRequest(owner.id, organization.id, stale.id, 'APPROVED', null), 'REQUEST_ALREADY_RESOLVED')
-    assert.equal((await prisma.organizationRequest.findUniqueOrThrow({ where: { id: stale.id } })).status, 'CANCELLED')
+    assert.equal((await prisma.organizationRequest.findUniqueOrThrow({ where: { id: stale.id } })).status, 'INVALID')
   })
 
   it('lets only the author edit a pending request and alerts reviewers again', async () => {
@@ -818,8 +819,8 @@ describe('pending shift-request lifecycle regressions', { concurrency: false }, 
   const proposal = (shiftId: string, date: string) => createRequest(member.id, organization.id, { requestTypeId: shiftTypeId, relatedShiftId: shiftId, proposedStartDate: date, proposedStartTime: '10:00', proposedEndDate: date, proposedEndTime: '18:00', comment: 'Перенести смену' })
   async function assertCancelled(id: string) {
     const record = await prisma.organizationRequest.findUniqueOrThrow({ where: { id }, include: { events: true } })
-    assert.equal(record.status, 'CANCELLED'); assert.ok(record.cancelledAt); assert.ok(record.resolutionComment)
-    assert.equal(record.events.filter(event => event.type === 'CANCELLED').length, 1)
+    assert.ok(['CANCELLED','INVALID','EXPIRED'].includes(record.status)); assert.ok(record.cancelledAt); assert.ok(record.resolutionComment)
+    assert.equal(record.events.filter(event => ['CANCELLED','INVALID','EXPIRED'].includes(event.type)).length, 1)
     assert.equal((await listAccountNotifications(member.id)).some(item => item.requestId === id && item.type === 'REQUEST_CANCELLED'), true)
     assert.equal((await listRequests(owner.id, organization.id, 'incoming', { page: 1, pageSize: 100 })).requests.some(item => item.id === id), false)
     assert.equal((await listRequests(owner.id, organization.id, 'history', { page: 1, pageSize: 100 })).requests.some(item => item.id === id), true)
@@ -837,7 +838,7 @@ describe('pending shift-request lifecycle regressions', { concurrency: false }, 
     await updateShift(owner.id, organization.id, shift.id, { ...shiftInput('2039-01-01'), description: 'Другая заметка' })
     assert.equal((await prisma.organizationRequest.findUniqueOrThrow({ where: { id: request.id } })).status, 'PENDING')
     await updateShift(owner.id, organization.id, shift.id, { ...shiftInput('2039-01-01'), startTime: '08:00' })
-    assert.equal((await prisma.organizationRequest.findUniqueOrThrow({ where: { id: request.id } })).status, 'CANCELLED')
+    assert.equal((await prisma.organizationRequest.findUniqueOrThrow({ where: { id: request.id } })).status, 'INVALID')
     await assertCancelled(request.id)
   })
   it('cancels pending proposals when the original shift is cancelled or assigned to someone else', async () => {
@@ -879,7 +880,7 @@ describe('pending shift-request lifecycle regressions', { concurrency: false }, 
     await getRequest(member.id, organization.id, external.id)
     await assertCancelled(external.id)
     await getRequest(member.id, organization.id, external.id)
-    assert.equal(await prisma.requestEvent.count({ where: { requestId: external.id, type: 'CANCELLED' } }), 1)
+    assert.equal(await prisma.requestEvent.count({ where: { requestId: external.id, type: 'INVALID' } }), 1)
   })
   it('cannot approve a proposal concurrently with cancelling the original shift', async () => {
     const shift = await createShift(owner.id, organization.id, shiftInput('2039-06-01'))
@@ -1335,11 +1336,11 @@ describe('employee absences: lifecycle, privacy and schedule consistency', { con
     const vacation = types.find(t => t.systemCode === 'VACATION')!, dayOff = types.find(t => t.systemCode === 'DAY_OFF')!
     const shift = await createShift(owner.id, org, input('2052-06-02'))
     const request = await createRequest(member.id, org, { requestTypeId: vacation.id, startDate: '2052-06-01', endDate: '2052-06-03' })
-    const concurrent = await Promise.allSettled([resolveRequest(owner.id, org, request.id, 'APPROVED', null), resolveRequest(admin.id, org, request.id, 'APPROVED', null)])
+    const concurrent = await Promise.allSettled([resolveRequest(owner.id, org, request.id, 'APPROVED', null,true), resolveRequest(admin.id, org, request.id, 'APPROVED', null,true)])
     assert.equal(concurrent.filter(r => r.status === 'fulfilled').length, 1)
     assert.equal(await prisma.employeeAbsence.count({ where: { sourceRequestId: request.id } }), 1)
     assert.deepEqual((await getRequest(owner.id, org, request.id)).absenceConflicts, [])
-    assert.equal((await prisma.workShift.findUniqueOrThrow({ where: { id: shift.id } })).status, 'SCHEDULED')
+    assert.equal((await prisma.workShift.findUniqueOrThrow({ where: { id: shift.id } })).status, 'CANCELLED')
     const rejected = await createRequest(member.id, org, { requestTypeId: dayOff.id, startDate: '2052-06-05' })
     await resolveRequest(owner.id, org, rejected.id, 'REJECTED', 'Нужен другой день')
     assert.equal(await prisma.employeeAbsence.count({ where: { sourceRequestId: rejected.id } }), 0)
@@ -1387,11 +1388,13 @@ describe('employee absences: lifecycle, privacy and schedule consistency', { con
     await changeAbsence(member.id, org, item.id, { updatedAt: edited.updatedAt.toISOString(), reason: 'Планы изменились' })
   })
 
-  it('keeps informational requests mandatory, editable and cancellable in the shared history', async () => {
+  it('keeps informational requests configurable, editable and cancellable in the shared history', async () => {
     const type = (await listRequestTypes(member.id, org)).find(t => t.systemCode === 'SICK')!
-    await expectCode(() => updateRequestType(owner.id, org, type.id, { name: type.name, description: type.description, dateMode: type.dateMode, requiresComment: type.requiresComment, allowsAttachments: type.allowsAttachments, isActive: false }), 'MANDATORY_REQUEST_TYPE')
+    await updateRequestType(owner.id,org,type.id,{name:type.name,description:type.description,dateMode:type.dateMode,requiresComment:type.requiresComment,allowsAttachments:type.allowsAttachments,isActive:false})
+    await expectCode(()=>createRequest(member.id,org,{requestTypeId:type.id,startDate:'2055-03-01',endDate:'2055-03-02'}),'REQUEST_TYPE_NOT_FOUND')
+    await updateRequestType(owner.id,org,type.id,{name:type.name,description:type.description,dateMode:type.dateMode,requiresComment:type.requiresComment,allowsAttachments:type.allowsAttachments,isActive:true})
     const report = await createRequest(member.id, org, { requestTypeId: type.id, startDate: '2055-03-01', endDate: '2055-03-02', absenceReason: 'OTHER', comment: 'Проверка сообщения' })
-    assert.equal(report.status, 'APPROVED')
+    assert.equal(report.status, 'REGISTERED')
     assert.equal((await listRequests(owner.id, org, 'incoming', { page: 1, pageSize: 50 })).requests.some(r => r.id === report.id), false)
     assert.ok((await listRequests(owner.id, org, 'history', { page: 1, pageSize: 50 })).requests.some(r => r.id === report.id))
     await expectCode(() => resolveRequest(owner.id, org, report.id, 'APPROVED', null), 'INFORMATIONAL_REQUEST')

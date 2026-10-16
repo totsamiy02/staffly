@@ -32,6 +32,7 @@ export default function ShiftFormModal({ organization, members, date, shift, act
   const [endTime, setEndTime] = useState(actual ? actualEnd.time : scheduledEnd.time)
   const [description, setDescription] = useState(shift?.description ?? '')
   const [reason, setReason] = useState('')
+  const [attendance,setAttendance]=useState<'WORKED'|'PARTIAL'|'NO_SHOW'>(shift?.attendance==='NO_SHOW'?'NO_SHOW':shift?.attendance==='PARTIAL'?'PARTIAL':'WORKED')
   const [error, setError] = useState('')
   useToastFeedback('', error)
   const [busy, setBusy] = useState(false)
@@ -90,7 +91,7 @@ export default function ShiftFormModal({ organization, members, date, shift, act
     event.preventDefault(); setError('')
     const start = Date.parse(`${startDate}T${startTime}:00Z`)
     const end = Date.parse(`${endDate}T${endTime}:00Z`)
-    if (!batch && end <= start) { setError('Окончание должно быть позже начала. Для ночной смены выберите следующий день.'); return }
+    if (!batch && !(actual&&attendance==='NO_SHOW') && end <= start) { setError('Окончание должно быть позже начала. Для ночной смены выберите следующий день.'); return }
     if (actual && reason.trim().length < 3) { setError('Укажите причину изменения отработанного времени.'); return }
     setBusy(true)
     try {
@@ -98,7 +99,7 @@ export default function ShiftFormModal({ organization, members, date, shift, act
         const shifts = batch && !shift ? dates.map(day => { const times=overrides[day]??{startTime,endTime,overnight:endDate>startDate};return {memberId,positionId:positionId||null,startDate:day,endDate:addDays(day,times.overnight?1:0),startTime:times.startTime,endTime:times.endTime,breakMinutes:0,description} }) : [{memberId,positionId:positionId||null,startDate,endDate,startTime,endTime,breakMinutes:shift?.breakMinutes??0,description}]
         await apiRequest(`/organizations/${organization.id}/schedule/drafts/${draft.id}/proposals`,{method:'POST',body:{revision:draft.revision,proposalId:draft.proposalId,sourceShiftId:draft.sourceShiftId,kind:draft.sourceShiftId?'UPDATE':'CREATE',shifts,confirmResponseWindow:confirmWindow,deadline:extendWindow?localDateTimeIso(deadlineDate,deadlineTime,organization.timezone):undefined}})
       }
-      else if (actual && shift) await apiRequest(`/organizations/${organization.id}/shifts/${shift.id}/actual`, { method: 'POST', body: { startDate, startTime, endDate, endTime, breakMinutes: 0, reason } })
+      else if (actual && shift) await apiRequest(`/organizations/${organization.id}/schedule/shifts/${shift.id}/attendance`,{method:'POST',body:{attendance,reason,startAt:localDateTimeIso(startDate,startTime,organization.timezone),endAt:localDateTimeIso(endDate,endTime,organization.timezone)}})
       else if (batch && !shift) {
         await apiRequest('/organizations/' + organization.id + '/shifts/batch', { method: 'POST', body: { acknowledgeAbsence, acknowledgeWorkload, shifts: dates.map(day => {
           const times = overrides[day] ?? { startTime, endTime, overnight: endDate > startDate }
@@ -117,6 +118,7 @@ export default function ShiftFormModal({ organization, members, date, shift, act
     <header><div><p className="app-eyebrow">{actual ? 'Завершённая смена' : shift ? 'Редактирование графика' : displayDate(date)}</p><h2>{actual ? 'Изменить отработанное время' : shift ? 'Редактировать смену' : 'Создать смену'}</h2><p>{draft ? 'Предварительный график. Основной календарь пока не изменится.' : actual ? 'План сохранится без изменений. Укажите фактическое время и причину.' : 'Выберите сотрудника и время его работы.'}</p></div><button type="button" disabled={busy} aria-label="Закрыть" onClick={close}>×</button></header>
     {actual && shift && <div className="shift-form__plan"><span>Запланированное время</span><strong>{scheduledStart.time}–{scheduledEnd.time}</strong><small>{displayDate(scheduledStart.date)}{scheduledEnd.date !== scheduledStart.date ? ` → ${displayDate(scheduledEnd.date)}` : ''}</small></div>}
 
+    {actual&&<label><span>Результат смены</span><Select value={attendance} onChange={e=>setAttendance(e.target.value as typeof attendance)}><option value="WORKED">Отработана</option><option value="PARTIAL">Частично отработана</option><option value="NO_SHOW">Неявка · 0 отработанных часов</option></Select><small>План сохраняется. Это отметка учёта времени, а не дисциплинарное решение.</small></label>}
     {!actual && <EmployeePicker members={members} value={memberId} onChange={chooseEmployee} />}
     <div className="shift-form__location"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="M19 10c0 5-7 11-7 11S5 15 5 10a7 7 0 1 1 14 0Z" /><circle cx="12" cy="10" r="2.5" /></svg><span><small>Точка смены</small><strong>{organization.location?.name ?? organization.name}</strong></span></div>
     {!actual && <div className="planning-time"><label><span>Должность в смене</span><Select value={positionId} onChange={event => choosePosition(event.target.value)}><option value="">Без должности</option>{positions.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</Select></label><label><span>Шаблон времени</span><Select value={templateId} onChange={event => applyTemplate(event.target.value)}><option value="">Свободное время</option>{templates.map(item => <option key={item.id} value={item.id}>{item.name} · {item.startTime}–{item.endTime}</option>)}</Select></label></div>}

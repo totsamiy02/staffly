@@ -14,6 +14,7 @@ import { Link } from 'react-router-dom'
 import './schedule.scss'
 
 export default function PlanningSettings({ organization }: { organization: OrganizationSummary }) {
+  const globalSettings = !!(organization.owner || organization.organizationPermissions?.includes('schedule.settings'))
   const planning = useSchedulePlanning(organization.id)
   const { apiRequest } = useAuth()
   const queryClient = useQueryClient()
@@ -29,12 +30,12 @@ export default function PlanningSettings({ organization }: { organization: Organ
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [feedbackScope, setFeedbackScope] = useState('')
-  const [tab, setTab] = useState(canAccess(organization,'schedule.settings') || canAccess(organization,'coverage.manage') ? 'team' : canAccess(organization,'positions.manage') ? 'positions' : canAccess(organization,'offers.settings') ? 'offers' : canAccess(organization,'schedule.templates') ? 'templates' : 'workload')
+  const [tab, setTab] = useState(globalSettings || canAccess(organization,'schedule.settings') || canAccess(organization,'coverage.manage') ? 'team' : canAccess(organization,'positions.manage') ? 'positions' : canAccess(organization,'offers.settings') ? 'offers' : canAccess(organization,'schedule.templates') ? 'templates' : 'workload')
   useEffect(() => { if (!message) return; const timer = window.setTimeout(() => setMessage(''), 4500); return () => window.clearTimeout(timer) }, [message])
   function feedback(scope: string) { return feedbackScope === scope ? <>{error && <p className="form-inline-error" role="alert">{error}</p>}</> : null }
   const [error, setError] = useState('')
   useToastFeedback(message, error)
-  const canManage = ['coverage.manage','schedule.settings','schedule.templates','positions.manage','offers.settings'].some(key=>organization.owner || organization.permissions?.includes(key))
+  const canManage = globalSettings || ['coverage.manage','schedule.settings','schedule.templates','positions.manage','offers.settings'].some(key=>organization.owner || organization.permissions?.includes(key))
   useEffect(() => { setHours(planning.data?.monthlyWorkMinutes ? String(planning.data.monthlyWorkMinutes / 60) : '') }, [planning.data?.monthlyWorkMinutes])
   async function save(path: string, body: unknown, method: 'POST' | 'PATCH' | 'PUT' = 'POST') {
     setBusy(true); setError(''); setMessage(''); setFeedbackScope(path.includes('/positions') ? 'positions' : path.includes('/templates') ? 'templates' : 'workload')
@@ -50,7 +51,7 @@ export default function PlanningSettings({ organization }: { organization: Organ
   if (planning.isError) return <article className="settings-card"><p>Не удалось загрузить настройки расписания.</p><button className="app-secondary" onClick={() => void planning.refetch()}>Повторить</button></article>
   const data = planning.data!
   if (!canManage) return <article className="settings-card"><div><h2>Рабочее время</h2><p>Месячная норма: {data.monthlyWorkMinutes ? data.monthlyWorkMinutes / 60 + ' ч' : 'не задана'}. Должности и шаблоны настраивает администратор.</p></div></article>
-  return <article className="planning-settings"><SegmentedNav label="Настройки расписания">{[[ 'team','Планирование команды',canAccess(organization,'schedule.settings')?'schedule.settings':'coverage.manage'],[ 'positions','Должности','positions.manage'],['offers','Передача и обмен','offers.settings'],['templates','Шаблоны смен','schedule.templates'],['workload','Норма часов','schedule.settings']].filter(([, ,key])=>organization.owner || organization.permissions?.includes(key)).map(([key, label]) => <button type="button" key={key} aria-pressed={tab === key} onClick={() => { setTab(key); setMessage(''); setError('') }}>{label}</button>)}</SegmentedNav>
+  return <article className="planning-settings"><SegmentedNav label="Настройки расписания">{[[ 'team','Планирование команды',canAccess(organization,'schedule.settings')?'schedule.settings':'coverage.manage'],[ 'positions','Должности','positions.manage'],['offers','Передача и обмен','offers.settings'],['templates','Шаблоны смен','schedule.templates'],['workload','Норма часов','schedule.settings']].filter(([tabKey, ,key])=>tabKey==='team'&&globalSettings || organization.owner || organization.permissions?.includes(key)).map(([key, label]) => <button type="button" key={key} aria-pressed={tab === key} onClick={() => { setTab(key); setMessage(''); setError('') }}>{label}</button>)}</SegmentedNav>
     {tab === 'team' && <TeamPlanningSettings organization={organization} />}
     {tab === 'offers' && canAccess(organization,'offers.settings') && <ShiftOfferSettings organization={organization} />}
     {tab === 'workload' && canAccess(organization,'schedule.settings') && <section><header><h3>Месячная норма часов</h3><p>Порог предупреждения при планировании, для этой точки. Учитываются часы сотрудника во всех точках организации.</p></header>{feedback('workload')}<form onSubmit={event => { event.preventDefault(); void save('/schedule/workload', { monthlyWorkMinutes: hours ? Math.round(Number(hours) * 60) : null }, 'PUT') }}><label><span>Часов на сотрудника в календарный месяц</span><input type="number" min="1" max="744" step="0.5" value={hours} onChange={event => setHours(event.target.value)} placeholder="Норма не задана" /></label><p>В часовом поясе точки. Сумма отработанных и будущих часов; смена относится к месяцу её начала. Превышение требует подтверждения, а не запрещает сохранение.</p><button className="app-primary" disabled={busy}>Сохранить норму</button></form></section>}

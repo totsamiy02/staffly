@@ -1,3 +1,4 @@
+import { requestDefinition } from '../../app/requests/workflow.ts'
 import { z } from 'zod'
 
 const dateOnly = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Укажите дату в формате ГГГГ-ММ-ДД.').refine((value) => {
@@ -14,16 +15,17 @@ export const listRequestsQuery = z.object({
   pointId: z.union([z.uuid(), z.literal('all')]).optional(),
   page: z.coerce.number().int().min(1).max(100_000).default(1),
   pageSize: z.coerce.number().int().min(1).max(50).default(20),
-  status: z.enum(['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED']).optional(),
+  status: z.enum(['DRAFT','RETURNED','REGISTERED','EXPIRED','INVALID','PENDING', 'APPROVED', 'REJECTED', 'CANCELLED']).optional(),
   typeId: z.string().uuid().optional(),
   memberId: z.string().uuid().optional(),
+  roleId:z.uuid().optional(),
   role: z.enum(['OWNER', 'ADMIN', 'MEMBER']).optional(),
   from: dateOnly.optional(),
   to: dateOnly.optional(),
   search: z.string().trim().max(100).optional(),
 }).refine(value => !value.from || !value.to || value.from <= value.to, { message: 'Начало периода должно быть не позже окончания.', path: ['to'] })
-export const createRequestBody = z.object({ staffingPositionId: z.uuid().nullish(), staffingPositionName: z.string().trim().min(2).max(120).nullish(), requestTypeId: z.string().uuid(), absenceReason: z.enum(['SICK', 'PERSONAL', 'OTHER']).nullish(), startDate: dateOnly.nullish(), endDate: dateOnly.nullish(), comment: z.string().trim().max(2000).nullish(), relatedShiftId: z.string().uuid().nullish(), proposedStartDate: dateOnly.nullish(), proposedStartTime: timeOnly.nullish(), proposedEndDate: dateOnly.nullish(), proposedEndTime: timeOnly.nullish() })
+export const createRequestBody = z.object({ draft: z.boolean().optional(), submissionKey: z.string().min(8).max(100).optional(), subjectMemberId: z.uuid().optional(), answers: z.record(z.string(),z.union([z.string().max(2000),z.number(),z.object({start:dateOnly,end:dateOnly})])).optional(), staffingPositionId: z.uuid().nullish(), staffingPositionName: z.string().trim().min(2).max(120).nullish(), requestTypeId: z.string().uuid(), absenceReason: z.enum(['SICK', 'PERSONAL', 'OTHER']).nullish(), startDate: dateOnly.nullish(), endDate: dateOnly.nullish(), comment: z.string().trim().max(2000).nullish(), relatedShiftId: z.string().uuid().nullish(), proposedStartDate: dateOnly.nullish(), proposedStartTime: timeOnly.nullish(), proposedEndDate: dateOnly.nullish(), proposedEndTime: timeOnly.nullish() })
 export const resolveRequestBody = z.object({ comment: z.string().trim().max(1000).nullish(), cancelConflictingShifts: z.boolean().default(false), acknowledgeWorkload: z.boolean().default(false), acknowledgeAbsence: z.boolean().default(false) })
 export const rejectRequestBody = z.object({ comment: z.string().trim().min(3, 'Укажите причину отклонения.').max(1000) })
-export const createRequestTypeBody = z.object({ name: z.string().trim().min(2).max(100), description: z.string().trim().max(500).nullish(), dateMode: z.enum(['NONE', 'SINGLE', 'RANGE']), requiresComment: z.boolean(), allowsAttachments: z.boolean() })
+export const createRequestTypeBody = z.object({ definition: requestDefinition.optional(), name: z.string().trim().min(2).max(100), description: z.string().trim().max(500).nullish(), dateMode: z.enum(['NONE', 'SINGLE', 'RANGE']), requiresComment: z.boolean(), allowsAttachments: z.boolean() })
 export const updateRequestTypeBody = createRequestTypeBody.extend({ isActive: z.boolean() })

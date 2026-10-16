@@ -13,6 +13,13 @@ export const accessModules: Record<string, { icon: string; description: string }
 }
 
 export const permissionHints: Partial<Record<Permission, string>> = {
+  'requestTypes.manage':'Создание, изменение, отключение и удаление пользовательских типов; общие правила отпусков',
+  'vacations.view':'Календарь и периоды отпусков в разрешённых точках',
+  'vacations.collect':'Сбор дат, выбор аудитории и контроль ответов',
+  'vacations.resolve':'Согласование периодов и возврат на доработку',
+  'vacations.change':'Перенос, продление, отзыв и отмена с историей',
+  'requests.onBehalf':'Оформление отпуска или пользовательского обращения за сотрудника',
+  'requests.selfResolve':'Явное исключение: согласование собственных обращений',
   'members.contacts': 'Email и телефон сотрудников',
   'members.personnel.view': 'Доступ к табельным номерам',
   'members.personnel.edit': 'Изменение номера в карточке сотрудника',

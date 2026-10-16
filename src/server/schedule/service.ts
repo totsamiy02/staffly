@@ -65,6 +65,7 @@ export async function assertNoApprovedAbsence(organizationId: string, memberId: 
     const absenceEnd = startOfZonedDate(addCalendarDays(dateText(item.endDate), 1), timezone)
     return startAt < absenceEnd && endAt > absenceStart
   })
+  if(absence?.type==='VACATION')throw new ApiError(409,'VACATION_CONFLICT','На эти даты согласован отпуск. Сначала оформите перенос или отзыв; обычное подтверждение не разрешает назначить смену.',{absenceId:absence.id})
   if (absence && !acknowledge) throw new ApiError(409, 'EMPLOYEE_ABSENT', `Сотрудник отсутствует ${dateText(absence.startDate)}–${dateText(absence.endDate)}: ${absenceLabels[absence.type] ?? 'Отсутствие'}. Подтвердите назначение смены несмотря на отсутствие.`, { absenceId: absence.id })
 }
 
@@ -74,6 +75,7 @@ export function publicShift(shift: WorkShift & { member: { user: { email: string
   return {
     id: shift.id,
     activeOffer: shift.offerReservation?.offer ?? null,
+    attendance:shift.attendance,attendanceReason:shift.attendanceReason,
     locationId: shift.locationId,
     positionId: shift.positionId,
     positionName: shift.positionNameSnapshot,
@@ -86,7 +88,7 @@ export function publicShift(shift: WorkShift & { member: { user: { email: string
     actualStartAt: shift.actualStartAt,
     actualEndAt: shift.actualEndAt,
     actualBreakMinutes: shift.actualBreakMinutes,
-    effectiveMinutes: countedMinutes(effectiveStartAt, effectiveEndAt),
+    effectiveMinutes: shift.attendance==='NO_SHOW'?0:countedMinutes(effectiveStartAt, effectiveEndAt),
     description: shift.description,
     status: shift.status,
     cancelledAt: shift.cancelledAt,
@@ -291,7 +293,7 @@ export async function correctActualTime(userId: string, organizationId: string, 
     const previousEndAt = fresh.actualEndAt ?? fresh.scheduledEndAt
     const previousBreakMinutes = fresh.actualBreakMinutes ?? fresh.breakMinutes
     await tx.workShiftAdjustment.create({ data: { shiftId, changedByMemberId: actor.id, previousStartAt, previousEndAt, previousBreakMinutes, newStartAt: startAt, newEndAt: endAt, newBreakMinutes: input.breakMinutes, reason: input.reason } })
-    const shift = await tx.workShift.update({ where: { id: shiftId }, data: { actualStartAt: startAt, actualEndAt: endAt, actualBreakMinutes: input.breakMinutes }, include: shiftInclude })
+    const shift = await tx.workShift.update({ where: { id: shiftId }, data: { attendance:'WORKED', attendanceReason:input.reason, actualStartAt: startAt, actualEndAt: endAt, actualBreakMinutes: input.breakMinutes }, include: shiftInclude })
     return publicShift(shift)
   }, { isolationLevel: 'Serializable' })
 }
@@ -327,4 +329,19 @@ export async function mutatePlannedShift(tx: Prisma.TransactionClient, actor: Aw
   }
   const notification = assignmentChanged ? await recordShiftNotification(tx, changed, !current || current.memberId !== input.memberId ? 'SHIFT_ASSIGNED' : 'SHIFT_CHANGED', actor.organization.timezone) : null
   return { changed, notification, previousAssignment }
+}
+
+export async function setShiftAttendance(userId:string,organizationId:string,shiftId:string,input:{attendance:'WORKED'|'PARTIAL'|'NO_SHOW';reason:string;startAt?:string;endAt?:string}){
+  const actor=await getMembership(userId,organizationId);requirePermission(actor,'schedule.actual')
+  return prisma.$transaction(async tx=>{
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId},1))::text`
+    await lockShift(tx,shiftId)
+    const shift=await shiftInOrganization(tx,organizationId,shiftId)
+    requirePermission(actor,'schedule.actual',shift.locationId)
+    if(shift.status==='CANCELLED'||shift.scheduledStartAt>new Date())throw new ApiError(409,'ATTENDANCE_UNAVAILABLE','Результат можно указать после начала действующей смены.')
+    const start=input.attendance==='NO_SHOW'?shift.scheduledStartAt:new Date(input.startAt??shift.scheduledStartAt.toISOString()),end=input.attendance==='NO_SHOW'?shift.scheduledEndAt:new Date(input.endAt??shift.scheduledEndAt.toISOString())
+    if(Number.isNaN(start.getTime())||Number.isNaN(end.getTime())||input.attendance!=='NO_SHOW'&&(end<=start||end>new Date())||input.attendance==='PARTIAL'&&(!input.startAt||!input.endAt))throw new ApiError(400,'INVALID_ACTUAL','Укажите прошедший период фактической работы.')
+    await tx.workShiftAdjustment.create({data:{shiftId,changedByMemberId:actor.id,previousStartAt:shift.actualStartAt??shift.scheduledStartAt,previousEndAt:shift.actualEndAt??shift.scheduledEndAt,previousBreakMinutes:shift.actualBreakMinutes??shift.breakMinutes,newBreakMinutes:0,newStartAt:start,newEndAt:end,reason:input.reason,kind:"ATTENDANCE",assignmentChange:{before:shift.attendance,after:input.attendance}}})
+    return tx.workShift.update({where:{id:shiftId},data:{attendance:input.attendance,attendanceReason:input.reason,actualStartAt:input.attendance==='NO_SHOW'?null:start,actualEndAt:input.attendance==='NO_SHOW'?null:end,actualBreakMinutes:input.attendance==='NO_SHOW'?null:0}})
+  },{isolationLevel:'Serializable'})
 }
