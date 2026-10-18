@@ -7,8 +7,8 @@ import path from 'node:path'
 import { prisma } from '../src/server/db.ts'
 import { createOrganization } from '../src/server/organizations/organization-service.ts'
 import { locationContext } from '../src/server/organizations/location-context.ts'
-import { buildReport, previewReport, reportWorkbook, reportOptions, reportMembers, saveReportTemplate, deleteReportTemplate, updatePersonnelNumber } from '../src/server/schedule/report-service.ts'
-import { reportBody, reportConfigSchema, templateBody, personnelBody } from '../src/server/schedule/report-schemas.ts'
+import { buildReport, previewReport, reportWorkbook, reportOptions, reportMembers, saveReportTemplate, deleteReportTemplate } from '../src/server/schedule/report-service.ts'
+import { reportBody, reportConfigSchema, templateBody } from '../src/server/schedule/report-schemas.ts'
 import { defaultReportConfig, type ReportInput } from '../src/app/schedule/reporting.ts'
 import { startOfZonedDate, zonedDateTimeToUtc } from '../src/server/schedule/timezone.ts'
 
@@ -104,7 +104,7 @@ describe('accounting export rules and security', { concurrency: false }, () => {
     const all = await buildReport(people.owner.id, orgId, input({ memberIds: [], includeFormer: true }), now)
     assert.equal(all.rows.summary.filter(row => row.memberId === people.anna.memberId).length, 2)
     assert.equal(all.rows.summary.find(row => row.memberId === people.former.memberId)?.status, 'Бывший')
-    assert.ok(all.warnings.missingNumber.some(row => row.id === people.former.memberId))
+    assert.equal('missingNumber' in all.warnings, false)
   })
   it('covers temporary transfers and historical absence scope without inventing absence locations', async () => {
     const transfer = await prisma.locationTransfer.create({ data: { organizationId: orgId, memberId: people.other.memberId, createdByMemberId: people.owner.memberId, fromLocationId: point2, toLocationId: point1, temporary: true, startAt: new Date('2026-10-02'), endAt: new Date('2026-10-04') } })
@@ -124,14 +124,24 @@ describe('accounting export rules and security', { concurrency: false }, () => {
       await prisma.organizationRequest.delete({ where: { id: request.id } })
     }
   })
-  it('stores personnel numbers as optional trimmed organization values and reserves former numbers', async () => {
-    assert.equal(personnelBody.parse({ personnelNumber: ' 0041 ' }).personnelNumber, '0041')
-    assert.equal(personnelBody.parse({ personnelNumber: ' ' }).personnelNumber, null)
-    await updatePersonnelNumber(people.owner.id, orgId, people.former.memberId, '0009')
-    await assert.rejects(updatePersonnelNumber(people.admin.id, orgId, people.ivan.memberId, '0009'), code('PERSONNEL_NUMBER_EXISTS'))
-    await assert.rejects(updatePersonnelNumber(people.admin.id, orgId, people.other.memberId, '0010'), code('INSUFFICIENT_PERMISSIONS'))
-    await assert.rejects(updatePersonnelNumber(people.anna.id, orgId, people.anna.memberId, '0010'), code('INSUFFICIENT_PERMISSIONS'))
-    await updatePersonnelNumber(people.admin.id, orgId, people.ivan.memberId, '0042')
+  it('adapts saved legacy templates and never exports retired personnel data', async () => {
+    const config = defaultReportConfig()
+    config.sheets[0].columns.splice(1, 0, { key: 'personnelNumber', title: 'Старый номер' })
+    const template = await prisma.reportTemplate.create({ data: { organizationId: orgId, createdByMemberId: people.owner.memberId, name: 'Legacy', config } })
+    try {
+      const saved = (await reportOptions(people.owner.id, orgId)).templates.find(item => item.id === template.id)!
+      assert.ok(!saved.config.sheets.some(sheet => sheet.columns.some(column => column.key === 'personnelNumber')))
+      const parsed = reportBody.parse({ ...input(), config })
+      assert.deepEqual(parsed.config, saved.config)
+      const report = await buildReport(people.owner.id, orgId, { ...input(), config }, now)
+      assert.ok(Object.values(report.rows).flat().every(row => !('personnelNumber' in row)))
+      const workbook = new ExcelJS.Workbook()
+      await workbook.xlsx.load(new Uint8Array(await reportWorkbook(report)).buffer)
+      for (const sheet of workbook.worksheets) sheet.eachRow(row => row.eachCell(cell => assert.ok(!/табельн|0041|0042/iu.test(String(cell.value)))))
+      config.sheets[0].columns = [{ key: 'personnelNumber', title: 'Старый номер' }]
+      const adapted = reportConfigSchema.parse(config)
+      assert.deepEqual(adapted.sheets[0].columns.map(column => column.key), ['name'])
+    } finally { await prisma.reportTemplate.delete({ where: { id: template.id } }) }
   })
   it('validates dates, empty sheets, normalized duplicate titles and cross-sheet/unknown keys', () => {
     for (const patch of [{ from: '2026-02-30' }, { from: '2026-99-99' }, { to: '2026-09-01' }, { to: '2028-01-01' }]) assert.equal(reportBody.safeParse({ ...input(), ...patch }).success, false)
@@ -160,21 +170,21 @@ describe('accounting export rules and security', { concurrency: false }, () => {
     await prisma.locationMember.update({ where: { locationId_memberId: { locationId: point1, memberId: people.admin.memberId } }, data: { leftAt: now } })
     try { await assert.rejects(reportOptions(people.admin.id, orgId), code('INSUFFICIENT_PERMISSIONS')); await assert.rejects(buildReport(people.admin.id, orgId, input({ templateId: template.id }), now), code('INSUFFICIENT_PERMISSIONS')); await assert.rejects(deleteReportTemplate(people.admin.id, orgId, template.id), code('INSUFFICIENT_PERMISSIONS')) } finally { await prisma.locationMember.update({ where: { locationId_memberId: { locationId: point1, memberId: people.admin.memberId } }, data: { leftAt: null } }); await deleteReportTemplate(people.owner.id, orgId, template.id) }
   })
-  it('exports custom ordered titles, typed dates/numbers and preserves leading zeroes and literal formulas', async () => {
-    const config = defaultReportConfig(); config.layout = 'table'; config.sheets[0].columns = [{ key: 'personnelNumber', title: '=Код' }, { key: 'name', title: '+Сотрудник' }, { key: 'shifts', title: '-Смен' }, { key: 'hours', title: '@Часы' }, { key: 'locations', title: 'Заведение' }]
+  it('exports custom ordered titles, typed dates/numbers and literal formulas', async () => {
+    const config = defaultReportConfig(); config.layout = 'table'; config.sheets[0].columns = [{ key: 'memberId', title: '=Код' }, { key: 'name', title: '+Сотрудник' }, { key: 'shifts', title: '-Смен' }, { key: 'hours', title: '@Часы' }, { key: 'locations', title: 'Заведение' }]
     const report = await buildReport(people.owner.id, orgId, input({ config }), now), preview = previewReport(report), workbook = new ExcelJS.Workbook()
     await workbook.xlsx.load(new Uint8Array(await reportWorkbook(report)).buffer)
     assert.deepEqual(workbook.worksheets.map(sheet => sheet.name), ['Сводка', 'Смены', 'Отсутствия', 'Параметры'])
     const summary = workbook.getWorksheet('Сводка')!
     assert.deepEqual(Array.from(summary.getRow(1).values as unknown[]).slice(1), ['=Код', '+Сотрудник', '-Смен', '@Часы', 'Заведение'])
-    assert.equal(summary.getCell('A2').value, '0041'); assert.equal(summary.getCell('A3').value, '0042')
+    assert.equal(summary.getCell('A2').value, people.anna.memberId); assert.equal(summary.getCell('A3').value, people.ivan.memberId)
     assert.equal(summary.getCell('D5').value, 28.5); assert.equal(summary.getCell('D2').numFmt, '0.00')
     assert.equal(summary.views[0].state, 'frozen'); assert.ok(summary.autoFilter)
-    assert.ok(workbook.getWorksheet('Смены')!.getCell('F2').value instanceof Date)
-    assert.equal(workbook.getWorksheet('Смены')!.getCell('F2').numFmt, 'dd.mm.yyyy hh:mm')
+    assert.ok(workbook.getWorksheet('Смены')!.getCell('E2').value instanceof Date)
+    assert.equal(workbook.getWorksheet('Смены')!.getCell('E2').numFmt, 'dd.mm.yyyy hh:mm')
     assert.equal(summary.getCell('A2').numFmt, '@')
-    assert.equal(workbook.getWorksheet('Отсутствия')!.getCell('K3').value, '=HYPERLINK("https://example.test")')
-    assert.deepEqual(preview.sheets[0].rows[0], ['0041', 'Смирнова Анна Сергеевна', 1, 8, 'Парк'])
+    assert.equal(workbook.getWorksheet('Отсутствия')!.getCell('J3').value, '=HYPERLINK("https://example.test")')
+    assert.deepEqual(preview.sheets[0].rows[0], [people.anna.memberId, 'Смирнова Анна Сергеевна', 1, 8, 'Парк'])
     assert.equal(summary.getCell('A1').type, ExcelJS.ValueType.String)
     for (const sheet of workbook.worksheets) sheet.eachRow(row => row.eachCell(cell => assert.notEqual(cell.type, ExcelJS.ValueType.Formula)))
   })
@@ -203,9 +213,9 @@ describe('accounting export rules and security', { concurrency: false }, () => {
       assert.equal(sheet.views[0].showGridLines, false)
       assert.equal(sheet.pageSetup.printTitlesRow, '7:7')
     }
-    assert.equal(workbook.getWorksheet('Смены')!.getCell('F8').value instanceof Date, true)
-    assert.equal(workbook.getWorksheet('Смены')!.getCell('F8').numFmt, 'dd.mm.yyyy hh:mm')
-    assert.equal(workbook.getWorksheet('Отсутствия')!.getCell('E8').value instanceof Date, true)
+    assert.equal(workbook.getWorksheet('Смены')!.getCell('E8').value instanceof Date, true)
+    assert.equal(workbook.getWorksheet('Смены')!.getCell('E8').numFmt, 'dd.mm.yyyy hh:mm')
+    assert.equal(workbook.getWorksheet('Отсутствия')!.getCell('D8').value instanceof Date, true)
     assert.ok(!report.config.sheets.some(sheet => sheet.columns.some(column => ['memberId', 'id'].includes(column.key))))
     if (process.env.REPORT_REVIEW_DIR) {
       const sample = structuredClone(report)
@@ -224,7 +234,7 @@ describe('accounting export rules and security', { concurrency: false }, () => {
       for (let day = 2; day <= 26; day++) { if ([5, 7].includes(day)) continue; created.push((await shift('ivan', point1, `2026-10-${String(day).padStart(2, '0')}`, '19:00', '19:01', `2026-10-${String(day).padStart(2, '0')}`, { breakMinutes: 0 })).id) }
       const report = await buildReport(people.owner.id, orgId, input(), now), preview = previewReport(report), workbook = new ExcelJS.Workbook()
       assert.equal(preview.sheets[1].rows.length, 20); assert.equal(preview.sheets[1].total, 27)
-      await workbook.xlsx.load(new Uint8Array(await reportWorkbook(report)).buffer); assert.equal(workbook.getWorksheet('Смены')!.rowCount, 37)
+      await workbook.xlsx.load(new Uint8Array(await reportWorkbook(report)).buffer); assert.equal(workbook.getWorksheet('Смены')!.getColumn(report.config.sheets[1].columns.findIndex(column => column.key === 'start') + 1).values.filter(value => value instanceof Date).length, 27)
       assert.equal(report.metrics.minutes, 1733)
     } finally { await prisma.workShift.deleteMany({ where: { id: { in: created } } }) }
     assert.equal((await buildReport(people.owner.id, orgId, input(), now)).metrics.minutes, 1710)
@@ -232,7 +242,7 @@ describe('accounting export rules and security', { concurrency: false }, () => {
   it('creates empty included sheets with headers and suppresses totals when disabled', async () => {
     const config = defaultReportConfig(); config.totals = false; config.sheets[2].enabled = false
     const report = await buildReport(people.owner.id, orgId, input({ from: '2026-12-01', to: '2026-12-31', config }), now), workbook = new ExcelJS.Workbook()
-    await workbook.xlsx.load(new Uint8Array(await reportWorkbook(report)).buffer); assert.equal(workbook.worksheets.length, 3); assert.equal(workbook.getWorksheet('Сводка')!.rowCount, 10); assert.equal(previewReport(report).sheets[0].totals, null)
+    await workbook.xlsx.load(new Uint8Array(await reportWorkbook(report)).buffer); assert.equal(workbook.worksheets.length, 3); assert.equal(workbook.getWorksheet('Сводка')!.rowCount, 9); assert.equal(previewReport(report).sheets[0].totals, null)
     assert.equal(startOfZonedDate('2026-10-01', 'Asia/Vladivostok').toISOString(), '2026-09-30T14:00:00.000Z')
   })
 })

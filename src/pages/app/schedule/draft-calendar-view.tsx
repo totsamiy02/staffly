@@ -1,9 +1,11 @@
+import MemberProfileLink from '../../../component/ui/member-profile-link.tsx'
+import MemberAvatar from '../../../component/ui/member-avatar.tsx'
+import ActionSurface from '../../../component/ui/action-surface.tsx'
 import { useState } from 'react'
 import type { WorkShift } from '../../../app/schedule/types.ts'
 import type { DraftProposal } from '../../../app/schedule/team-planning-types.ts'
 import { displayDate, shiftCoversDate, shiftTimeRange } from '../../../app/schedule/date-utils.ts'
 import PlanningMonthCalendar from './planning-month-calendar.tsx'
-import Avatar from '../../../component/ui/avatar/avatar.tsx'
 const labels = { KEEP: 'Без изменений', CREATE: 'Новая смена', UPDATE: 'Изменена', CANCEL: 'Будет отменена' }
 type Props = { from: string; to: string; timezone: string; date: string; onDate: (date: string) => void; shifts: WorkShift[]; proposals: DraftProposal[]; manager: boolean; canEdit: boolean; onShift: (shift: WorkShift, proposal?: DraftProposal) => void; onAdd: () => void }
 export default function DraftCalendarView({from,to,timezone,date,onDate,shifts,proposals,manager,canEdit,onShift,onAdd}:Props) {
@@ -23,10 +25,10 @@ export default function DraftCalendarView({from,to,timezone,date,onDate,shifts,p
     <section className="planning-card draft-day-detail"><header><div><h3>{displayDate(date)}</h3><p>{manager?'Предварительные смены команды':'Мои предлагаемые смены'} · {selected.length}</p></div>{canEdit&&<button className="app-primary" onClick={onAdd}>＋ Добавить смену</button>}</header>
       <div className="draft-day-detail__list">{selected.length?selected.map(shift=>{
         const proposal=proposalFor(shift),kind=proposal?.kind??'KEEP'
-        return <button className="draft-day-shift" key={shift.id} onClick={()=>onShift(shift,proposal)}>
-          {manager&&<Avatar name={shift.memberName} url={shift.memberAvatarUrl} className="draft-person-avatar"/>}
-          <span>{manager&&<strong>{shift.memberName}</strong>}<b>{shiftTimeRange(shift.scheduledStartAt,shift.scheduledEndAt,timezone,date)}</b><small>{shift.positionName??'Без должности'}</small><span className={`draft-status draft-shift--${kind.toLowerCase()}`}>{labels[kind]}</span></span><span aria-hidden="true">›</span>
-        </button>
+        return <ActionSurface aria-label={`Открыть предварительную смену ${shift.memberName}`} className="draft-day-shift" key={shift.id} onClick={()=>onShift(shift,proposal)}>
+          {manager&&<MemberAvatar memberId={shift.memberId} name={shift.memberName} url={shift.memberAvatarUrl} className="draft-person-avatar"/>}
+          <span className="draft-day-shift__copy">{manager&&<MemberProfileLink memberId={shift.memberId}><strong>{shift.memberName}</strong></MemberProfileLink>}<b>{shiftTimeRange(shift.scheduledStartAt,shift.scheduledEndAt,timezone,date)}</b><small>{shift.positionName??'Без должности'}</small><span className={`draft-status draft-shift--${kind.toLowerCase()}`}>{labels[kind]}</span></span>
+        </ActionSurface>
       }):<p className="planning-empty">{manager?'На эту дату смен пока нет.':'На этот день вам не назначены смены в предварительном графике.'}</p>}</div>
     </section>
   </div>

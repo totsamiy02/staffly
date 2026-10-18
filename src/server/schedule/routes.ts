@@ -1,4 +1,5 @@
 import { setShiftAttendance } from './service.ts'
+import { getTimeCorrection, saveTimeCorrection, timeCorrectionBody } from './time-correction-service.ts'
 import { offerBody, offerModesBody, offerListQuery, offerActionBody, getOfferModes, saveOfferModes, offerCandidates, createOffer, listOffers, getOffer, actOnOffer } from './offer-service.ts'
 import { reportSickness, listAbsences, changeAbsence, absenceReportBody, absenceEditBody, absenceCancelBody, absenceListQuery } from './absence-service.ts'
 import { planningData, savePosition, saveTemplate, assignPositions, saveWorkload, positionBody, templateBody, assignmentBody, workloadBody } from './planning.ts'
@@ -16,6 +17,15 @@ import { listCancelledShifts } from './service.ts'
 const router = Router()
 const mutationLimiter = rateLimit({ windowMs: 60 * 1000, limit: 120, standardHeaders: 'draft-8', legacyHeaders: false, message: { code: 'TOO_MANY_REQUESTS', message: 'Слишком много изменений. Попробуйте через минуту.' } })
 router.use(requireAuth)
+
+router.get('/organizations/:organizationId/schedule/shifts/:shiftId/time-correction', async (request, response) => {
+  const { organizationId, shiftId } = parse(shiftParams, request.params)
+  response.set('Cache-Control', 'private, no-store').json(await getTimeCorrection(auth(request).userId, organizationId, shiftId))
+})
+router.post('/organizations/:organizationId/schedule/shifts/:shiftId/time-correction', mutationLimiter, async (request, response) => {
+  const { organizationId, shiftId } = parse(shiftParams, request.params)
+  response.json({ shift: await saveTimeCorrection(auth(request).userId, organizationId, shiftId, parse(timeCorrectionBody, request.body)) })
+})
 
 router.get('/organizations/:organizationId/schedule/offer-settings', async (request, response) => {
   const { organizationId } = parse(organizationParams, request.params)

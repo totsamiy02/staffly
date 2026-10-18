@@ -31,7 +31,7 @@ export default function NotificationItem({ item, now, compact = false, floating 
       <div className="notification-item__source"><span>{[showOrganization ? item.organization.name : '', item.locationName || (!showOrganization ? notificationTypeLabel(item.type) : '')].filter(Boolean).join(' · ')}</span></div>
       {state && !floating && <span className={`notification-status notification-status--${appearance.tone}`}>{state}</span>}
       {active && !floating && <div className="notification-item__actions"><button type="button" className="app-primary app-primary--small" disabled={busy} onClick={() => onInvite(item.id, 'accept')}>Принять</button><button type="button" className="app-secondary" disabled={busy} onClick={() => onInvite(item.id, 'reject')}>Отклонить</button></div>}
-      {item.href && (floating || (!compact && item.shiftOfferId)) && <div className="notification-item__actions"><Link className="notification-item__cta" to={item.href} onClick={interact}>{notificationActionLabel(item)}<span aria-hidden="true">→</span></Link></div>}
+      {item.href && (floating || (!compact && item.shiftOfferId)) && <div className="notification-item__actions"><Link className="notification-item__cta" to={item.href} onClick={interact}>{notificationActionLabel(item)}</Link></div>}
     </div>
   </article>
 }

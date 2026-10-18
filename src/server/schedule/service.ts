@@ -46,7 +46,7 @@ export async function activeTarget(tx: Prisma.TransactionClient | typeof prisma,
   const locationId = scopedLocationId(organizationId)
   if (locationId && member.role !== 'OWNER') {
     const permanent = await tx.locationMember.findFirst({ where: { locationId, memberId, leftAt: null } })
-    const temporary = startAt && endAt ? await tx.locationTransfer.findFirst({ where: { organizationId, memberId, toLocationId: locationId, temporary: true, startAt: { lte: startAt }, endAt: { gte: endAt } } }) : await tx.locationTransfer.findFirst({ where: { organizationId, memberId, toLocationId: locationId, temporary: true, endAt: { gt: new Date() } } })
+    const temporary = startAt && endAt ? await tx.locationTransfer.findFirst({ where: { organizationId, memberId, toLocationId: locationId, temporary: true, revokedAt: null, startAt: { lte: startAt }, endAt: { gte: endAt } } }) : await tx.locationTransfer.findFirst({ where: { organizationId, memberId, toLocationId: locationId, temporary: true, revokedAt: null, endAt: { gt: new Date() } } })
     if (!permanent && !temporary) throw new ApiError(400, 'MEMBER_NOT_IN_LOCATION', 'Сотрудник не назначен в эту точку на период смены.')
   }
   return member
@@ -255,7 +255,7 @@ export async function getShift(userId: string, organizationId: string, shiftId: 
   if (!shift) throw new ApiError(404, 'SHIFT_NOT_FOUND', 'Смена не найдена.')
   requirePermission(actor, shift.memberId === actor.id ? 'schedule.own' : 'schedule.view')
   const total = shift._count.adjustments
-  return { ...publicShift(shift), adjustments: shift.adjustments.map((item) => ({ ...item, changedByName: displayName(item.changedByMember.user) })), adjustmentPagination: { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) } }
+  return { ...publicShift(shift), adjustments: shift.adjustments.map((item) => ({ ...item, assignmentChange: ['TRANSFER', 'SWAP'].includes(item.kind) ? item.assignmentChange : null, timeCorrection: item.kind === 'TIME_CORRECTION' ? item.assignmentChange : null, changedByName: displayName(item.changedByMember.user) })), adjustmentPagination: { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) } }
 }
 
 export async function cancelShift(userId: string, organizationId: string, shiftId: string, reason: string) {
@@ -313,6 +313,7 @@ export async function mutatePlannedShift(tx: Prisma.TransactionClient, actor: Aw
   if (!startAt || !endAt) throw new ApiError(400, 'SHIFT_RANGE', 'Укажите время смены.')
   validateDuration(startAt, endAt, input.breakMinutes)
   await activeTarget(tx, actor.organizationId, input.memberId, startAt, endAt)
+  if (current && (current.actualStartAt || current.actualEndAt)) validateDuration(current.actualStartAt ?? startAt, current.actualEndAt ?? endAt, current.actualBreakMinutes ?? 0)
   await assertNoApprovedAbsence(actor.organizationId, input.memberId, startAt, endAt, actor.organization.timezone, tx, input.acknowledgeAbsence)
   const position = input.positionId ? await tx.organizationPosition.findFirst({ where: { id: input.positionId, organizationId: actor.organizationId, isActive: true, members: { some: { memberId: input.memberId } } } }) : null
   if (input.positionId && !position) throw new ApiError(400, 'POSITION_NOT_ASSIGNED', 'Должность не назначена сотруднику или неактивна.')

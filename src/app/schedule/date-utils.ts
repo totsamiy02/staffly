@@ -16,13 +16,13 @@ export function monthKeyInZone(date: Date, timezone: string) {
   return `${get('year')}-${get('month')}`
 }
 
-export function calendarRange(month: string) {
+export function calendarRange(month: string, fixedWeeks = false) {
   const [year, number] = month.split('-').map(Number)
   const first = new Date(Date.UTC(year, number - 1, 1))
   const mondayOffset = (first.getUTCDay() + 6) % 7
   first.setUTCDate(first.getUTCDate() - mondayOffset)
   const daysInMonth = new Date(Date.UTC(year, number, 0)).getUTCDate()
-  const dayCount = Math.ceil((mondayOffset + daysInMonth) / 7) * 7
+  const dayCount = fixedWeeks ? 42 : Math.ceil((mondayOffset + daysInMonth) / 7) * 7
   const last = new Date(first)
   last.setUTCDate(last.getUTCDate() + dayCount)
   return { from: dateKey(first), to: dateKey(last), days: Array.from({ length: dayCount }, (_, index) => addDays(dateKey(first), index)) }

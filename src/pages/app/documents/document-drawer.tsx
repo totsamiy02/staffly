@@ -1,3 +1,5 @@
+import MemberAvatar from '../../../component/ui/member-avatar.tsx'
+import MemberProfileLink from '../../../component/ui/member-profile-link.tsx'
 import FilePreview from '../../../component/ui/file-preview/file-preview.tsx'
 import DocumentActionsMenu from './document-actions-menu.tsx'
 import { liveQueryOptions } from '../../../app/live-query.ts'
@@ -5,7 +7,6 @@ import { useToast } from '../../../component/ui/toast/toast-context.ts'
 import { useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { useAuth } from '../../../app/auth/auth-context.tsx'
-import Avatar from '../../../component/ui/avatar/avatar.tsx'
 import type { DocumentItem, Folder, Recipient } from '../../../app/documents/types.ts'
 import { documentPath, sizeLabel, stateLabels, visibilityLabels } from '../../../app/documents/types.ts'
 import { useDocumentRefresh } from '../../../app/documents/queries.ts'
@@ -22,9 +23,9 @@ export default function DocumentDrawer({ organizationId, documentId, manager, po
   const [error, setError] = useState(''), [fileAction, setFileAction] = useState<'download' | null>(null)
   const [showRecipients, setShowRecipients] = useState(false), [progressPage, setProgressPage] = useState(1), [confirmCancel, setConfirmCancel] = useState<string | null>(null)
   const fileBusy = fileAction !== null
-  const progress = useQuery({ ...liveQueryOptions, queryKey: ['document-progress', organizationId, documentId, progressPage, locationId], queryFn: () => apiRequest<{ recipients: Recipient[]; pagination: { pages: number; total: number } }>(`${documentPath(organizationId, documentId)}/progress?page=${progressPage}${pointId ? `&locationId=${pointId}` : ''}`), enabled: manager && Boolean(doc.data?.document.canControl) && showRecipients && Boolean(doc.data), retry: false })
-  const ack = useMutation({ mutationFn: () => apiRequest(`${documentPath(organizationId, documentId)}/acknowledge`, { method: 'POST' }), onSuccess: async () => { await refresh(); toast('Ознакомление подтверждено.') } })
-  const cancel = useMutation({ mutationFn: (id: string) => apiRequest(`${documentPath(organizationId, documentId)}/acknowledgements/${id}/cancel`, { method: 'POST' }), onSuccess: async () => { setConfirmCancel(null); await refresh() } })
+  const progress = useQuery({ ...liveQueryOptions, queryKey: ['document-progress', organizationId, documentId, progressPage, pointId ?? locationId], queryFn: () => apiRequest<{ recipients: Recipient[]; pagination: { pages: number; total: number } }>(`${documentPath(organizationId, documentId)}/progress?page=${progressPage}${pointId ? `&locationId=${pointId}` : ''}`), enabled: manager && Boolean(doc.data?.document.canControl) && showRecipients && Boolean(doc.data), retry: false })
+  const ack = useMutation({ mutationFn: () => apiRequest(`${documentPath(organizationId, documentId)}/acknowledge${pointId ? `?locationId=${pointId}` : ''}`, { method: 'POST' }), onSuccess: async () => { await refresh(); toast('Ознакомление подтверждено.') } })
+  const cancel = useMutation({ mutationFn: (id: string) => apiRequest(`${documentPath(organizationId, documentId)}/acknowledgements/${id}/cancel${pointId ? `?locationId=${pointId}` : ''}`, { method: 'POST' }), onSuccess: async () => { setConfirmCancel(null); await refresh() } })
   async function openFile() {
     if (fileBusy) return
     setFileAction('download'); setError('')
@@ -49,7 +50,7 @@ export default function DocumentDrawer({ organizationId, documentId, manager, po
     <p className="document-recipients-title">{item.displayName}</p>
     {activeProgress && <div className="document-progress__summary"><span>Ознакомились: {activeProgress.acknowledged} из {activeProgress.total}</span><span>Ожидают: {activeProgress.total - activeProgress.acknowledged}</span></div>}
     {progress.isLoading ? <div className="app-state" role="status"><span className="app-spinner" />Загружаем статусы…</div> : progress.isError ? <div className="app-state" role="alert"><p>Не удалось загрузить статусы.</p><button className="app-secondary" onClick={() => void progress.refetch()}>Повторить</button></div> : !progress.data?.recipients.some(recipient => !recipient.cancelledAt) ? <p>Активных назначений нет.</p> : progress.data.recipients.filter(recipient => !recipient.cancelledAt).map(recipient => <article className="document-recipient" key={recipient.id}>
-      <Avatar className="app-avatar document-avatar" url={recipient.member.avatarUrl} name={recipient.member.name} /><div><strong>{recipient.member.name}{recipient.member.former ? ' · бывший сотрудник' : ''}</strong><span>{stateLabels[recipient.state]}</span>{recipient.acknowledgedAt && <small>{new Date(recipient.acknowledgedAt).toLocaleString('ru-RU')}</small>}</div>
+      <MemberAvatar memberId={recipient.member.id} locationId={pointId ?? undefined} className="app-avatar document-avatar" url={recipient.member.avatarUrl} name={recipient.member.name} /><div><strong><MemberProfileLink memberId={recipient.member.id} locationId={pointId ?? undefined}>{recipient.member.name}</MemberProfileLink>{recipient.member.former ? ' · бывший сотрудник' : ''}</strong><span>{stateLabels[recipient.state]}</span>{recipient.acknowledgedAt && <small>{new Date(recipient.acknowledgedAt).toLocaleString('ru-RU')}</small>}</div>
       {!recipient.cancelledAt && !recipient.acknowledgedAt && <button className="app-secondary" disabled={cancel.isPending} onClick={() => setConfirmCancel(recipient.id)}>Отменить</button>}
       {confirmCancel === recipient.id && <div className="document-cancel-confirm"><p>Отменить требование? История сохранится.</p><button className="app-primary" disabled={cancel.isPending} onClick={() => cancel.mutate(recipient.id)}>Да, отменить</button><button className="app-secondary" disabled={cancel.isPending} onClick={() => setConfirmCancel(null)}>Назад</button></div>}
     </article>)}

@@ -331,7 +331,7 @@ export async function validateDraft(userId:string,organizationId:string,id:strin
 async function refreshRecipients(tx:DB,_actor:Actor,d:ScheduleDraft) {
   const rows=await tx.draftShift.findMany({where:{draftId:d.id}}), proposals=rows.map(proposal)
   const from=startOfZonedDate(dateText(d.fromDate),d.timezone),to=startOfZonedDate(addCalendarDays(dateText(d.toDate),1),d.timezone)
-  const members=await tx.organizationMember.findMany({where:{organizationId:d.organizationId,leftAt:null,user:{deletedAt:null},OR:[{locationMemberships:{some:{locationId:d.locationId,leftAt:null}}},{locationTransfers:{some:{toLocationId:d.locationId,temporary:true,startAt:{lt:to},endAt:{gt:from}}}}]},select:{id:true}})
+  const members=await tx.organizationMember.findMany({where:{organizationId:d.organizationId,leftAt:null,user:{deletedAt:null},OR:[{locationMemberships:{some:{locationId:d.locationId,leftAt:null}}},{locationTransfers:{some:{toLocationId:d.locationId,temporary:true,revokedAt:null,startAt:{lt:to},endAt:{gt:from}}}}]},select:{id:true}})
   const eligible=new Set(members.map(m=>m.id))
   for(const p of proposals) for(const s of [p.source,p.proposed]) if(s) {try{await activeTarget(tx,d.organizationId,s.memberId,new Date(s.scheduledStartAt),new Date(s.scheduledEndAt));eligible.add(s.memberId)}catch(error){if(!(error instanceof ApiError))throw error}}
   const current=await tx.draftRecipient.findMany({where:{draftId:d.id}}),known=new Set(current.map(r=>r.memberId))

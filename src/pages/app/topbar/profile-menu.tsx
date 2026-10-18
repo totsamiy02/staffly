@@ -1,3 +1,5 @@
+import MemberAvatar from '../../../component/ui/member-avatar.tsx'
+import { useMemberProfile } from '../../../app/member-profile/context.tsx'
 import RoleBadge from '../../../component/ui/role-badge/role-badge.tsx'
 import { Link, useLocation } from 'react-router-dom'
 import type { AuthUser } from '../../../app/auth/auth-context.tsx'
@@ -20,6 +22,7 @@ type ProfileMenuProps = {
 
 
 export default function ProfileMenu({ user, organization, open, busy, onToggle, onClose, onLogout }: ProfileMenuProps) {
+  const profile = useMemberProfile()
   const location = useLocation()
   const initial = user.displayName.slice(0, 1).toUpperCase()
   return <div className="topbar-popover-host">
@@ -29,8 +32,8 @@ export default function ProfileMenu({ user, organization, open, busy, onToggle, 
       <span className="topbar-profile-trigger__chevron"><ChevronIcon /></span>
     </button>
     {open && <section className="topbar-popover topbar-popover--profile" aria-label="Профиль пользователя">
-      <div className="profile-preview"><Avatar url={user.avatarUrl} name={initial} className="app-avatar profile-preview__avatar" eager /><div><strong>{user.displayName}</strong><span>{user.email}</span>{organization && <small><RoleBadge role={organization.organizationRole ?? organization.role} /> в «{organization.name}»</small>}</div></div>
-      <nav><Link to={organization ? `/app/organizations/${organization.id}/documents?section=mine` : "/app/settings?section=documents"} state={{ returnTo: location.pathname + location.search }} onClick={onClose}><span>Мои документы</span><small>{organization ? 'Личные документы этой организации' : 'Личные документы по организациям'}</small></Link><Link to="/app/settings" state={{ returnTo: location.pathname + location.search }} onClick={onClose}><span>Настройки профиля</span><small>Пароль и данные аккаунта</small></Link></nav>
+      <div className="profile-preview">{organization?.viewerMemberId ? <MemberAvatar memberId={organization.viewerMemberId} url={user.avatarUrl} name={user.displayName} className="app-avatar profile-preview__avatar" eager /> : <Avatar url={user.avatarUrl} name={initial} className="app-avatar profile-preview__avatar" eager />}<div><strong>{user.displayName}</strong><span>{user.email}</span>{organization && <small><RoleBadge role={organization.organizationRole ?? organization.role} /> в «{organization.name}»</small>}</div></div>
+      <nav>{organization?.viewerMemberId && profile && <button type="button" className="profile-menu-member" onClick={() => { onClose(); profile.open(organization.viewerMemberId!) }}><span>Мой профиль в организации</span><small>{organization.name} · смены, документы и заявки</small></button>}<Link to={organization ? `/app/organizations/${organization.id}/documents?section=mine` : "/app/settings?section=documents"} state={{ returnTo: location.pathname + location.search }} onClick={onClose}><span>Мои документы</span><small>{organization ? 'Личные документы этой организации' : 'Личные документы по организациям'}</small></Link><Link to="/app/settings" state={{ returnTo: location.pathname + location.search }} onClick={onClose}><span>Настройки профиля</span><small>Пароль и данные аккаунта</small></Link></nav>
       <button className="profile-preview__logout" type="button" disabled={busy} onClick={onLogout}>{busy ? 'Выходим…' : 'Выйти из аккаунта'}</button>
     </section>}
   </div>

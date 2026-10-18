@@ -30,21 +30,6 @@
   .report-sheet-hint { margin: 8px 0 10px; }
   .report-sheet-nav { display: flex; gap: 22px; align-items: stretch; overflow-x: auto; max-width: 100%; min-width: 0; }
   .report-sheet-tab { display: flex; align-items: center; flex-shrink: 0; gap: 8px; position: relative; padding: 0 2px; button { min-height: 40px; padding: 0 0 12px; margin-top: 12px; font-size: 13px; border: 0; background: transparent; cursor: pointer; white-space: nowrap; } input { margin-top: -1px; } &.is-active::after { position: absolute; bottom: 0; left: 28px; right: 0; height: 2px; background: #111; content: ''; } &.is-active button { font-weight: 650; } }
-  .report-table-scroll { overflow: auto; max-height: 350px; min-width: 0; border: 1px solid #e5e6e9; border-radius: 9px; overscroll-behavior-x: contain; scrollbar-width: thin;
-    table { border-collapse: separate; border-spacing: 0; width: 100%; text-align: left; font-size: 12px; }
-    th, td { padding: 14px 12px; border-bottom: 1px solid #e8e9ec; vertical-align: middle; min-width: 100px; max-width: 340px; line-height: 1.6; }
-    th { background: #f4f4f6; position: sticky; top: 0; z-index: 1; font-weight: 500; font-size: 11px; line-height: 1.5; }
-    td { white-space: pre-wrap; overflow-wrap: break-word; }
-    tbody tr:last-child td { border-bottom: 0; }
-    tfoot td { border-top: 1px solid #e8e9ec; border-bottom: 0; font-weight: 650; background: #fff; }
-    .report-cell--hours, .report-cell--number { text-align: right; min-width: 76px; }
-    [data-field=name] { min-width: 172px; }
-    [data-field=memberId], [data-field=id] { min-width: 165px; }
-    [data-field=personnelNumber] { min-width: 110px; white-space: nowrap; }
-    [data-field=positions] { min-width: 150px; }
-    [data-field=value], [data-field=comment] { min-width: 270px; }
-    .report-cell--datetime, .report-cell--date { white-space: nowrap; }
-  }
   .report-id { display: flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 11px; >span { cursor: help; } button { width: 28px; height: 28px; display: grid; place-items: center; border: 0; border-radius: 5px; background: transparent; color: #787d86; cursor: pointer; &:hover { background: #f0f0f0; color: #111; } } svg { width: 15px; height: 15px; } }
   .report-empty { color: #858891; }
   .report-empty-period { margin: 0; color: #666; font-size: 13px; }
@@ -79,5 +64,18 @@
   .report-dialog.document-dialog { width: calc(100vw - 24px); max-height: calc(100dvh - 24px); >.report-header { gap: 14px; padding: 18px; flex-wrap: wrap; } .report-heading { flex-basis: calc(100% - 60px); } .report-close { order: 1; } .report-header .staffly-segmented { order: 2; width: fit-content; } .report-standard-layout { grid-template-columns: 1fr; } .report-sidebar { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 18px; border: 0; border-bottom: 1px solid #e7e7e7; >h3, .report-location-list, .report-rules { grid-column: 1 / -1; } .report-former { grid-column: 2; } } .report-points { grid-template-columns: 1fr 1fr; >label:first-child { grid-column: 1 / -1; } } .report-rules ul { grid-template-columns: 1fr 1fr; gap: 10px 18px; } .report-preview { padding: 20px 18px; } .report-custom-layout { padding: 18px 18px 0; } .report-workspace { grid-template-columns: minmax(0, 1fr); gap: 20px; } .report-editor { padding: 0 0 18px; border: 0; border-bottom: 1px solid #e7e7e7; } .report-workspace .report-preview { padding: 0 0 20px; } .report-columns { max-height: 320px; } .report-column { grid-template-columns: 16px 18px minmax(0, 1fr) 36px 36px; button { min-height: 36px; } } .report-custom-sheets { display: block; .report-label { display: block; padding-top: 12px; } } .report-footer { padding: 14px 18px; } }
 }
 @media (max-width: 520px) {
-  .report-dialog.document-dialog { width: 100vw; max-height: 100dvh; border-radius: 0; >.report-header { padding: 16px; gap: 12px; } .report-heading h2 { font-size: 22px; } .report-heading p { font-size: 12px; } .report-header .staffly-segmented { width: 100%; margin: 0; >button { flex: 1; font-size: 12px; min-height: 38px; } } .report-sidebar { display: flex; padding: 18px 16px; gap: 16px; } .report-period { gap: 10px; } .report-points { grid-template-columns: 1fr; gap: 12px; } .report-rules { padding-top: 16px; } .report-rules ul { grid-template-columns: 1fr; margin-top: 12px; } .report-preview { padding: 18px 16px; gap: 14px; } .report-metrics { gap: 8px 0; font-size: 10px; span { padding-inline: 8px; } strong { font-size: 15px; } } .report-sheet-nav { gap: 18px; } .report-sheet-tab button { font-size: 12px; min-height: 44px; } .report-table-scroll { max-height: 300px; th,td { padding: 12px 10px; } } .report-checks { padding: 12px; h3 { font-size: 15px; } } .report-custom-layout { padding: 16px 16px 0; gap: 16px; } .report-custom-filters { grid-template-columns: minmax(0, 1fr); gap: 14px; .report-former { margin-top: 0; } } .report-templates { display: grid; grid-template-columns: 1fr; label { min-width: 0; } .app-secondary { justify-self: stretch; } } .report-location-popover { width: 100%; max-width: 100%; } .report-column { gap: 6px; grid-template-columns: 12px 18px minmax(0,1fr) 34px 34px; } .report-rules-inline p { font-size: 11px; } .report-footer { flex-direction: column; align-items: stretch; padding: 10px 16px max(12px, env(safe-area-inset-bottom)); gap: 8px; small { font-size: 10px; } >div { display: grid; grid-template-columns: 1fr 1.4fr; gap: 10px; } button { min-height: 44px; font-size: 12px; padding-inline: 10px; } } }
+  .report-dialog.document-dialog { width: 100%; max-width:100%; max-height: 100dvh; border-radius: 0; >.report-header { padding: 16px; gap: 12px; } .report-heading h2 { font-size: 22px; } .report-heading p { font-size: 12px; } .report-header .staffly-segmented { width: 100%; margin: 0; >button { flex: 1; font-size: 12px; min-height: 38px; } } .report-sidebar { display: flex; padding: 18px 16px; gap: 16px; } .report-period { gap: 10px; } .report-points { grid-template-columns: 1fr; gap: 12px; } .report-rules { padding-top: 16px; } .report-rules ul { grid-template-columns: 1fr; margin-top: 12px; } .report-preview { padding: 18px 16px; gap: 14px; } .report-metrics { gap: 8px 0; font-size: 10px; span { padding-inline: 8px; } strong { font-size: 15px; } } .report-sheet-nav { gap: 18px; } .report-sheet-tab button { font-size: 12px; min-height: 44px; } .report-checks { padding: 12px; h3 { font-size: 15px; } } .report-custom-layout { padding: 16px 16px 0; gap: 16px; } .report-custom-filters { grid-template-columns: minmax(0, 1fr); gap: 14px; .report-former { margin-top: 0; } } .report-templates { display: grid; grid-template-columns: 1fr; label { min-width: 0; } .app-secondary { justify-self: stretch; } } .report-location-popover { width: 100%; max-width: 100%; } .report-column { gap: 6px; grid-template-columns: 12px 18px minmax(0,1fr) 34px 34px; } .report-rules-inline p { font-size: 11px; } .report-footer { flex-direction: column; align-items: stretch; padding: 10px 16px max(12px, env(safe-area-inset-bottom)); gap: 8px; small { font-size: 10px; } >div { display: grid; grid-template-columns: 1fr 1.4fr; gap: 10px; } button { min-height: 44px; font-size: 12px; padding-inline: 10px; } } }
 }
+.report-dialog.document-dialog .report-workbook {height:440px;border:1px solid #e1e1e6;border-radius:10px;overflow:hidden;margin-bottom:14px;
+ &:fullscreen {height:100dvh;border-radius:0;}
+ .file-preview-sheet-select {display:flex;align-items:center;gap:10px;}
+ .file-preview-table {font-size:12px;line-height:1.5;th,td{padding:8px 10px;}thead th{background:#f1f1f3;}td{vertical-align:top;}}
+ .report-workbook-headings td {background:#f4f4f6;font-weight:600;}
+ .report-workbook-totals td {background:#eeedf2;font-weight:650;}
+ .report-cell--hours,.report-cell--number{text-align:right;font-variant-numeric:tabular-nums;}
+ .report-cell--date,.report-cell--datetime{white-space:nowrap;}
+ .file-preview-table-footer {color:#777b85;font-size:11px;}
+ .file-preview-sheets button[aria-pressed=true] {background:#fff;color:#111;border-bottom-color:#222;}
+ .file-preview-toolbar label {font-size:12px;font-weight:400;}
+}
+@media(max-width:520px){.report-dialog.document-dialog .report-workbook{height:410px;}}

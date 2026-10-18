@@ -1,0 +1,3 @@
+export default function RequestIcon({ code }: { code?: string | null }) {
+  return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{code === 'VACATION' ? <><path d="m3 10 7 2 6-8 3 1-4 8 6 4-2 2-7-3-4 5-2-1 2-6-6-2Z" /></> : code === 'SICK' || code === 'SICK_LEAVE' ? <><rect x="5" y="5" width="14" height="16" rx="2" /><path d="M9 5V3h6v2M9 12h6m-3-3v6" /></> : code === 'ABSENCE' ? <><circle cx="12" cy="12" r="9" /><path d="M8 12h8" /></> : <><rect x="4" y="5" width="16" height="16" rx="2" /><path d="M8 3v4m8-4v4M4 11h16m-10 5h4" /></>}</svg>
+}

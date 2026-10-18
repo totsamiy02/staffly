@@ -1,3 +1,4 @@
+import { mediaUrl } from '../storage/image-service.ts'
 import { normalizePermissions } from '../../app/access/catalog.ts'
 import { z } from 'zod'
 import { prisma } from '../db.ts'
@@ -52,11 +53,11 @@ export async function deleteAccessRole(userId: string, org: string, id: string, 
 export async function memberAccess(userId: string, org: string, memberId: string) {
   const actor = await getMembership(userId, org)
   if (!actor.owner && actor.id !== memberId) throw new ApiError(403, 'OWNER_REQUIRED', 'Итоговый доступ сотрудников видит владелец.')
-  const target = await prisma.organizationMember.findFirst({ where: { id: memberId, organizationId: org, leftAt: null }, include: { _count:{select:{locationMemberships:true}}, accessAssignments: true, locationMemberships: { where: { leftAt: null } }, user: { select: { firstName: true, lastName: true, email: true } } } })
+  const target = await prisma.organizationMember.findFirst({ where: { id: memberId, organizationId: org, leftAt: null }, include: { _count:{select:{locationMemberships:true}}, accessAssignments: true, locationMemberships: { where: { leftAt: null } }, user: { select: { firstName: true, lastName: true, middleName: true, avatarFileId: true, email: true } } } })
   if (!target) throw new ApiError(404, 'MEMBER_NOT_FOUND', 'Сотрудник не найден.')
   const roles = await ensureAccessRoles(prisma, org), locations = await prisma.organizationLocation.findMany({ where: { organizationId: org, archivedAt: null }, select: { id: true, name: true } })
   const assignments = target.accessConfigured ? target.accessAssignments : target.locationMemberships.map(l => ({ locationId: l.locationId, roleId: roles.find(r => r.systemCode === l.role)!.id }))
-  return { organizationRoleId: target.accessRoleId, assignments, owner: target.role === 'OWNER', member: target.user, locations, access: resolveAccess(target, roles, locations.map(l => l.id)), roles }
+  return { organizationRoleId: target.accessRoleId, assignments, owner: target.role === 'OWNER', member: { firstName: target.user.firstName, lastName: target.user.lastName, middleName: target.user.middleName, email: target.user.email, avatarUrl: mediaUrl(target.user.avatarFileId) }, locations, access: resolveAccess(target, roles, locations.map(l => l.id)), roles }
 }
 export async function saveMemberAccess(userId: string, org: string, memberId: string, data: z.infer<typeof accessAssignmentBody>) {
   await prisma.$transaction(async db => {

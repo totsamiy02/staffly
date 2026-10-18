@@ -6,7 +6,8 @@ export type DB = Prisma.TransactionClient
 export type PermissionActor = { id: string; organizationId: string; organizationRole?: string; role: string; locationId?: string; permissions?: string[]; organizationPermissions?: string[]; permissionLocations?: Record<string, string[]>; accessRoleId?: string | null; accessAssignments?: Array<{ locationId: string; roleId: string }>; owner?: boolean; accessSystemCode?: string | null }
 export async function ensureAccessRoles(db: DB, organizationId: string) {
   if (!await db.accessRole.count({ where: { organizationId } })) await db.accessRole.createMany({ data: (['OWNER','ADMIN','MEMBER'] as const).map(systemCode => ({ organizationId, systemCode, name: systemRoleNames[systemCode], permissions: recommendedPermissions[systemCode] })), skipDuplicates: true })
-  return db.accessRole.findMany({ where: { organizationId }, orderBy: [{ systemCode: 'asc' }, { createdAt: 'asc' }] })
+  const roles = await db.accessRole.findMany({ where: { organizationId }, orderBy: [{ systemCode: 'asc' }, { createdAt: 'asc' }] })
+  return roles.map(role => ({ ...role, permissions: role.permissions.filter(key => (permissionKeys as readonly string[]).includes(key)) }))
 }
 export function hasPermission(actor: PermissionActor, key: Permission, locationId: string | null | undefined = actor.locationId) {
   if (actor.owner || actor.organizationRole === 'OWNER' || actor.role === 'OWNER') return true

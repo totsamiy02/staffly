@@ -1,7 +1,7 @@
 @use './styles/reset';
 @use './styles/controls';
 
-html { scroll-behavior: smooth; scrollbar-color: #aaa transparent; scrollbar-width: thin; }
+html { scrollbar-gutter:stable; scroll-behavior: smooth; scrollbar-color: #aaa transparent; scrollbar-width: thin; }
 * { scrollbar-color: #aaa transparent; scrollbar-width: thin; }
 *::-webkit-scrollbar { width: 8px; height: 8px; }
 *::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 999px; background: #aaa; background-clip: padding-box; }

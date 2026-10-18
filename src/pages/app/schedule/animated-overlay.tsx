@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 
+const overlayStack: symbol[] = []
+
 type Props = {
   variant: 'modal' | 'drawer'
   className?: string
@@ -9,6 +11,8 @@ type Props = {
 }
 
 export default function AnimatedOverlay({ variant, className = '', dismissible = true, onClose, children }: Props) {
+  const identity = useRef(Symbol())
+  useEffect(() => { const id = identity.current; overlayStack.push(id); return () => { const index = overlayStack.indexOf(id); if (index >= 0) overlayStack.splice(index, 1) } }, [])
   const [closing, setClosing] = useState(false)
   const closeTimer = useRef<number | null>(null)
   const requestClose = useCallback(() => {
@@ -20,7 +24,7 @@ export default function AnimatedOverlay({ variant, className = '', dismissible =
   useEffect(() => () => { if (closeTimer.current !== null) window.clearTimeout(closeTimer.current) }, [])
 
   useEffect(() => {
-    function escape(event: KeyboardEvent) { if (event.key === 'Escape') requestClose() }
+    function escape(event: KeyboardEvent) { if (event.key === 'Escape' && !event.defaultPrevented && overlayStack.at(-1) === identity.current) requestClose() }
     document.addEventListener('keydown', escape)
     return () => document.removeEventListener('keydown', escape)
   }, [requestClose])

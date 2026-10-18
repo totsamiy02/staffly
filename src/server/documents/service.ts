@@ -408,3 +408,20 @@ export async function previewDocumentAudience(userId: string, organizationId: st
     return { members: result }
   })
 }
+
+/** Member profile uses exactly the library's current audience and ancestor-folder checks. */
+export async function listMemberProfileDocuments(userId: string, organizationId: string, memberId: string, kind: 'personal' | 'acknowledgements', page = 1, pendingOnly = false) {
+  return transaction(userId, organizationId, async (tx, actor) => {
+    if (!await tx.organizationMember.findFirst({ where: { organizationId, id: memberId, user: { deletedAt: null } }, select: { id: true } })) throw new ApiError(404, 'MEMBER_NOT_FOUND', 'Сотрудник не найден.')
+    const own = actor.id === memberId
+    const folders = await allowedFolders(tx, actor)
+    const permission: Permission = kind === 'personal' ? 'documents.personal.view' : 'documents.control'
+    const scope = scopedLocationId(organizationId)
+    const points = [scope, null].filter((id): id is string | null => id !== undefined).filter(id => docPermission(actor, 'documents.view', id) && (own || docPermission(actor, permission, id)))
+    const where: Prisma.DocumentWhereInput = { organizationId, deletedAt: null, AND: [libraryWhere(actor), visibleWhere(actor), { OR: [{ folderId: null }, { folderId: { in: folders.map(folder => folder.id) } }] }, { OR: points.map(locationId => ({ locationId })) }],
+      ...(kind === 'personal' ? { visibility: 'PRIVATE_MEMBER', targetMemberId: memberId } : { acknowledgements: { some: { memberId, cancelledAt: null, ...(pendingOnly ? { acknowledgedAt: null } : {}) } } }) }
+    const total = await tx.document.count({ where })
+    const items = await tx.document.findMany({ where, include: { ...include, acknowledgements: { where: { memberId }, include: acknowledgementInclude } }, orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }], skip: (page - 1) * 15, take: 15 })
+    return { documents: items.map(item => ({ ...documentDto(item, actor, actor.organization.timezone, folders), profileAcknowledgement: kind === 'acknowledgements' ? item.acknowledgements.map(ack => ({ openedAt: ack.openedAt, acknowledgedAt: ack.acknowledgedAt, deadline: ack.deadline }))[0] ?? null : null })), pagination: { page, total, pages: Math.max(1, Math.ceil(total / 15)) } }
+  })
+}

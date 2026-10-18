@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { WorkbookPreview } from '../../../app/file-preview/types.ts'
 import { columnLabel } from '../../../app/file-preview/types.ts'
 import Select from '../select/select.tsx'
+import SpreadsheetSurface from './spreadsheet-surface.tsx'
 import { PageControls } from './controls.tsx'
 const ROWS = 100, COLUMNS = 30
 export default function TablePreview({ workbook }: { workbook: WorkbookPreview }) {
@@ -12,9 +13,7 @@ export default function TablePreview({ workbook }: { workbook: WorkbookPreview }
   const colStart = (columnPage - 1) * COLUMNS + 1, colEnd = Math.min(sheet.columns, colStart + COLUMNS - 1)
   const visibleMerges = sheet.merges.filter(m => m.top <= rowEnd && m.bottom >= rowStart && m.left <= colEnd && m.right >= colStart)
   const columns = Array.from({ length: Math.max(0, colEnd - colStart + 1) }, (_, i) => colStart + i)
-  return <div className="file-preview-reader">
-    <div className="file-preview-toolbar"><label className="file-preview-sheet-select">Лист<Select value={String(index)} onChange={event => { setIndex(Number(event.target.value)); setPage(1); setColumnPage(1) }}>{workbook.sheets.map((s, i) => <option key={i} value={i}>{s.name}{s.hidden ? ' (скрытый)' : ''}</option>)}</Select></label><span>{sheet.rows.toLocaleString('ru-RU')} строк · {sheet.columns} столбцов</span></div>
-    {workbook.warnings.length > 0 && <details className="file-preview-notes"><summary>Особенности просмотра</summary>{workbook.warnings.map(note => <p key={note}>{note}</p>)}</details>}
+  return <SpreadsheetSurface toolbar={<><label className="file-preview-sheet-select">Лист<Select value={String(index)} onChange={event => { setIndex(Number(event.target.value)); setPage(1); setColumnPage(1) }}>{workbook.sheets.map((s, i) => <option key={i} value={i}>{s.name}{s.hidden ? ' (скрытый)' : ''}</option>)}</Select></label><span>{sheet.rows.toLocaleString('ru-RU')} строк · {sheet.columns} столбцов</span></>} notes={workbook.warnings.length > 0 && <details className="file-preview-notes"><summary>Особенности просмотра</summary>{workbook.warnings.map(note => <p key={note}>{note}</p>)}</details>} footer={<><PageControls page={page} count={Math.max(1, Math.ceil(sheet.rows / ROWS))} onChange={setPage} /><span>Строки {sheet.rows ? rowStart : 0}–{rowEnd}</span>{sheet.columns > COLUMNS && <><span>Столбцы {columnLabel(colStart)}–{columnLabel(colEnd)}</span><PageControls page={columnPage} count={Math.ceil(sheet.columns / COLUMNS)} onChange={setColumnPage} noun="Блок" /></>}</>} sheets={<div className="file-preview-sheets" role="tablist" aria-label="Листы книги">{workbook.sheets.map((s, i) => <button type="button" role="tab" aria-selected={i === index} key={i} onClick={() => { setIndex(i); setPage(1); setColumnPage(1) }}>{s.name}{s.hidden ? ' · скрытый' : ''}</button>)}</div>}>
     <div key={`${index}:${page}:${columnPage}`} className="file-preview-table-scroll" tabIndex={0} aria-label={`Лист ${sheet.name}`}>
       {!sheet.rows || !sheet.columns ? <p className="file-preview-status">Пустой лист</p> : <table className="file-preview-table"><colgroup><col style={{ width: 52 }} />{columns.map(c => <col key={c} style={{ width: sheet.widths[c] || 150 }} />)}</colgroup><thead><tr><th aria-label="Номер строки" />{columns.map(c => <th key={c} scope="col">{columnLabel(c)}</th>)}</tr></thead><tbody>{Array.from({ length: rowEnd - rowStart + 1 }, (_, offset) => {
         const r = rowStart + offset
@@ -26,7 +25,5 @@ export default function TablePreview({ workbook }: { workbook: WorkbookPreview }
         })}</tr>
       })}</tbody></table>}
     </div>
-    <div className="file-preview-toolbar file-preview-table-footer"><PageControls page={page} count={Math.max(1, Math.ceil(sheet.rows / ROWS))} onChange={setPage} /><span>Строки {sheet.rows ? rowStart : 0}–{rowEnd}</span>{sheet.columns > COLUMNS && <><span>Столбцы {columnLabel(colStart)}–{columnLabel(colEnd)}</span><PageControls page={columnPage} count={Math.ceil(sheet.columns / COLUMNS)} onChange={setColumnPage} noun="Блок" /></>}</div>
-    <div className="file-preview-sheets" role="tablist" aria-label="Листы книги">{workbook.sheets.map((s, i) => <button type="button" role="tab" aria-selected={i === index} key={i} onClick={() => { setIndex(i); setPage(1); setColumnPage(1) }}>{s.name}{s.hidden ? ' · скрытый' : ''}</button>)}</div>
-  </div>
+  </SpreadsheetSurface>
 }

@@ -1,4 +1,4 @@
-import type { Permission } from '../../app/access/catalog.ts'
+import { permissionCatalog, type Permission } from '../../app/access/catalog.ts'
 
 export const accessModules: Record<string, { icon: string; description: string }> = {
   'Сотрудники': { icon: 'people', description: 'Состав команды, контактные данные и кадровые действия.' },
@@ -21,8 +21,6 @@ export const permissionHints: Partial<Record<Permission, string>> = {
   'requests.onBehalf':'Оформление отпуска или пользовательского обращения за сотрудника',
   'requests.selfResolve':'Явное исключение: согласование собственных обращений',
   'members.contacts': 'Email и телефон сотрудников',
-  'members.personnel.view': 'Доступ к табельным номерам',
-  'members.personnel.edit': 'Изменение номера в карточке сотрудника',
   'members.exclude': 'Прекращение участия в организации',
   'schedule.own': 'Только смены самого сотрудника',
   'schedule.actual': 'Редактирование фактически отработанного времени',
@@ -38,3 +36,5 @@ export const permissionHints: Partial<Record<Permission, string>> = {
   'locations.browse': 'Расширяет разрешённый просмотр публичных разделов',
 }
 
+
+export const accessGroups = [...new Set(permissionCatalog.map(permission => permission.group))]

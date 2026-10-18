@@ -8,9 +8,8 @@ import { useToast } from '../../component/ui/toast/toast-context.ts'
 import AnimatedOverlay from './schedule/animated-overlay.tsx'
 import DocumentDialog from './documents/document-dialog.tsx'
 import { AccessIcon, AccessNote, AccessPermission } from './access-elements.tsx'
-import { accessModules, permissionHints } from './access-presentation.ts'
+import { accessGroups as groups, accessModules, permissionHints } from './access-presentation.ts'
 
-const groups = [...new Set(permissionCatalog.map(permission => permission.group))]
 
 export default function RoleEditor({ org, role, onClose }: { org: string; role?: AccessRole; onClose: () => void }) {
   const { apiRequest } = useAuth()

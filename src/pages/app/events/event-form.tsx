@@ -1,3 +1,5 @@
+import MemberProfileLink from '../../../component/ui/member-profile-link.tsx'
+import MemberAvatar from '../../../component/ui/member-avatar.tsx'
 import { canAccess } from '../../../app/access/catalog.ts'
 import { useAccessRoles } from '../../../app/access/queries.ts'
 import { useState, type FormEvent } from 'react'
@@ -10,7 +12,6 @@ import { locationTone } from '../../../app/organizations/format.ts'
 import DatePicker, { TimeInput } from '../../../component/ui/date-picker/date-picker.tsx'
 import Select from '../../../component/ui/select/select.tsx'
 import SegmentedNav from '../../../component/ui/segmented-nav/segmented-nav.tsx'
-import Avatar from '../../../component/ui/avatar/avatar.tsx'
 import { useToast } from '../../../component/ui/toast/toast-context.ts'
 import DocumentDialog from '../documents/document-dialog.tsx'
 import AnimatedOverlay from '../schedule/animated-overlay.tsx'
@@ -66,7 +67,7 @@ export default function EventForm({ organization, event, onClose, onSaved }: { o
       <label><span>Описание и повестка</span><textarea rows={4} maxLength={4000} value={form.description} onChange={action => field('description', action.target.value)} placeholder="Что запланировано и как подготовиться" /></label>
       <fieldset className="event-form-audience"><legend>Получатели</legend><Select aria-label="Выбор получателей" value={form.audienceMode} onChange={action => field('audienceMode', action.target.value as EventFormInput['audienceMode'])}><option value="ALL">Все сотрудники выбранной области</option><option value="ROLES">По роли в точке</option><option value="SELECTED">Конкретные сотрудники</option></Select>
         {form.audienceMode === 'ROLES' && <div className="event-role-picker">{roles.data?.roles.map(role => <label className="event-check" key={role.id}><input type="checkbox" checked={form.audienceAccessRoleIds?.includes(role.id) ?? false} onChange={() => {field('audienceRoles',[]);field('audienceAccessRoleIds', form.audienceAccessRoleIds?.includes(role.id) ? form.audienceAccessRoleIds.filter(value=>value!==role.id) : [...(form.audienceAccessRoleIds??[]),role.id])}} /><span>{role.name}</span></label>)}</div>}
-        {form.audienceMode === 'SELECTED' && <><input aria-label="Поиск получателей" placeholder="Найти сотрудника" value={memberSearch} onChange={action => setMemberSearch(action.target.value)} /><div className="event-member-picker">{candidates.filter(member => member.name.toLocaleLowerCase().includes(memberSearch.toLocaleLowerCase())).map(member => <label className="event-check" key={member.id}><input type="checkbox" checked={form.memberIds.includes(member.id)} onChange={() => field('memberIds', form.memberIds.includes(member.id) ? form.memberIds.filter(id => id !== member.id) : [...form.memberIds, member.id])} /><Avatar className="app-avatar" name={member.name} url={member.avatarUrl} /><span>{member.name}</span></label>)}</div></>}
+        {form.audienceMode === 'SELECTED' && <><input aria-label="Поиск получателей" placeholder="Найти сотрудника" value={memberSearch} onChange={action => setMemberSearch(action.target.value)} /><div className="event-member-picker">{candidates.filter(member => member.name.toLocaleLowerCase().includes(memberSearch.toLocaleLowerCase())).map(member => <div className="event-check" key={member.id}><input aria-label={`Выбрать: ${member.name}`} type="checkbox" checked={form.memberIds.includes(member.id)} onChange={() => field('memberIds', form.memberIds.includes(member.id) ? form.memberIds.filter(id => id !== member.id) : [...form.memberIds, member.id])} /><MemberAvatar memberId={member.id} className="app-avatar" name={member.name} url={member.avatarUrl} /><MemberProfileLink memberId={member.id}><span>{member.name}</span></MemberProfileLink></div>)}</div></>}
         {members.isFetching ? <p className="event-muted">Загружаем получателей…</p> : members.isError ? <p className="form-inline-error">Не удалось загрузить получателей. <button type="button" onClick={() => void members.refetch()}>Повторить</button></p> : <p className="event-muted">{keepsSnapshot ? `Сохранённый состав: ${event.recipientCount}` : `В выбранном составе: ${preview.length}`}</p>}
         {event && <label className="event-check"><input type="checkbox" checked={form.refreshRecipients} onChange={action => field('refreshRecipients', action.target.checked)} /><span>Обновить состав по текущим назначениям</span></label>}
         <p className="event-muted">Состав фиксируется при публикации. Новые сотрудники автоматически не добавляются.</p>

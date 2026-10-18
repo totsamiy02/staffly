@@ -6,7 +6,7 @@ import { ApiError } from '../api-error.ts'
 import { getMembership } from '../organizations/permissions.ts'
 import type { Prisma } from '../../generated/prisma/client.ts'
 import { addCalendarDays, startOfZonedDate, zonedParts } from './timezone.ts'
-import { reportCatalog, reportScopeError, type ReportInput, type ReportPreview, type ReportSheet, type ReportConfig } from '../../app/schedule/reporting.ts'
+import { reportCatalog, reportScopeError, normalizeReportConfig, type ReportInput, type ReportPreview, type ReportSheet, type ReportConfig } from '../../app/schedule/reporting.ts'
 import { mediaUrl } from '../storage/image-service.ts'
 
 const MAX_ROWS = 25000
@@ -29,7 +29,7 @@ function scopeWhere(organizationId: string, locations: Awaited<ReturnType<typeof
     return { OR: [
       { workShifts: { some: { organizationId, locationId: location.id, status: { not: 'CANCELLED' }, cancelledAt: null, scheduledStartAt: { gte: start, lt: end } } } },
       { locationMemberships: { some: { locationId: location.id, joinedAt: { lt: end }, OR: [{ leftAt: null }, { leftAt: { gt: start } }] } } },
-      { locationTransfers: { some: { toLocationId: location.id, startAt: { lt: end }, OR: [{ endAt: null }, { endAt: { gt: start } }] } } },
+      { locationTransfers: { some: { toLocationId: location.id, startAt: { lt: end }, AND: [{ OR: [{ revokedAt: null }, { revokedAt: { gt: start } }] }, { OR: [{ revokedAt: null }, { revokedAt: { gt: prisma.locationTransfer.fields.startAt } }] }], OR: [{ endAt: null }, { endAt: { gt: start } }] } } },
     ] }
   }) }
 }
@@ -37,7 +37,7 @@ const nameOf = (user: { lastName: string | null; firstName: string | null; middl
 export async function reportOptions(userId: string, organizationId: string) {
   const { actor, locations } = await reportAccess(userId, organizationId)
   const templates = await prisma.reportTemplate.findMany({ where: { organizationId }, orderBy: [{ name: 'asc' }, { id: 'asc' }] })
-  return { locations: locations.map(({ id, name, timezone, archivedAt }) => ({ id, name, timezone, archivedAt })), templates: templates.map(template => ({ id: template.id, name: template.name, config: template.config as ReportConfig, canManage: (actor.owner || locationsFor(actor,'reports.templates').length>0) && (actor.owner || template.createdByMemberId===actor.id || locationsFor(actor,'reports.templates.all').length>0) })) }
+  return { locations: locations.map(({ id, name, timezone, archivedAt }) => ({ id, name, timezone, archivedAt })), templates: templates.map(template => ({ id: template.id, name: template.name, config: normalizeReportConfig(template.config as ReportConfig), canManage: (actor.owner || locationsFor(actor,'reports.templates').length>0) && (actor.owner || template.createdByMemberId===actor.id || locationsFor(actor,'reports.templates.all').length>0) })) }
 }
 export async function reportMembers(userId: string, organizationId: string, input: ReportInput) {
   const access = await reportAccess(userId, organizationId)
@@ -52,7 +52,7 @@ export async function saveReportTemplate(userId: string, organizationId: string,
     const { actor } = await reportAccess(userId, organizationId, db, 'reports.templates')
     if (id) await editableTemplate(db, organizationId, id, actor)
     else if (await db.reportTemplate.count({ where: { organizationId } }) >= 100) throw new ApiError(400, 'REPORT_LIMIT', 'Можно сохранить не более 100 настроек.')
-    const data = { name: input.name, config: input.config as unknown as Prisma.InputJsonValue }
+    const data = { name: input.name, config: normalizeReportConfig(input.config) as unknown as Prisma.InputJsonValue }
     return id ? db.reportTemplate.update({ where: { id }, data }) : db.reportTemplate.create({ data: { ...data, organizationId, createdByMemberId: actor.id } })
   }, { isolationLevel: 'Serializable' })
 }
@@ -65,21 +65,12 @@ async function editableTemplate(db: DB, organizationId: string, id: string, acto
 export async function deleteReportTemplate(userId: string, organizationId: string, id: string) {
   await prisma.$transaction(async db => { const { actor } = await reportAccess(userId, organizationId, db, 'reports.templates'); await editableTemplate(db, organizationId, id, actor); await db.reportTemplate.delete({ where: { id } }) })
 }
-export async function updatePersonnelNumber(userId: string, organizationId: string, memberId: string, personnelNumber: string | null) {
-  try {
-    await prisma.$transaction(async db => {
-      const { actor } = await reportAccess(userId, organizationId, db, 'members.personnel.edit')
-      const member = await db.organizationMember.findFirst({ where: { organizationId, id: memberId }, include: { locationMemberships: true, locationTransfers: true } })
-      if (!member || (actor.organizationRole !== 'OWNER' && !member.locationMemberships.some(item => !item.leftAt && locationsFor(actor, 'members.personnel.edit').includes(item.locationId)) && !member.locationTransfers.some(item => item.temporary && item.startAt <= new Date() && item.endAt && item.endAt > new Date() && locationsFor(actor, 'members.personnel.edit').includes(item.toLocationId)))) throw fail('Сотрудник вне управляемой области.')
-      await db.organizationMember.update({ where: { id: memberId }, data: { personnelNumber } })
-    })
-  } catch (error) { if (error && typeof error === 'object' && 'code' in error && error.code === 'P2002') throw new ApiError(409, 'PERSONNEL_NUMBER_EXISTS', 'Этот табельный номер уже используется в организации, включая бывших сотрудников.'); throw error }
-}
 type Cell = string | number | Date | null
 type Row = Record<string, Cell>
 export type BuiltReport = { generatedAt: Date; metrics: ReportPreview['metrics']; warnings: ReportPreview['warnings']; rows: Record<ReportSheet, Row[]>; config: ReportConfig }
 // Repeatable read gives all sheets one database snapshot within this operation.
 export async function buildReport(userId: string, organizationId: string, input: ReportInput, now = new Date(), permission: Permission = 'reports.preview'): Promise<BuiltReport> {
+  input = { ...input, config: normalizeReportConfig(input.config) }
   return prisma.$transaction(async db => {
     const access = await reportAccess(userId, organizationId, db, permission), locations = selectedLocations(access, input.locationIds)
     const scopeError = reportScopeError(input.config, locations.length)
@@ -111,8 +102,7 @@ export async function buildReport(userId: string, organizationId: string, input:
     const identity = (id: string) => {
       const member = memberMap.get(id)!, name = nameOf(member.user)
       const sameName = (nameCounts.get(name) ?? 0) > 1
-      const number = locations.every(l=>hasPermission(access.actor,'members.personnel.view',l.id)) ? member.personnelNumber : null
-      return { memberId:id,personnelNumber:number,name:sameName ? `${name} (${number ? `таб. ${number}` : id.slice(0,8)})` : name }
+      return { memberId: id, name: sameName ? `${name} (${id.slice(0, 8)})` : name }
     }
     for (const shift of shifts) {
       const scopeKey = `${shift.memberId}:${shift.locationId}`
@@ -132,7 +122,7 @@ export async function buildReport(userId: string, organizationId: string, input:
       const member = memberMap.get(absence.memberId)!
       const relevant = locations.filter(location => {
         const { start: a, end: b } = range(overlapStart, overlapEnd, location.timezone)
-        return hasStartInRange(startsByMemberPoint.get(`${member.id}:${location.id}`) ?? [], a.getTime(), b.getTime()) || member.locationMemberships.some(item => item.locationId === location.id && item.joinedAt < b && (!item.leftAt || item.leftAt > a)) || member.locationTransfers.some(item => item.toLocationId === location.id && item.startAt < b && (!item.endAt || item.endAt > a))
+        return hasStartInRange(startsByMemberPoint.get(`${member.id}:${location.id}`) ?? [], a.getTime(), b.getTime()) || member.locationMemberships.some(item => item.locationId === location.id && item.joinedAt < b && (!item.leftAt || item.leftAt > a)) || member.locationTransfers.some(item => item.toLocationId === location.id && item.startAt < b && (!item.revokedAt || item.revokedAt > a && item.revokedAt > item.startAt) && (!item.endAt || item.endAt > a))
       })
       if (!relevant.length) continue
       for (const location of relevant) {
@@ -142,12 +132,11 @@ export async function buildReport(userId: string, organizationId: string, input:
       const details = relevant.every(l=>hasPermission(access.actor,'absences.details',l.id))
       rows.absences.push({ locations: relevant.map(location => locationLabel(location.id)).join('; '), id: absence.id, ...identity(absence.memberId), type: details ? ({ VACATION: 'Отпуск', SICK: 'Больничный', SICK_LEAVE: 'Больничный', DAY_OFF: 'Отгул', ABSENCE: 'Отсутствие' } as Record<string, string>)[absence.type] ?? 'Отсутствие' : 'Отсутствие', start: new Date(start), end: new Date(end), overlapStart: new Date(overlapStart), overlapEnd: new Date(overlapEnd), days: (Date.parse(overlapEnd) - Date.parse(overlapStart)) / 86400000 + 1, source: absence.sourceRequestId ? 'Одобренная заявка' : 'Зарегистрированное отсутствие', comment: details ? absence.comment : null })
     }
-    const warnings: BuiltReport['warnings'] = { missingNumber: [], incompleteName: [] }
+    const warnings: BuiltReport['warnings'] = { incompleteName: [] }
     for (const aggregate of totals.values()) {
       const id = aggregate.memberId
       const member = memberMap.get(id)!, identityRow = identity(id)
       rows.summary.push({ ...identityRow, locationId: aggregate.locationId, locations: [...aggregate.locations].sort().join('; ') || null, positions: [...aggregate.positions].sort().join('; ') || null, status: member.leftAt || member.user.deletedAt ? 'Бывший' : 'Активный', shifts: aggregate.shifts, hours: aggregate.minutes / 60 })
-      if (!member.personnelNumber && !warnings.missingNumber.some(item => item.id === id)) warnings.missingNumber.push({ id, name: identityRow.name })
       if ((!member.user.firstName || !member.user.lastName || !member.user.middleName) && !warnings.incompleteName.some(item => item.id === id)) warnings.incompleteName.push({ id, name: identityRow.name })
     }
     rows.summary.sort((a, b) => String(a.locations).localeCompare(String(b.locations), 'ru') || String(a.locationId).localeCompare(String(b.locationId)) || String(a.name).localeCompare(String(b.name), 'ru') || String(a.memberId).localeCompare(String(b.memberId)))
@@ -155,7 +144,7 @@ export async function buildReport(userId: string, organizationId: string, input:
     rows.absences.sort((a, b) => String(a.locations).localeCompare(String(b.locations), 'ru') || String(a.name).localeCompare(String(b.name), 'ru') || (a.start as Date).getTime() - (b.start as Date).getTime())
     metrics.employees = new Set([...totals.values()].map(value => value.memberId)).size; metrics.hours = metrics.minutes / 60; metrics.futureHours = futureMinutes / 60
     const parameters: Record<string, string> = {
-      'Организация': organization.name, 'Период включительно': `${input.from.split('-').reverse().join('.')} — ${input.to.split('-').reverse().join('.')}`, 'Время формирования': `${new Intl.DateTimeFormat('ru-RU', { timeZone: organization.timezone, dateStyle: 'short', timeStyle: 'medium' }).format(now)} (${organization.timezone})`, 'Точки и часовые пояса': locations.map(location => `${locationLabel(location.id)} (${location.timezone})`).join('; '), 'Сотрудники': input.memberIds.length ? selectedMembers.map(member => nameOf(member.user)).join('; ') : 'Все с данными периода в выбранной области', 'Бывшие сотрудники': input.includeFormer ? 'Включены при наличии данных' : 'Исключены', 'Расчёт часов': 'Фактическое время, если указано, иначе план; неявка — 0 часов', 'Перерыв': 'Включён в длительность', 'Отменённые смены': 'Исключены', 'Будущие смены': `${metrics.futureShifts}; ${metrics.futureHours.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ч; включены`, 'Ночные смены': 'Целиком по местной дате начала в часовом поясе точки', 'Отсутствия': 'Неотменённые записи; пересечение дат включительно; не уменьшают часы и не означают оплату', 'Область отсутствий': 'Смены, назначения или переводы в выбранные точки, пересекающиеся с датами отсутствия; каждое отсутствие один раз', 'Точность': 'Полные минуты; суммирование до перевода в часы; отображение 2 знака', 'Сохранённая настройка': templateName ?? 'Не использована', 'Разделение заведений': 'Сводка: отдельная строка для каждого сотрудника в каждом заведении. Смены сгруппированы по заведению и сотруднику.', 'Табельный номер': 'Необязательный номер бухгалтерии; ведущие нули сохраняются. UUID — технический ID, доступен только по выбору.',
+      'Организация': organization.name, 'Период включительно': `${input.from.split('-').reverse().join('.')} — ${input.to.split('-').reverse().join('.')}`, 'Время формирования': `${new Intl.DateTimeFormat('ru-RU', { timeZone: organization.timezone, dateStyle: 'short', timeStyle: 'medium' }).format(now)} (${organization.timezone})`, 'Точки и часовые пояса': locations.map(location => `${locationLabel(location.id)} (${location.timezone})`).join('; '), 'Сотрудники': input.memberIds.length ? selectedMembers.map(member => nameOf(member.user)).join('; ') : 'Все с данными периода в выбранной области', 'Бывшие сотрудники': input.includeFormer ? 'Включены при наличии данных' : 'Исключены', 'Расчёт часов': 'Фактическое время, если указано, иначе план; неявка — 0 часов', 'Перерыв': 'Включён в длительность', 'Отменённые смены': 'Исключены', 'Будущие смены': `${metrics.futureShifts}; ${metrics.futureHours.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ч; включены`, 'Ночные смены': 'Целиком по местной дате начала в часовом поясе точки', 'Отсутствия': 'Неотменённые записи; пересечение дат включительно; не уменьшают часы и не означают оплату', 'Область отсутствий': 'Смены, назначения или переводы в выбранные точки, пересекающиеся с датами отсутствия; каждое отсутствие один раз', 'Точность': 'Полные минуты; суммирование до перевода в часы; отображение 2 знака', 'Сохранённая настройка': templateName ?? 'Не использована', 'Разделение заведений': 'Сводка: отдельная строка для каждого сотрудника в каждом заведении. Смены сгруппированы по заведению и сотруднику.', 'Идентификаторы': 'Технические ID доступны только по выбору колонок.',
     }
     rows.parameters = Object.entries(parameters).map(([parameter, value]) => ({ parameter, value }))
     for (const sheet of input.config.sheets.filter(sheet => sheet.enabled)) {
@@ -225,7 +214,6 @@ export async function reportWorkbook(report: BuiltReport) {
         if (index % 2) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF6F7F8' } }
         if (index && point !== undefined && point !== previousLocation) cell.border = { top: { style: 'thin', color: { argb: 'FFBBC1C9' } } }
         const key = sheet.columns[col - 1].key
-        if (key === 'personnelNumber' && !cell.value) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF3DB' } }
         if (key === 'id' || key === 'memberId') cell.font = { name: 'Arial', size: 10, color: { argb: muted } }
       })
       previousLocation = point
@@ -246,10 +234,6 @@ export async function reportWorkbook(report: BuiltReport) {
       worksheet.addRow([])
       const note = worksheet.addRow([sheet.key === 'absences' ? 'Отсутствия не уменьшают часы. Заведения показывают область учёта; дни не суммируются между точками.' : sheet.key === 'summary' ? 'Отдельная строка на сотрудника и заведение. Фактическое время, иначе план; неявка — 0 часов; перерыв включён.' : sheet.key === 'shifts' ? 'Даты и время местные для заведения; часовой пояс указан в строке. Отменённые смены исключены.' : 'Правила и фильтры на момент формирования отчёта.'])
       note.font = { name: 'Arial', size: 10, color: { argb: muted } }; note.getCell(1).alignment = { wrapText: false }
-      if (sheet.key !== 'parameters' && sheet.columns.some(column => column.key === 'personnelNumber')) {
-        const legend = worksheet.addRow(['Жёлтым отмечены отсутствующие табельные номера. Номер необязателен.'])
-        legend.font = { name: 'Arial', size: 10, color: { argb: muted } }; legend.getCell(1).alignment = { wrapText: false }
-      }
     }
     const nameIndex = sheet.columns.findIndex(column => column.key === 'name')
     worksheet.views = [{ state: 'frozen', ySplit: headerRow, xSplit: nameIndex >= 0 && nameIndex < sheet.columns.length - 1 ? nameIndex + 1 : 0, showGridLines: false }]

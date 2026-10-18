@@ -55,7 +55,7 @@ export async function assertLocationCanClose(tx: Prisma.TransactionClient | type
   const location = await tx.organizationLocation.findFirst({ where: { id: locationId, organizationId, archivedAt: null } })
   if (!location) throw new ApiError(404, 'LOCATION_NOT_FOUND', 'Точка не найдена.')
   if (await tx.organizationLocation.count({ where: { organizationId, archivedAt: null } }) <= 1) throw new ApiError(409, 'LAST_LOCATION', 'Последнюю действующую точку нельзя закрыть.')
-  if (await tx.scheduleDraft.count({where:{locationId,status:{in:['PREPARING','OPEN','CLOSED']}}}) || await tx.workShift.count({ where: { locationId, status: 'SCHEDULED', scheduledEndAt: { gt: new Date() } } }) || await tx.organizationRequest.count({ where: { locationId, status: 'PENDING' } }) || await tx.locationTransfer.count({ where: { temporary: true, endAt: { gt: new Date() }, OR: [{ fromLocationId: locationId }, { toLocationId: locationId }] } })) throw new ApiError(409, 'LOCATION_HAS_WORK', 'Сначала обработайте заявки, будущие смены и подмены этой точки.')
+  if (await tx.scheduleDraft.count({where:{locationId,status:{in:['PREPARING','OPEN','CLOSED']}}}) || await tx.workShift.count({ where: { locationId, status: 'SCHEDULED', scheduledEndAt: { gt: new Date() } } }) || await tx.organizationRequest.count({ where: { locationId, status: 'PENDING' } }) || await tx.locationTransfer.count({ where: { temporary: true, revokedAt: null, endAt: { gt: new Date() }, OR: [{ fromLocationId: locationId }, { toLocationId: locationId }] } })) throw new ApiError(409, 'LOCATION_HAS_WORK', 'Сначала обработайте заявки, будущие смены и подмены этой точки.')
   return location
 }
 export async function requestLocationClosure(userId: string, organizationId: string, locationId: string) {

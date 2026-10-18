@@ -2,7 +2,7 @@ export const reportSheets = ['summary', 'shifts', 'absences', 'parameters'] as c
 export type ReportSheet = typeof reportSheets[number]
 export type ReportField = { key: string; title: string; type: 'text' | 'number' | 'hours' | 'date' | 'datetime'; width: number }
 const field = (key: string, title: string, type: ReportField['type'] = 'text', width = 24): ReportField => ({ key, title, type, width })
-const identity = [field('name', 'Полные ФИО', 'text', 36), field('personnelNumber', 'Табельный номер', 'text', 20), field('memberId', 'ID сотрудника (технический)', 'text', 38)]
+const identity = [field('name', 'Полные ФИО', 'text', 36), field('memberId', 'ID сотрудника (технический)', 'text', 38)]
 export const reportCatalog: Record<ReportSheet, { title: string; fields: ReportField[] }> = {
   summary: { title: 'Сводка', fields: [...identity, field('locations', 'Заведение', 'text', 30), field('positions', 'Должности на сменах', 'text', 30), field('status', 'Статус сотрудника'), field('shifts', 'Количество назначений', 'number'), field('hours', 'Часы с учётом результата', 'hours')] },
   shifts: { title: 'Смены', fields: [...identity, field('id', 'ID смены (технический)', 'text', 38), field('location', 'Точка'), field('timezone', 'Часовой пояс'), field('position', 'Должность на смене'), field('start', 'Начало (факт или план)', 'datetime'), field('end', 'Конец (факт или план)', 'datetime'), field('break', 'Перерыв по графику, мин', 'number'), field('minutes', 'Длительность, мин', 'number'), field('hours', 'Часы с учётом результата', 'hours'), field('state', 'Результат / состояние'), field('comment', 'Комментарий к смене', 'text', 48)] },
@@ -10,6 +10,13 @@ export const reportCatalog: Record<ReportSheet, { title: string; fields: ReportF
   parameters: { title: 'Параметры', fields: [field('parameter', 'Параметр', 'text', 38), field('value', 'Значение', 'text', 100)] },
 }
 export type ReportConfig = { layout?: 'report' | 'table'; sheets: Array<{ key: ReportSheet; enabled: boolean; columns: Array<{ key: string; title: string }> }>; totals: boolean }
+/** Older saved templates silently lose the retired field; a single-column sheet stays usable. */
+export function normalizeReportConfig(config: ReportConfig): ReportConfig {
+  return { ...config, sheets: config.sheets.map(sheet => {
+    const columns = sheet.columns.filter(column => column.key !== 'personnelNumber')
+    return { ...sheet, columns: !columns.length && columns.length !== sheet.columns.length ? [{ key: 'name', title: reportCatalog.summary.fields[0].title }] : columns }
+  }) }
+}
 export function defaultReportConfig(): ReportConfig { return { layout: 'report', sheets: reportSheets.map(key => ({ key, enabled: true, columns: reportCatalog[key].fields.filter(field => !['id', 'memberId'].includes(field.key)).map(({ key, title }) => ({ key, title })) })), totals: true } }
 export function reportConfigError(config: ReportConfig): string | null {
   if (!config.sheets.some(sheet => sheet.enabled)) return 'Включите хотя бы один лист.'
@@ -33,7 +40,7 @@ export type ReportTemplate = { id: string; name: string; config: ReportConfig; c
 export type ReportPreview = {
   generatedAt: string
   metrics: { employees: number; shifts: number; minutes: number; hours: number; futureShifts: number; futureHours: number }
-  warnings: { missingNumber: Array<{ id: string; name: string }>; incompleteName: Array<{ id: string; name: string }> }
+  warnings: { incompleteName: Array<{ id: string; name: string }> }
   sheets: Array<{ key: ReportSheet; title: string; columns: Array<ReportField>; rows: Array<Array<string | number | null>>; total: number; totals: Array<string | number | null> | null }>
 }
 

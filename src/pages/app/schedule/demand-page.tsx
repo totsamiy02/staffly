@@ -1,3 +1,4 @@
+import AsyncPanel from '../../../component/ui/async-panel.tsx'
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
@@ -23,7 +24,7 @@ type Plan = DemandInterval[] | null
 export default function DemandPage({organization}:{organization:OrganizationSummary}) {
   const settings=useTeamSettings(organization.id),allowed=canAccess(organization,'coverage.view'),query=useDemand(organization.id,allowed)
   return <section className="team-planning demand-page"><ScheduleSectionHeader organization={organization} title="Потребность в сотрудниках" description={`Количество сотрудников по должностям и времени · ${organization.location?.name}`}/>
-    {!allowed?<p className="planning-empty">Нет доступа к потребности.</p>:query.isLoading||settings.isLoading?<p className="planning-empty">Загружаем потребность…</p>:query.isError||settings.isError?<p className="form-inline-error" role="alert">Не удалось загрузить потребность. <button onClick={()=>{void query.refetch();void settings.refetch()}}>Повторить</button></p>:!settings.data?.coverageEnabled?<div className="planning-card"><p>Потребность выключена для этой точки.</p>{canAccess(organization,'schedule.settings')&&<Link className="app-secondary" to={`/app/organizations/${organization.id}/settings?section=schedule&location=${organization.locationId}`}>Включить в настройках</Link>}</div>:<DemandEditor key={organization.locationId} organization={organization} data={query.data!}/>}
+    <AsyncPanel pending={allowed && (query.isLoading || settings.isLoading)} minHeight={400}>{!allowed?<p className="planning-empty">Нет доступа к потребности.</p>:query.isLoading||settings.isLoading?<p className="planning-empty">Загружаем потребность…</p>:query.isError||settings.isError?<p className="form-inline-error" role="alert">Не удалось загрузить потребность. <button onClick={()=>{void query.refetch();void settings.refetch()}}>Повторить</button></p>:!settings.data?.coverageEnabled?<div className="planning-card"><p>Потребность выключена для этой точки.</p>{canAccess(organization,'schedule.settings')&&<Link className="app-secondary" to={`/app/organizations/${organization.id}/settings?section=schedule&location=${organization.locationId}`}>Включить в настройках</Link>}</div>:<DemandEditor key={organization.locationId} organization={organization} data={query.data!}/>}</AsyncPanel>
   </section>
 }
 function DemandEditor({organization,data}:{organization:OrganizationSummary;data:DemandData}) {

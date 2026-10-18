@@ -55,12 +55,12 @@ async function memberAccess(tx: Prisma.TransactionClient, shift: WorkShift, memb
   if (!point) fail('LOCATION_UNAVAILABLE', 'Точка закрыта или недоступна.')
   if (member.role !== 'OWNER') {
     const permanent = await tx.locationMember.findFirst({ where: { locationId: point.id, memberId, leftAt: null } })
-    const temporary = await tx.locationTransfer.findFirst({ where: { organizationId: shift.organizationId, memberId, toLocationId: point.id, temporary: true, startAt: { lte: new Date() }, endAt: { gt: new Date(), gte: shift.scheduledEndAt } } })
+    const temporary = await tx.locationTransfer.findFirst({ where: { organizationId: shift.organizationId, memberId, toLocationId: point.id, temporary: true, revokedAt: null, startAt: { lte: new Date() }, endAt: { gt: new Date(), gte: shift.scheduledEndAt } } })
     if (!permanent && !temporary) fail('MEMBER_NOT_IN_LOCATION', 'Сотрудник не имеет действующего доступа к этой точке на период смены.')
   }
   return { member, point }
 }
-async function eligible(tx: Prisma.TransactionClient, shift: WorkShift, memberId: string, excluded: string[] = []) {
+export async function eligible(tx: Prisma.TransactionClient, shift: WorkShift, memberId: string, excluded: string[] = []) {
   const { member, point } = await memberAccess(tx, shift, memberId)
   if (shift.positionId && !await tx.memberPosition.findFirst({ where: { memberId, positionId: shift.positionId, position: { organizationId: shift.organizationId, isActive: true } } })) fail('POSITION_NOT_ASSIGNED', 'Сотруднику не назначена активная должность этой смены.')
   await assertNoApprovedAbsence(shift.organizationId, memberId, shift.scheduledStartAt, shift.scheduledEndAt, point.timezone, tx)
@@ -72,7 +72,7 @@ async function notice(tx: Prisma.TransactionClient, offer: ShiftOffer, type: 'SH
   const members = await tx.organizationMember.findMany({ where: { id: { in: [...new Set(memberIds)] }, organizationId: offer.organizationId, leftAt: null, user: { deletedAt: null } }, select: { id: true, userId: true } })
   if (members.length) await tx.accountNotification.createMany({ data: members.map(member => ({ organizationId: offer.organizationId, userId: member.userId, shiftOfferId: offer.id, type, title, message: message.slice(0, 500), shiftOfferDeliveryKey: `${offer.id}:${type}:${member.id}` })), skipDuplicates: true })
 }
-async function closeOffer(tx: Prisma.TransactionClient, offer: ShiftOffer, status: 'COMPLETED' | 'CANCELLED' | 'REJECTED' | 'EXPIRED' | 'INVALID', reason: string, patch: Prisma.ShiftOfferUncheckedUpdateInput = {}) {
+export async function closeOffer(tx: Prisma.TransactionClient, offer: ShiftOffer, status: 'COMPLETED' | 'CANCELLED' | 'REJECTED' | 'EXPIRED' | 'INVALID', reason: string, patch: Prisma.ShiftOfferUncheckedUpdateInput = {}) {
   if (!isActive(offer)) return offer
   const updated = await tx.shiftOffer.update({ where: { id: offer.id }, data: { ...patch, status, resolutionReason: reason, closedAt: new Date() } })
   await tx.shiftOfferReservation.deleteMany({ where: { offerId: offer.id } })

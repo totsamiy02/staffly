@@ -9,7 +9,7 @@ import './schedule-redesign.scss'
 export default function ScheduleTabs({ organization }: { organization: OrganizationSummary }) {
   const drafts = useDrafts(organization.id), settings = useTeamSettings(organization.id)
   const base = `/app/organizations/${organization.id}/schedule`
-  return <SegmentedNav label="Разделы расписания">
+  return <SegmentedNav label="Разделы расписания" continuityKey={`schedule:${organization.id}:${organization.locationId}`}>
     {(canAccess(organization,'schedule.view') || canAccess(organization,'schedule.own') || canAccess(organization,'coverage.view')) && <NavLink end to={base}>Календарь</NavLink>}
     {(settings.data?.discussionEnabled || !!drafts.data?.drafts.length) && <NavLink to={`${base}/drafts?location=${organization.locationId}`}>Согласование графика</NavLink>}
     {settings.data?.coverageEnabled && canAccess(organization,'coverage.view') && <NavLink to={`${base}/demand?location=${organization.locationId}`}>Потребность</NavLink>}

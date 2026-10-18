@@ -1,10 +1,10 @@
 import { createPortal } from 'react-dom'
 import { Children, isValidElement, useEffect, useLayoutEffect, useId, useRef, useState, useCallback, type SelectHTMLAttributes, type ReactNode, type ChangeEvent, type KeyboardEvent, type CSSProperties } from 'react'
 
-type Props = SelectHTMLAttributes<HTMLSelectElement> & { searchable?: boolean }
+type Props = SelectHTMLAttributes<HTMLSelectElement> & { searchable?: boolean; onOpenPerson?: (value: string) => void; canOpenPerson?: (value: string) => boolean }
 type Option = { value: string; label: ReactNode; disabled: boolean; search: string }
 
-export default function Select({ children, value, onChange, disabled, required, id, searchable = false, ...props }: Props) {
+export default function Select({ children, value, onChange, disabled, required, id, searchable = false, onOpenPerson, canOpenPerson, ...props }: Props) {
   const listId = useId()
   const host = useRef<HTMLDivElement>(null)
   const popup = useRef<HTMLDivElement>(null)
@@ -98,19 +98,22 @@ export default function Select({ children, value, onChange, disabled, required, 
       if (index >= 0) { setOpenState(true); setActive(index) }
     }
   }
+  const canOpen = (person: string) => Boolean(person && onOpenPerson && (!canOpenPerson || canOpenPerson(person)))
+  const openPerson = (person: string) => { setOpenState(false); onOpenPerson?.(person) }
   const accessibleLabel = props['aria-label'] ?? (label || undefined)
   return <div className="staffly-select" ref={host} onBlur={event => { if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget) && !popup.current?.contains(event.relatedTarget)) setOpenState(false) }}>
     <select {...props} value={value} disabled={disabled} required={required} onChange={onChange} tabIndex={-1} aria-hidden="true" onFocus={() => trigger.current?.focus()} className="staffly-select__validation" onInvalid={event => { event.preventDefault(); setInvalid(true); trigger.current?.focus(); setOpenState(true) }}>
       {options.map((option, index) => <option key={`${option.value}-${index}`} value={option.value} disabled={option.disabled}>{option.search}</option>)}
     </select>
-    <button id={id} ref={trigger} type="button" role="combobox" aria-label={accessibleLabel} aria-labelledby={props['aria-labelledby']} aria-describedby={props['aria-describedby']} aria-expanded={open} aria-controls={listId} aria-owns={open ? listId : undefined} aria-haspopup="listbox" aria-required={required} aria-invalid={props['aria-invalid'] ?? invalid} aria-activedescendant={open && available.some(option => option.index === active) ? `${listId}-${active}` : undefined} disabled={disabled} className="staffly-control" onClick={event => { event.preventDefault(); event.stopPropagation(); trigger.current?.focus(); setActive(Math.max(0, selected)); setOpenState(!openRef.current) }} onKeyDown={event => navigate(event)}>
+    <button id={id} ref={trigger} type="button" role="combobox" aria-label={accessibleLabel} aria-labelledby={props['aria-labelledby']} aria-describedby={props['aria-describedby']} aria-expanded={open} aria-controls={listId} aria-owns={open ? listId : undefined} aria-haspopup="listbox" aria-required={required} aria-invalid={props['aria-invalid'] ?? invalid} aria-activedescendant={open && available.some(option => option.index === active) ? `${listId}-${active}` : undefined} disabled={disabled} className="staffly-control" onClick={event => { event.preventDefault(); event.stopPropagation(); if ((event.target as HTMLElement).closest('.media-avatar') && canOpen(String(value ?? ''))) { openPerson(String(value)); return } trigger.current?.focus(); setActive(Math.max(0, selected)); setOpenState(!openRef.current) }} onKeyDown={event => navigate(event)}>
       <span>{options[selected]?.label ?? 'Выберите значение'}</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 7 5 5 5-5" /></svg>
     </button>
+    {canOpen(String(value ?? '')) && <button type="button" className="staffly-select__profile" onClick={event => { event.preventDefault(); event.stopPropagation(); openPerson(String(value)) }}>Профиль сотрудника</button>}
     {open && createPortal(<div ref={popup} style={popupStyle} className="staffly-select__options staffly-select__options--floating">
       {searchable && <input type="search" role="combobox" aria-label="Поиск сотрудника" aria-expanded="true" aria-controls={listId} aria-activedescendant={available.some(option => option.index === active) ? `${listId}-${active}` : undefined} placeholder="ФИО или почта" value={search} onChange={event => { setSearch(event.target.value); const terms = event.target.value.trim().toLocaleLowerCase().split(/\s+/); setActive(options.findIndex(option => !option.disabled && terms.every(term => option.search.toLocaleLowerCase().includes(term)))) }} onKeyDown={event => navigate(event, true)} />}
       <div id={listId} role="listbox" aria-label={accessibleLabel}>
         {!matches.length && <p className="staffly-select__empty">Ничего не найдено</p>}
-        {matches.map(({ index, ...option }) => <div role="option" id={`${listId}-${index}`} data-index={index} key={`${option.value}-${index}`} aria-selected={index === selected} aria-disabled={option.disabled} className={index === active ? 'is-active' : ''} onPointerMove={() => setActive(index)} onMouseDown={event => event.preventDefault()} onClick={() => choose(index)}>{option.label}{index === selected && <span aria-hidden="true">✓</span>}</div>)}
+        {matches.map(({ index, ...option }) => <div role="option" id={`${listId}-${index}`} data-index={index} key={`${option.value}-${index}`} aria-selected={index === selected} aria-disabled={option.disabled} className={index === active ? 'is-active' : ''} onPointerMove={() => setActive(index)} onMouseDown={event => event.preventDefault()} onClick={event => { if ((event.target as HTMLElement).closest('.media-avatar') && canOpen(option.value)) { event.stopPropagation(); openPerson(option.value) } else choose(index) }}>{option.label}{index === selected && <span aria-hidden="true">✓</span>}</div>)}
       </div>
     </div>, document.body)}
   </div>

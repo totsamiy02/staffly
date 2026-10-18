@@ -1,0 +1,9 @@
+.async-panel { min-width:0; overflow-anchor:none; }
+.async-panel__content { display:flow-root; min-width:0; }
+.async-panel__pending { display:grid; gap:14px; padding:24px 0; visibility:hidden; }
+.async-panel__pending.is-visible { visibility:visible; }
+.async-panel__pending>span { display:block; height:48px; border-radius:8px; background:#f0f1f3; }
+.async-panel__pending>span:nth-child(2) {width:90%;}
+.async-panel__pending>span:nth-child(3) {width:75%;}
+// Keep the small content slide inside its own area; navigation and filters stay still.
+.async-panel {overflow-x:clip;}

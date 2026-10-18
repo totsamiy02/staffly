@@ -90,8 +90,8 @@
 .day-shift--focused { outline: 2px solid #7354cf; outline-offset: -2px; box-shadow: 0 0 0 4px rgb(115 84 207 / 14%); }
 .day-shift--cancelled { background: #faf4f4; opacity: .67; }
 .day-shift__heading { display: flex; align-items: center; gap: 10px; }
-.day-shift__heading > span { display: grid; width: 38px; height: 38px; flex: 0 0 38px; place-items: center; border-radius: 50%; background: #111; color: #fff; font-size: 12px; font-weight: 700; }
-.day-shift__heading > div { display: grid; }
+.day-shift__heading > .day-shift__avatar { display: grid; width: 38px; height: 38px; flex: 0 0 38px; place-items: center; border-radius: 50%; background: #111; color: #fff; font-size: 12px; font-weight: 700; }
+.day-shift__heading > div { display: grid; min-width:0; overflow-wrap:anywhere; }
 .day-shift__heading strong { font-size: 13px; }
 .day-shift__heading small { color: #858585; font-size: 9px; }
 .day-shift__time { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-top: 17px; padding-top: 15px; border-top: 1px solid #eee; }

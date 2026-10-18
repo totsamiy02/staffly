@@ -1,14 +1,17 @@
+import TimeCorrectionAction from './schedule/time-correction-action.tsx'
+import MemberProfileLink from '../../component/ui/member-profile-link.tsx'
+import MemberAvatar from '../../component/ui/member-avatar.tsx'
+import ActionSurface from '../../component/ui/action-surface.tsx'
 import { requestStatusNames } from '../../app/requests/workflow.ts'
 import type { Permission } from '../../app/access/catalog.ts'
 import { useState, type ReactNode } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../app/auth/auth-context.tsx'
 import type { OrganizationSummary } from '../../app/organizations/types.ts'
 import { useDashboardRecords, useDashboardSchedule } from './dashboard-queries.ts'
 import { addDays, calendarRange, formatMonth, moveMonth, shiftTimeRange, zonedDateAndTime } from '../../app/schedule/date-utils.ts'
 import { useLocations } from '../../app/organizations/queries.ts'
 import { useInvitationClock } from '../../app/organizations/invitation-time.ts'
-import Avatar from '../../component/ui/avatar/avatar.tsx'
 import DocumentDialog from './documents/document-dialog.tsx'
 import AnimatedOverlay from './schedule/animated-overlay.tsx'
 import { useEvents } from '../../app/events/queries.ts'
@@ -31,6 +34,7 @@ function QueryState({ loading, error, retry, empty, children }: { loading: boole
 }
 
 export default function DashboardOverview({ organization }: { organization: OrganizationSummary }) {
+  const navigate = useNavigate()
   const { user } = useAuth()
   const locations = useLocations(organization.id)
   const points = (locations.data?.locations ?? []).filter(point => !point.archivedAt)
@@ -49,7 +53,7 @@ export default function DashboardOverview({ organization }: { organization: Orga
   const [month, setMonth] = useState(today.slice(0, 7))
   const [selectedDay, setSelectedDay] = useState(today)
   const [scheduleDay, setScheduleDay] = useState<string | null>(null)
-  const range = calendarRange(month)
+  const range = calendarRange(month, true)
   const can = (key: Permission) => Boolean(organization.owner || visiblePoints.some(p=>p.permissions?.includes(key)))
   const calendarPoints = visiblePoints.filter(p=>organization.owner || p.permissions?.some(key=>key==='schedule.view' || key==='schedule.own'))
   const calendar = useDashboardSchedule(organization.id, calendarPoints, range.from, range.to, locations.isSuccess)
@@ -69,9 +73,9 @@ export default function DashboardOverview({ organization }: { organization: Orga
   const calendarShifts = calendar.isPlaceholderData ? [] : (calendar.data?.shifts ?? []).filter(shift => shift.status !== 'CANCELLED')
   const dayShifts = calendarShifts.filter(shift => zonedDateAndTime(shift.scheduledStartAt, shift.timezone).date === selectedDay).sort((a, b) => a.scheduledStartAt.localeCompare(b.scheduledStartAt))
   const markedDays = new Set(calendarShifts.map(shift => zonedDateAndTime(shift.scheduledStartAt, shift.timezone).date))
-  const link = (to: string, label: string) => <Link className="dashboard-link" to={to}>{label}<DashboardIcon kind="arrow" /></Link>
-  const scheduleLink = (day: string, label: string) => selectedPoint ? link(dayHref(day), label) : <button className="dashboard-link" onClick={() => setScheduleDay(day)}>{label}<DashboardIcon kind="arrow" /></button>
-  const shiftRows = (items: typeof shifts, showDate = false) => <div className="dashboard-shifts">{items.map(shift => <Link key={shift.id} to={dayHref(zonedDateAndTime(shift.scheduledStartAt, shift.timezone).date, shift.locationId)} className="dashboard-shift"><span className="dashboard-shift__time">{shiftTimeRange(shift.scheduledStartAt, shift.scheduledEndAt, shift.timezone)}{showDate && <small>{dateLabel(zonedDateAndTime(shift.scheduledStartAt, shift.timezone).date)}</small>}</span><span><strong>{shift.positionName || 'Рабочая смена'}</strong><small>{shift.memberName}</small>{!selectedPoint && <small className="dashboard-point-label">{shift.locationName}</small>}</span><DashboardIcon kind="arrow" /></Link>)}</div>
+  const link = (to: string, label: string) => <Link className="dashboard-link" to={to}>{label}</Link>
+  const scheduleLink = (day: string, label: string) => selectedPoint ? link(dayHref(day), label) : <button className="dashboard-link" onClick={() => setScheduleDay(day)}>{label}</button>
+  const shiftRows = (items: typeof shifts, showDate = false) => <div className="dashboard-shifts">{items.map(shift => <ActionSurface key={shift.id} aria-label={`Открыть смену ${shift.memberName}`} onClick={() => navigate(dayHref(zonedDateAndTime(shift.scheduledStartAt, shift.timezone).date, shift.locationId))} className="dashboard-shift"><span className="dashboard-shift__time">{shiftTimeRange(shift.scheduledStartAt, shift.scheduledEndAt, shift.timezone)}{showDate && <small>{dateLabel(zonedDateAndTime(shift.scheduledStartAt, shift.timezone).date)}</small>}</span><span><strong>{shift.positionName || 'Рабочая смена'}</strong><small>{shift.memberName}</small>{!selectedPoint && <small className="dashboard-point-label">{shift.locationName}</small>}</span><TimeCorrectionAction shift={shift} locationId={shift.locationId} /></ActionSurface>)}</div>
   return <div className="dashboard-layout">
     <div className="dashboard-main">
       <header className="dashboard-greeting"><p>{hour < 6 ? 'Доброй ночи' : hour < 12 ? 'Доброе утро' : hour < 18 ? 'Добрый день' : 'Добрый вечер'},</p><h1>{user?.firstName || user?.displayName || 'Добро пожаловать'}</h1><span>{selectedPoint ? `Сегодня в «${selectedPoint.name}»` : 'Сегодня во всей организации'} · {dateLabel(today)}</span></header>
@@ -84,8 +88,8 @@ export default function DashboardOverview({ organization }: { organization: Orga
       <div className="dashboard-panels">
         {hasEvents && <Panel title="Ближайшие события" className="dashboard-events" action={link(href('events'), 'Все события')}><QueryState loading={events.isLoading} error={events.isError} retry={events.refetch} empty={!events.data?.events.length ? 'Предстоящих событий пока нет.' : undefined}><div>{events.data?.events.map(event => <Link className="event-row" key={event.id} to={eventHref(event, anchorId, pointId)}><EventRowContent event={event} compact /></Link>)}</div></QueryState></Panel>}
         {hasSchedule && <Panel title="Ближайшие смены" action={scheduleLink(today, 'Расписание')}><QueryState loading={upcoming.isLoading} error={upcoming.isError} retry={upcoming.refetch} empty={!nextShifts.length ? 'На ближайшие две недели смен нет.' : undefined}>{shiftRows(nextShifts, true)}</QueryState></Panel>}
-        {hasRequests && <Panel title={manager ? 'Заявки на рассмотрении' : 'Мои заявки'} action={link(href('requests', { tab: scope }), 'Все заявки')}><QueryState loading={requests.isPending} error={requests.isError} retry={requests.refetch} empty={!requests.data?.requests.length ? 'Заявок пока нет.' : undefined}><div className="dashboard-requests">{requests.data?.requests.slice(0, 4).map(request => <Link key={request.id} to={href('requests', { tab: scope, request: request.id, location: request.locationId })}><Avatar className="app-avatar" url={request.creatorAvatarUrl} name={request.creatorName} /><span><strong>{request.creatorName}</strong><small>{request.typeNameSnapshot}</small>{!selectedPoint && <small>{request.locationName}</small>}</span><span className={`dashboard-status dashboard-status--${request.status.toLowerCase()}`}>{(request.processLabel??requestStatusNames[request.status])}</span></Link>)}</div></QueryState></Panel>}
-        {hasDocuments && <Panel title="Мои документы" action={link(href('documents', { section: 'acknowledgements' }), 'Все документы')}><div className="dashboard-panel-caption">Требуют ознакомления <span>{documents.data?.pagination.total ?? '—'}</span></div><QueryState loading={documents.isPending} error={documents.isError} retry={documents.refetch} empty={!documents.data?.documents.length ? 'Всё готово. Нет документов, требующих ознакомления.' : undefined}><div className="dashboard-document-list">{documents.data?.documents.map(item => <Link key={item.id} to={href('documents', { section: 'acknowledgements', document: item.id, ...(item.locationId ? { location: item.locationId } : {}) })}><DashboardIcon kind="document" /><span><strong>{item.displayName}</strong><small>{item.locationName || 'Вся организация'}</small></span><DashboardIcon kind="arrow" /></Link>)}</div></QueryState></Panel>}
+        {hasRequests && <Panel title={manager ? 'Заявки на рассмотрении' : 'Мои заявки'} action={link(href('requests', { tab: scope }), 'Все заявки')}><QueryState loading={requests.isPending} error={requests.isError} retry={requests.refetch} empty={!requests.data?.requests.length ? 'Заявок пока нет.' : undefined}><div className="dashboard-requests">{requests.data?.requests.slice(0, 4).map(request => <ActionSurface key={request.id} aria-label={`Открыть заявку: ${request.creatorName}`} onClick={() => navigate(href('requests', { tab: scope, request: request.id, location: request.locationId }))}><MemberAvatar memberId={request.createdByMemberId} locationId={request.locationId} className="app-avatar" url={request.creatorAvatarUrl} name={request.creatorName} /><span><strong><MemberProfileLink memberId={request.createdByMemberId} locationId={request.locationId}>{request.creatorName}</MemberProfileLink></strong><small>{request.typeNameSnapshot}</small>{!selectedPoint && <small>{request.locationName}</small>}</span><span className={`dashboard-status dashboard-status--${request.status.toLowerCase()}`}>{(request.processLabel??requestStatusNames[request.status])}</span></ActionSurface>)}</div></QueryState></Panel>}
+        {hasDocuments && <Panel title="Мои документы" action={link(href('documents', { section: 'acknowledgements' }), 'Все документы')}><div className="dashboard-panel-caption">Требуют ознакомления <span>{documents.data?.pagination.total ?? '—'}</span></div><QueryState loading={documents.isPending} error={documents.isError} retry={documents.refetch} empty={!documents.data?.documents.length ? 'Всё готово. Нет документов, требующих ознакомления.' : undefined}><div className="dashboard-document-list">{documents.data?.documents.map(item => <Link key={item.id} to={href('documents', { section: 'acknowledgements', document: item.id, ...(item.locationId ? { location: item.locationId } : {}) })}><DashboardIcon kind="document" /><span><strong>{item.displayName}</strong><small>{item.locationName || 'Вся организация'}</small></span></Link>)}</div></QueryState></Panel>}
       </div>
     </div>
     {hasSchedule && <Panel title="Календарь" className="dashboard-calendar" action={scheduleLink(selectedDay, 'Открыть')}>
@@ -94,6 +98,6 @@ export default function DashboardOverview({ organization }: { organization: Orga
       <div className="dashboard-calendar__day"><strong>{selectedDay === today ? 'Сегодня, ' : ''}{dateLabel(selectedDay)}</strong><span>{calendar.isLoading || calendar.isPlaceholderData ? '…' : `Смены: ${dayShifts.length}`}</span></div>
       <QueryState loading={calendar.isLoading || calendar.isPlaceholderData} error={calendar.isError} retry={calendar.refetch} empty={!dayShifts.length ? 'На этот день смены не назначены.' : undefined}>{shiftRows(dayShifts.slice(0, 5))}{dayShifts.length > 5 && scheduleLink(selectedDay, `Ещё ${dayShifts.length - 5} смен`)}</QueryState>
     </Panel>}
-    {scheduleDay && <AnimatedOverlay variant="modal" onClose={() => setScheduleDay(null)}>{close => <DocumentDialog title="Расписание точек" eyebrow={dateLabel(scheduleDay)} onClose={close}><div className="dashboard-point-choices">{calendarPoints.map(point => <Link key={point.id} to={dayHref(scheduleDay, point.id)}><strong>{point.name}</strong><small>{[point.city, point.address].filter(Boolean).join(', ')}</small><DashboardIcon kind="arrow" /></Link>)}</div></DocumentDialog>}</AnimatedOverlay>}
+    {scheduleDay && <AnimatedOverlay variant="modal" onClose={() => setScheduleDay(null)}>{close => <DocumentDialog title="Расписание точек" eyebrow={dateLabel(scheduleDay)} onClose={close}><div className="dashboard-point-choices">{calendarPoints.map(point => <Link key={point.id} to={dayHref(scheduleDay, point.id)}><strong>{point.name}</strong><small>{[point.city, point.address].filter(Boolean).join(', ')}</small></Link>)}</div></DocumentDialog>}</AnimatedOverlay>}
   </div>
 }

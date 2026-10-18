@@ -28,6 +28,7 @@ export type ShiftDetails = WorkShift & {
     id: string
     changedByName: string
     kind?: string
+    timeCorrection?: { mode: string; before: { attendance: string; actualStartAt: string | null; actualEndAt: string | null }; after: { attendance: string; actualStartAt: string | null; actualEndAt: string | null }; provisional: boolean } | null
     assignmentChange?: { previousMemberName: string; newMemberName: string; initiatorMemberId: string; initiatorMemberName?: string; acceptedByMemberId: string; acceptedByMemberName?: string; reviewedByMemberId: string | null; reviewedByMemberName?: string | null } | null
     previousStartAt: string
     previousEndAt: string
@@ -67,7 +68,7 @@ export type MemberWorkTime = {
   member: { avatarUrl: string | null; id: string; name: string; role: OrganizationRole; active: boolean }
   period: WorkTimeMember | null
   allTime: WorkTimeMember | null
-  history: Array<{ id: string; scheduledStartAt: string; scheduledEndAt: string; actualStartAt: string | null; actualEndAt: string | null; status: 'SCHEDULED' | 'CANCELLED'; minutes: number; plannedMinutes: number; actualMinutes: number | null; breakMinutes: number; actualBreakMinutes: number | null; cancellationReason: string | null; adjusted: boolean; description: string | null }>
+  history: Array<{ attendance?: 'UNCONFIRMED' | 'WORKED' | 'PARTIAL' | 'NO_SHOW'; id: string; scheduledStartAt: string; scheduledEndAt: string; actualStartAt: string | null; actualEndAt: string | null; status: 'SCHEDULED' | 'CANCELLED'; minutes: number; plannedMinutes: number; actualMinutes: number | null; breakMinutes: number; actualBreakMinutes: number | null; cancellationReason: string | null; adjusted: boolean; description: string | null }>
   pagination: { page: number; limit: number; total: number; pages: number }
   timezone: string
 }

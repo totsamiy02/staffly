@@ -4,7 +4,7 @@ import { liveQueryOptions } from '../live-query.ts'
 export type Position = { id: string; name: string; isActive: boolean }
 export type ShiftTemplate = { id: string; name: string; positionId: string | null; startTime: string; endTime: string; endDayOffset: number; isActive: boolean }
 export type PlanningData = { positions: Position[]; templates: ShiftTemplate[]; assignments: Array<{ memberId: string; positionId: string }>; monthlyWorkMinutes: number | null }
-export function useSchedulePlanning(organizationId: string) {
+export function useSchedulePlanning(organizationId: string, pointId?: string | null, enabled = true) {
   const { locationId, apiRequest } = useAuth()
-  return useQuery({ ...liveQueryOptions, queryKey: ['schedule-planning', organizationId, locationId], queryFn: () => apiRequest<PlanningData>('/organizations/' + organizationId + '/schedule/planning') })
+  return useQuery({ ...liveQueryOptions, enabled, queryKey: ['schedule-planning', organizationId, pointId ?? locationId], queryFn: () => apiRequest<PlanningData>('/organizations/' + organizationId + '/schedule/planning' + (pointId ? `?locationId=${pointId}` : '')) })
 }

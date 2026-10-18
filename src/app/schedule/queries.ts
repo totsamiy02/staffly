@@ -46,12 +46,12 @@ export function useWorkTimeStatistics(organizationId: string, params: Statistics
 
 export function useMemberWorkTime(organizationId: string, memberId: string | null, params: StatisticsParams) {
   const { locationId, apiRequest } = useAuth()
-  return useQuery({ ...liveQueryOptions, queryKey: ['member-work-time', organizationId, memberId, params, locationId], queryFn: () => apiRequest<MemberWorkTime>(`/organizations/${organizationId}/members/${memberId}/work-time?${queryString({ ...params, memberState: 'all' })}`), enabled: Boolean(memberId) })
+  return useQuery({ ...liveQueryOptions, queryKey: ['member-work-time', organizationId, memberId, params, locationId], placeholderData: (previous, query) => { const old = query?.queryKey[3] as StatisticsParams | undefined; return query?.queryKey[1] === organizationId && query.queryKey[2] === memberId && query.queryKey.at(-1) === locationId && old?.from === params.from && old?.to === params.to ? previous : undefined }, queryFn: () => apiRequest<MemberWorkTime>(`/organizations/${organizationId}/members/${memberId}/work-time?${queryString({ ...params, memberState: 'all' })}`), enabled: Boolean(memberId) })
 }
 
 export function useMyWorkTime(organizationId: string, params: StatisticsParams, enabled = true) {
   const { locationId, apiRequest } = useAuth()
-  return useQuery({ ...liveQueryOptions, queryKey: ['my-work-time', organizationId, params, locationId], queryFn: () => apiRequest<MemberWorkTime>(`/organizations/${organizationId}/me/work-time?${queryString({ ...params, memberState: 'all' })}`), enabled })
+  return useQuery({ ...liveQueryOptions, queryKey: ['my-work-time', organizationId, params, locationId], placeholderData: (previous, query) => { const old = query?.queryKey[2] as StatisticsParams | undefined; return query?.queryKey[1] === organizationId && query.queryKey.at(-1) === locationId && old?.from === params.from && old?.to === params.to ? previous : undefined }, queryFn: () => apiRequest<MemberWorkTime>(`/organizations/${organizationId}/me/work-time?${queryString({ ...params, memberState: 'all' })}`), enabled })
 }
 
 export function useShiftDetails(organizationId: string, shiftId: string | null, page = 1) {

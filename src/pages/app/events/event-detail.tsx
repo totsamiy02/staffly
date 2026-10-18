@@ -1,8 +1,9 @@
+import MemberProfileLink from '../../../component/ui/member-profile-link.tsx'
+import MemberAvatar from '../../../component/ui/member-avatar.tsx'
 import { useState } from 'react'
 import { useEvent, useEventActions } from '../../../app/events/queries.ts'
 import type { StaffEvent } from '../../../app/events/types.ts'
 import { useToast } from '../../../component/ui/toast/toast-context.ts'
-import Avatar from '../../../component/ui/avatar/avatar.tsx'
 import { eventDate, eventTime, eventTimezoneLabel } from '../../../app/events/format.ts'
 import { displayDate } from '../../../app/schedule/date-utils.ts'
 import DocumentDialog from '../documents/document-dialog.tsx'
@@ -22,8 +23,8 @@ export default function EventDetail({ organizationId, eventId, onClose, onEdit }
       <div className="event-facts"><p><EventIcon /><span>{displayDate(eventDate(event))}</span></p><p><EventIcon kind="clock" /><span>{eventTime(event)}<small>{eventTimezoneLabel(event.timezone)}</small></span></p>{(event.place || event.meetingUrl) && <p><EventIcon kind="place" /><span>{event.place || 'Онлайн'}</span></p>}<p><EventIcon kind="people" /><span>Получателей: {event.recipientCount}</span></p></div>
       {event.description && <section className="event-detail-section"><h3>Описание и повестка</h3><p className="event-description">{event.description}</p></section>}
       {event.meetingUrl && <a className="event-meeting-link app-secondary" href={event.meetingUrl} target="_blank" rel="noopener noreferrer"><EventIcon kind="link" />Открыть ссылку на встречу</a>}
-      <section className="event-detail-section"><h3>Участники <small>{event.recipientCount}</small></h3>{event.recipients.length ? <div className="event-recipients">{event.recipients.map(member => <div key={member.id}><Avatar className="app-avatar" name={member.name} url={member.avatarUrl} /><span>{member.name}</span></div>)}</div> : <p className="event-muted">Действующих получателей нет.</p>}</section>
-      <div className="event-organizer">Создал: <strong>{event.createdBy.name}</strong></div>
+      <section className="event-detail-section"><h3>Участники <small>{event.recipientCount}</small></h3>{event.recipients.length ? <div className="event-recipients">{event.recipients.map(member => <div key={member.id}><MemberAvatar memberId={member.id} className="app-avatar" name={member.name} url={member.avatarUrl} /><MemberProfileLink memberId={member.id}><span>{member.name}</span></MemberProfileLink></div>)}</div> : <p className="event-muted">Действующих получателей нет.</p>}</section>
+      <div className="event-organizer">Создал: <MemberProfileLink memberId={event.createdBy.id}><strong>{event.createdBy.name}</strong></MemberProfileLink></div>
       {!!event.changes?.length && <details className="event-history"><summary>История события</summary><ul>{event.changes.map(change => <li key={change.id}><strong>{({ CREATED: 'Создано', UPDATED: 'Изменено', CANCELLED: 'Отменено' })[change.action] ?? change.action}</strong><span>{change.author}</span><time dateTime={change.createdAt}>{new Date(change.createdAt).toLocaleString('ru-RU', { timeZone: event.timezone, day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</time></li>)}</ul></details>}
       {(event.canManage || event.canCancel) && <footer className="event-detail-actions">{confirm ? <div className="event-cancel-confirm"><strong>Отменить событие?</strong><p>Получатели будут уведомлены. Событие сохранится в истории.</p><div><button className="app-secondary" disabled={actions.cancel.isPending} onClick={() => setConfirm(false)}>Вернуться</button><button className="app-danger" disabled={actions.cancel.isPending} onClick={() => void cancel()}>{actions.cancel.isPending ? 'Отменяем…' : 'Отменить событие'}</button></div></div> : <>{event.canManage && <button className="app-secondary" onClick={() => onEdit(event)}>Редактировать</button>}{event.canCancel && <button className="event-cancel-button" onClick={() => setConfirm(true)}>Отменить событие</button>}</>}</footer>}
       {actions.cancel.error && <p className="form-inline-error" role="alert">{actions.cancel.error.message}</p>}

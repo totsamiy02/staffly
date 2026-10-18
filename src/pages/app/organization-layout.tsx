@@ -1,10 +1,12 @@
+import TimeCorrectionProvider from './schedule/time-correction-provider.tsx'
+import MemberProfileProvider from './member-profile/member-profile-provider.tsx'
 import DraftPage from './schedule/draft-page.tsx'
 import DemandPage from './schedule/demand-page.tsx'
 import { canAccess, type Permission } from '../../app/access/catalog.ts'
 import { locationTone } from '../../app/organizations/format.ts'
 import { useAuth } from '../../app/auth/auth-context.tsx'
 import RoleBadge from '../../component/ui/role-badge/role-badge.tsx'
-import { Navigate, Link, NavLink, Route, Routes, useLocation, useParams, useNavigate } from 'react-router-dom'
+import { Navigate, Link, NavLink, Route, Routes, useLocation, useParams, useNavigate, useNavigationType } from 'react-router-dom'
 import { useState, useEffect, useLayoutEffect, useRef, type ReactNode } from 'react'
 import { useOrganization, useLocations } from '../../app/organizations/queries.ts'
 import AppTopbar from './app-topbar.tsx'
@@ -72,20 +74,14 @@ function WorkspaceLoadError({ retry, notFound, organizationId }: { retry: () => 
 export default function OrganizationLayout() {
   const { organizationId } = useParams()
   const location = useLocation()
+  const navigationType = useNavigationType(), previousPath = useRef(location.pathname)
+  useLayoutEffect(() => { if (previousPath.current !== location.pathname && navigationType !== 'POP') window.scrollTo({ top: 0, behavior: 'instant' }); previousPath.current = location.pathname }, [location.pathname, navigationType])
   const query = useOrganization(organizationId)
   const locations = useLocations(organizationId)
   const { user } = useAuth()
   const navigate = useNavigate()
   const selectedId = query.data?.organization.locationId
-  const contentRef = useRef<HTMLElement>(null)
   const sectionParams = new URLSearchParams(location.search)
-  const sectionKey = [location.pathname, selectedId, sectionParams.get('section'), sectionParams.get('tab'), sectionParams.get('view'), sectionParams.get('folder')].join(':')
-  useLayoutEffect(() => {
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
-    const panel = contentRef.current?.querySelector(':scope > :not(.workspace-location-banner)')
-    const animation = panel?.animate([{ opacity: .3 }, { opacity: 1 }], { duration: 220, easing: 'ease-out' })
-    return () => animation?.cancel()
-  }, [sectionKey])
   useEffect(() => {
     if (selectedId) window.sessionStorage.setItem(`staffly:location:${user?.id}:${organizationId}`, selectedId)
   }, [selectedId, user?.id, organizationId])
@@ -106,7 +102,7 @@ export default function OrganizationLayout() {
       return !value
     })
   }
-  return <div className="app-page"><AppTopbar key={organization.locationId} organization={organization} /><div className={`workspace-shell${sidebarCollapsed ? ' workspace-shell--collapsed' : ''}`}>
+  return <TimeCorrectionProvider key={organization.id + organization.locationId} organization={organization}><MemberProfileProvider organization={organization}><div className="app-page"><AppTopbar key={organization.locationId} organization={organization} /><div className={`workspace-shell${sidebarCollapsed ? ' workspace-shell--collapsed' : ''}`}>
     <aside className="workspace-sidebar" aria-label="Навигация организации">
       <div className="workspace-sidebar__organization"><Avatar url={organization.logoUrl} name={organization.name} className="workspace-sidebar__organization-avatar" eager /><div><strong>{organization.name}</strong><small><RoleBadge role={organization.organizationRole ?? organization.role} name={organization.roleName} /> · {currentSection}</small></div></div>
       <div className="workspace-points" role="radiogroup" aria-label="Точки организации">
@@ -125,7 +121,7 @@ export default function OrganizationLayout() {
       <nav aria-label="Разделы организации">{navigation.filter(([path]) => !path || path === 'settings' && organization.owner || (modulePermissions[path] ?? []).some(p => canAccess(organization,p))).map(([path, label]) => <NavLink end title={sidebarCollapsed ? label : undefined} to={`${path ? `${organizationPath}/${path}` : organizationPath}?location=${organization.locationId}`} key={label}><NavigationIcon section={path} /><span>{label}</span>{path === 'documents' && <DocumentNavBadge organizationId={organization.id} />}</NavLink>)}</nav>
       <div className="workspace-sidebar__footer"><NavLink className="workspace-sidebar__back" title={sidebarCollapsed ? 'Все организации' : undefined} to="/app"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m10 6-6 6 6 6M4 12h16" /></svg><span>Все организации</span></NavLink><Link className="workspace-sidebar__guide" to="/guide" title="Справочник" aria-label="Справочник"><GuideIcon name="book" /><span>Справочник</span></Link></div>
     </aside>
-    <main ref={contentRef} className="workspace-content" key={currentSegment ? organization.locationId : organization.id}>{currentSegment && <div className="workspace-location-banner" data-tone={locationTone(organization.locationId ?? '')}><NavigationIcon section="location" /><strong title={organization.location?.name}>{organization.location?.name}</strong>{locationAddress && <span title={locationAddress}>{locationAddress}</span>}</div>}
+    <main className="workspace-content" key={currentSegment ? organization.locationId : organization.id}>{currentSegment && <div className="workspace-location-banner" data-tone={locationTone(organization.locationId ?? '')}><NavigationIcon section="location" /><strong title={organization.location?.name}>{organization.location?.name}</strong>{locationAddress && <span title={locationAddress}>{locationAddress}</span>}</div>}
       <Routes>
         <Route index element={module(<OrganizationDashboard organization={organization} />)} />
         <Route path="employees" element={module(<OrganizationMembers organization={organization} />)} />
@@ -143,5 +139,5 @@ export default function OrganizationLayout() {
         <Route path="*" element={<ModuleNotFound organizationPath={organizationPath} />} />
       </Routes>
     </main>
-  </div></div>
+  </div></div></MemberProfileProvider></TimeCorrectionProvider>
 }

@@ -1,10 +1,11 @@
+import { useMemberProfile } from '../../../app/member-profile/context.tsx'
 import { useState } from 'react'
 import { definitionOf, fieldKinds, visibleField, type RequestDefinition, type RequestAnswers } from '../../../app/requests/workflow.ts'
 import { useAccessRoles } from '../../../app/access/queries.ts'
 import { useOrganizationDirectory, useLocations } from '../../../app/organizations/queries.ts'
 import Avatar from '../../../component/ui/avatar/avatar.tsx'
 import HelpTip from '../../../component/ui/help-tip/help-tip.tsx'
-import MemberPicker from '../../../component/ui/member-picker/member-picker.tsx'
+import MemberPicker from '../member-profile/profile-member-picker.tsx'
 import DatePicker from '../../../component/ui/date-picker/date-picker.tsx'
 import Select from '../../../component/ui/select/select.tsx'
 import EmployeePicker from '../schedule/employee-picker.tsx'
@@ -19,6 +20,7 @@ function ListOptions({ options, onChange }: { options: string[]; onChange: (valu
   return <input required value={text} placeholder="Форма, Обувь, Другое" onChange={e => { setText(e.target.value); onChange(e.target.value.split(',').map(v => v.trim()).filter(Boolean)) }}/>
 }
 export function WorkflowEditor({ organizationId, value, onChange }: { organizationId: string; value: RequestDefinition; onChange: (v: RequestDefinition) => void }) {
+  const profile = useMemberProfile()
   const roles = useAccessRoles(organizationId), members = useOrganizationDirectory(organizationId)
   const patch = (v: Partial<RequestDefinition>) => onChange({ ...value, ...v })
   const fieldNames = { TEXT: 'Текст', NUMBER: 'Число', MONEY: 'Сумма', DATE: 'Дата', PERIOD: 'Период', SELECT: 'Список вариантов', MEMBER: 'Сотрудник', LOCATION: 'Точка', FILE: 'Файл' }
@@ -35,7 +37,7 @@ export function WorkflowEditor({ organizationId, value, onChange }: { organizati
     <div className="request-builder-section"><h3>Согласование<HelpTip label="Кто рассматривает заявки">По умолчанию решение принимает владелец или сотрудник с правом рассмотрения заявок в нужной точке. Отдельные этапы нужны для последовательного одобрения несколькими людьми.</HelpTip></h3><span className="request-builder-route-label">{value.stages.length ? `Этапов: ${value.stages.length}` : 'По правам роли'}</span>
       <details className="request-builder-disclosure" open={value.stages.length > 0}><summary>Отдельные этапы<HelpTip label="Как работают этапы">Этапы проходят по очереди. Для роли достаточно решения одного подходящего сотрудника. У согласующего должно быть право рассмотрения заявок; самосогласование ограничено отдельно.</HelpTip></summary>
         {(roles.isError || members.isError) && <p role="alert">Не удалось загрузить согласующих. <button type="button" className="app-secondary" onClick={() => { void roles.refetch(); void members.refetch() }}>Повторить</button></p>}
-        {value.stages.map((s, i) => <fieldset key={i}><legend>Этап {i + 1}</legend><label><span>Название этапа</span><input required minLength={2} maxLength={100} placeholder="Проверка руководителем" value={s.name} onChange={e => patch({ stages: value.stages.map((x, j) => i === j ? { ...x, name: e.target.value } : x) })}/></label><label><span>Кто принимает решение</span><Select required value={s.memberId ? 'member:' + s.memberId : s.roleId ? 'role:' + s.roleId : ''} onChange={e => { const [kind, id] = e.target.value.split(':'); patch({ stages: value.stages.map((x, j) => i === j ? { name: x.name, ...(kind === 'member' ? { memberId: id } : { roleId: id }) } : x) }) }}><option value="">Человек или роль</option>{roles.data?.roles.map(r => <option key={r.id} value={'role:' + r.id}>{r.name} · роль</option>)}{members.data?.members.map(m => <option key={m.id} value={'member:' + m.id}><span className="staffly-select__person"><Avatar url={m.avatarUrl} name={m.displayName} className="employee-picker__avatar"/><span><strong>{m.displayName}</strong></span></span></option>)}</Select></label><button type="button" className="request-builder-remove" onClick={() => patch({ stages: value.stages.filter((_, j) => i !== j) })}>Удалить этап</button></fieldset>)}
+        {value.stages.map((s, i) => <fieldset key={i}><legend>Этап {i + 1}</legend><label><span>Название этапа</span><input required minLength={2} maxLength={100} placeholder="Проверка руководителем" value={s.name} onChange={e => patch({ stages: value.stages.map((x, j) => i === j ? { ...x, name: e.target.value } : x) })}/></label><label><span>Кто принимает решение</span><Select onOpenPerson={profile ? value => profile.open(value.slice(7)) : undefined} canOpenPerson={value => value.startsWith('member:') && Boolean(profile?.canOpen(value.slice(7)))} required value={s.memberId ? 'member:' + s.memberId : s.roleId ? 'role:' + s.roleId : ''} onChange={e => { const [kind, id] = e.target.value.split(':'); patch({ stages: value.stages.map((x, j) => i === j ? { name: x.name, ...(kind === 'member' ? { memberId: id } : { roleId: id }) } : x) }) }}><option value="">Человек или роль</option>{roles.data?.roles.map(r => <option key={r.id} value={'role:' + r.id}>{r.name} · роль</option>)}{members.data?.members.map(m => <option key={m.id} value={'member:' + m.id}><span className="staffly-select__person"><Avatar url={m.avatarUrl} name={m.displayName} className="employee-picker__avatar"/><span><strong>{m.displayName}</strong></span></span></option>)}</Select></label><button type="button" className="request-builder-remove" onClick={() => patch({ stages: value.stages.filter((_, j) => i !== j) })}>Удалить этап</button></fieldset>)}
         <button type="button" className="app-secondary" disabled={value.stages.length >= 10 || roles.isLoading} onClick={() => patch({ stages: [...value.stages, { name: 'Согласование', roleId: roles.data?.roles.find(r => r.systemCode === 'ADMIN')?.id }] })}>+ Добавить этап</button>
       </details>
     </div>

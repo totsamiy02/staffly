@@ -1,9 +1,10 @@
+import { previewDeparture, confirmDeparture, departureCandidates, departureBody, departureScope } from './departure-service.ts'
+import { memberProfile } from './member-profile-service.ts'
 import { requirePermission } from './access.ts'
 import { mediaUrl } from '../storage/image-service.ts'
 import { prisma } from '../db.ts'
 import { getMembership } from './permissions.ts'
-import { scopedLocationId } from './location-context.ts'
-import { archiveLocation, requestLocationClosure, assignLocationMember, deleteTeam, listLocations, locationOverview, listTeams, locationMemberBody, removeLocationMember, saveLocation, saveTeam, teamBody, transferBody, transferMember } from './location-service.ts'
+import { archiveLocation, requestLocationClosure, assignLocationMember, deleteTeam, listLocations, locationOverview, listTeams, locationMemberBody, saveLocation, saveTeam, teamBody, transferBody, transferMember } from './location-service.ts'
 import { locationBody } from './schemas.ts'
 import { listNotificationHistory, readHistoryNotification, updateAllNotifications } from './notification-service.ts'
 import { Router, type Request } from 'express'
@@ -12,7 +13,7 @@ import { z } from 'zod'
 import { requireAuth, type AuthenticatedRequest } from '../auth.ts'
 import { deliverOrganizationCreated, deliverOrganizationInvitation, deliverSensitiveActionCode } from '../mail.ts'
 import { ApiError } from '../api-error.ts'
-import { memberFieldVisible, changeMemberRole, createOrganization, getOrganization, listAccountNotifications, listMembers, listMembersPage, listOrganizations, readAccountNotification, removeMember, updateOrganization } from './organization-service.ts'
+import { memberFieldVisible, changeMemberRole, createOrganization, getOrganization, listAccountNotifications, listMembers, listMembersPage, listOrganizations, readAccountNotification, updateOrganization } from './organization-service.ts'
 import { acceptCodeInvitation, acceptEmailInvitation, createCodeInvitation, createEmailInvitation, listActiveOrganizationInvitations, listPendingInvitations, previewCodeInvitation, previewEmailInvitation, rejectEmailInvitation, revokeInvitation } from './invitation-service.ts'
 import { confirmOrganizationDeletion, confirmOwnershipTransfer, requestOrganizationDeletion, requestOwnershipTransfer } from './sensitive-action-service.ts'
 import { createOrganizationBody, emailInvitationBody, inviteCodeBody, inviteParams, memberListQuery, memberParams, organizationIdParams, ownershipRequestBody, roleBody, sensitiveCodeBody, updateOrganizationBody } from './schemas.ts'
@@ -91,6 +92,13 @@ router.get('/organizations/:organizationId/members', async (request, response) =
   response.json({ members: await listMembers(auth(request).userId, organizationId) })
 })
 
+router.get('/organizations/:organizationId/members/:memberId/profile', async (request, response) => {
+  const { organizationId, memberId } = parse(memberParams, request.params)
+  const options = parse(z.object({ month: z.string().regex(/^(20\d{2})-(0[1-9]|1[0-2])$/), page: z.coerce.number().int().min(1).max(100000).default(1), section: z.enum(['overview', 'time', 'documents', 'requests']).default('overview'), kind: z.enum(['personal', 'acknowledgements']).default('personal'), requestState: z.enum(['all', 'pending']).default('all') }), request.query)
+  response.set('Cache-Control', 'private, no-store')
+  response.json(await memberProfile(auth(request).userId, organizationId, memberId, options))
+})
+
 router.patch('/organizations/:organizationId/members/:memberId/role', async (request, response) => {
   const { organizationId, memberId } = parse(memberParams, request.params)
   const { role } = parse(roleBody, request.body)
@@ -98,16 +106,27 @@ router.patch('/organizations/:organizationId/members/:memberId/role', async (req
   response.json({ member })
 })
 
-router.delete('/organizations/:organizationId/members/:memberId', async (request, response) => {
+router.get('/organizations/:organizationId/members/:memberId/departure', async (request, response) => {
   const { organizationId, memberId } = parse(memberParams, request.params)
-  await removeLocationMember(auth(request).userId, organizationId, scopedLocationId(organizationId)!, memberId)
-  response.status(204).end()
+  const { scope } = parse(z.object({ scope: departureScope }), request.query)
+  response.set('Cache-Control', 'private, no-store')
+  response.json(await previewDeparture(auth(request).userId, organizationId, memberId, scope))
 })
-
-router.delete('/organizations/:organizationId/members/:memberId/organization', async (request, response) => {
+router.get('/organizations/:organizationId/members/:memberId/departure/candidates', async (request, response) => {
   const { organizationId, memberId } = parse(memberParams, request.params)
-  const actor = await getMembership(auth(request).userId, organizationId); requirePermission(actor, 'members.exclude', null)
-  await removeMember(auth(request).userId, organizationId, memberId); response.status(204).end()
+  const options = parse(z.object({ scope: departureScope, shiftId: z.uuid(), search: z.string().trim().max(100).default(''), page: z.coerce.number().int().min(1).max(10000).default(1) }), request.query)
+  response.set('Cache-Control', 'private, no-store')
+  response.json(await departureCandidates(auth(request).userId, organizationId, memberId, options.scope, options.shiftId, options.search, options.page))
+})
+router.post('/organizations/:organizationId/members/:memberId/departure', async (request, response) => {
+  const { organizationId, memberId } = parse(memberParams, request.params)
+  response.json(await confirmDeparture(auth(request).userId, organizationId, memberId, parse(departureBody, request.body)))
+})
+// Old clients must review consequences before any destructive action.
+router.delete(['/organizations/:organizationId/members/:memberId', '/organizations/:organizationId/members/:memberId/organization'], async (request, _response) => {
+  const { organizationId } = parse(memberParams, request.params)
+  await getMembership(auth(request).userId, organizationId)
+  throw new ApiError(409, 'DEPARTURE_PREVIEW_REQUIRED', 'Откройте предпросмотр последствий исключения сотрудника.')
 })
 router.post('/organizations/:organizationId/invitations/email', invitationLimiter, async (request, response) => {
   const { organizationId } = parse(organizationIdParams, request.params)

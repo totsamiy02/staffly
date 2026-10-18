@@ -7,7 +7,7 @@ import { createOrganization, listMembersPage } from '../src/server/organizations
 import { locationContext } from '../src/server/organizations/location-context.ts'
 import { getMembership } from '../src/server/organizations/permissions.ts'
 import { hasPermission } from '../src/server/organizations/access.ts'
-import { listAccessRoles, saveAccessRole, saveMemberAccess, deleteAccessRole, accessAudit } from '../src/server/organizations/access-service.ts'
+import { listAccessRoles, saveAccessRole, saveMemberAccess, deleteAccessRole, accessAudit, memberAccess } from '../src/server/organizations/access-service.ts'
 import { buildReport } from '../src/server/schedule/report-service.ts'
 import { defaultReportConfig } from '../src/app/schedule/reporting.ts'
 import { reportBody } from '../src/server/schedule/report-schemas.ts'
@@ -64,6 +64,16 @@ after(async()=>{
 })
 
 describe('custom organization access: scopes, revocation and confidential fields',()=>{
+  it('returns full avatar identity to the owner or employee without exposing storage IDs or another employee access',async()=>{
+    await prisma.user.update({where:{id:people.employee.id},data:{middleName:'Тестович'}})
+    try {
+      const result=await memberAccess(people.owner.id,org,people.employee.memberId)
+      assert.deepEqual(result.member,{firstName:'employee',lastName:'Проверка',middleName:'Тестович',email:people.employee.email,avatarUrl:null})
+      assert.deepEqual((await memberAccess(people.employee.id,org,people.employee.memberId)).member,result.member)
+      await assert.rejects(memberAccess(people.accountant.id,org,people.employee.memberId),code('OWNER_REQUIRED'))
+      await assert.rejects(memberAccess(people.foreign.id,foreign,people.employee.memberId),code('MEMBER_NOT_FOUND'))
+    } finally { await prisma.user.update({where:{id:people.employee.id},data:{middleName:null}}) }
+  })
   it('creates three independent defaults and protects the owner and tenant boundaries',async()=>{
     const defaults=await listAccessRoles(people.owner.id,org)
     assert.equal(defaults.roles.filter(r=>r.systemCode).length,3)
@@ -101,7 +111,7 @@ describe('custom organization access: scopes, revocation and confidential fields
     const shift=await prisma.workShift.create({data:{organizationId:org,locationId:first,memberId:people.employee.memberId,createdByMemberId:people.owner.memberId,scheduledStartAt:new Date('2070-01-02T06:00:00Z'),scheduledEndAt:new Date('2070-01-02T15:00:00Z')}})
     const report=reportBody.parse({from:'2070-01-01',to:'2070-01-31',locationIds:[first],memberIds:[],includeFormer:false,config:defaultReportConfig()})
     const result=await at(second,()=>buildReport(people.accountant.id,org,report,new Date(),'reports.export'))
-    assert.equal(result.rows.shifts[0].id,shift.id);assert.equal(result.rows.shifts[0].personnelNumber,null)
+    assert.equal(result.rows.shifts[0].id,shift.id);assert.equal('personnelNumber' in result.rows.shifts[0],false)
     await assert.rejects(at(second,()=>buildReport(people.accountant.id,org,{...report,locationIds:[second]},new Date(),'reports.export')),code('INSUFFICIENT_PERMISSIONS'))
     await assert.rejects(at(first,()=>createShift(people.accountant.id,org,{memberId:people.employee.memberId,startDate:'2070-02-01',endDate:'2070-02-01',startTime:'09:00',endTime:'18:00',breakMinutes:0,description:null})),code('INSUFFICIENT_PERMISSIONS'))
     await assert.rejects(docs.listDocuments(people.accountant.id,org,listSchema.parse({})),code('INSUFFICIENT_PERMISSIONS'))
@@ -123,10 +133,10 @@ describe('custom organization access: scopes, revocation and confidential fields
     const list=await at(first,()=>listSchedule(people.accountant.id,org,'2071-01-01','2071-02-01'))
     assert.ok(list.shifts.some(s=>s.id===own.id));assert.ok(list.shifts.every(s=>s.memberId===people.accountant.memberId))
     const members=await at(first,()=>listMembersPage(people.accountant.id,org,{directory:'true'}))
-    assert.ok(members.members.every(m=>m.email==='' && m.phone===null && m.personnelNumber===null))
+    assert.ok(members.members.every(m=>m.email==='' && m.phone===null && !('personnelNumber' in m)))
   })
   it('redacts directory fields separately for each point in an all-points query',async()=>{
-    const contacts=await makeRole(['members.contacts','members.personnel.view']), directory=await makeRole(['members.view'])
+    const contacts=await makeRole(['members.contacts']), directory=await makeRole(['members.view'])
     await saveMemberAccess(people.owner.id,org,people.accountant.memberId,{organizationRoleId:null,assignments:[{locationId:first,roleId:contacts.id},{locationId:second,roleId:directory.id}]})
     await assign('employee',memberRole.id,second)
     await prisma.locationMember.updateMany({where:{memberId:people.employee.memberId,locationId:first},data:{leftAt:new Date()}})
@@ -134,7 +144,7 @@ describe('custom organization access: scopes, revocation and confidential fields
     try {
       const page=await at(first,()=>listMembersPage(people.accountant.id,org,{page:1,pageSize:20,directory:'true'}))
       const employee=page.members.find(m=>m.id===people.employee.memberId)!
-      assert.ok(employee); assert.equal(employee.email,''); assert.equal(employee.personnelNumber,null)
+      assert.ok(employee); assert.equal(employee.email,''); assert.equal('personnelNumber' in employee,false)
     } finally {
       await prisma.locationMember.updateMany({where:{memberId:people.employee.memberId,locationId:first},data:{leftAt:null}})
       await prisma.locationMember.updateMany({where:{memberId:people.employee.memberId,locationId:second},data:{leftAt:new Date()}})

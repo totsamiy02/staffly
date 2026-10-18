@@ -20,7 +20,7 @@ export function locationMemberWhere(organizationId: string): Prisma.Organization
   const locationId = scopedLocationId(organizationId)
   return locationId ? { OR: [
     { locationMemberships: { some: { locationId, leftAt: null } } },
-    { locationTransfers: { some: { toLocationId: locationId, temporary: true, endAt: { gt: new Date() } } } },
+    { locationTransfers: { some: { toLocationId: locationId, temporary: true, revokedAt: null, endAt: { gt: new Date() } } } },
   ] } : {}
 }
 export const selectLocation: RequestHandler = async (request, _response, next) => {

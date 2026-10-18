@@ -40,7 +40,7 @@ export default function ShiftFormModal({ organization, members, date, shift, act
   const [extendWindow, setExtendWindow] = useState(draft?.closed ?? false)
   const suggestedDeadline = zonedDateAndTime(new Date(Date.now()+24*3600000).toISOString(), organization.timezone)
   const [deadlineDate,setDeadlineDate]=useState(suggestedDeadline.date),[deadlineTime,setDeadlineTime]=useState(suggestedDeadline.time)
-  const planning = useSchedulePlanning(organization.id)
+  const planning = useSchedulePlanning(organization.id, organization.locationId, !actual)
 
   const [positionId, setPositionId] = useState(shift?.positionId ?? '')
   const [templateId, setTemplateId] = useState('')
@@ -99,7 +99,7 @@ export default function ShiftFormModal({ organization, members, date, shift, act
         const shifts = batch && !shift ? dates.map(day => { const times=overrides[day]??{startTime,endTime,overnight:endDate>startDate};return {memberId,positionId:positionId||null,startDate:day,endDate:addDays(day,times.overnight?1:0),startTime:times.startTime,endTime:times.endTime,breakMinutes:0,description} }) : [{memberId,positionId:positionId||null,startDate,endDate,startTime,endTime,breakMinutes:shift?.breakMinutes??0,description}]
         await apiRequest(`/organizations/${organization.id}/schedule/drafts/${draft.id}/proposals`,{method:'POST',body:{revision:draft.revision,proposalId:draft.proposalId,sourceShiftId:draft.sourceShiftId,kind:draft.sourceShiftId?'UPDATE':'CREATE',shifts,confirmResponseWindow:confirmWindow,deadline:extendWindow?localDateTimeIso(deadlineDate,deadlineTime,organization.timezone):undefined}})
       }
-      else if (actual && shift) await apiRequest(`/organizations/${organization.id}/schedule/shifts/${shift.id}/attendance`,{method:'POST',body:{attendance,reason,startAt:localDateTimeIso(startDate,startTime,organization.timezone),endAt:localDateTimeIso(endDate,endTime,organization.timezone)}})
+      else if (actual && shift) await apiRequest(`/organizations/${organization.id}/schedule/shifts/${shift.id}/attendance${organization.locationId ? `?locationId=${organization.locationId}` : ''}`,{method:'POST',body:{attendance,reason,startAt:localDateTimeIso(startDate,startTime,organization.timezone),endAt:localDateTimeIso(endDate,endTime,organization.timezone)}})
       else if (batch && !shift) {
         await apiRequest('/organizations/' + organization.id + '/shifts/batch', { method: 'POST', body: { acknowledgeAbsence, acknowledgeWorkload, shifts: dates.map(day => {
           const times = overrides[day] ?? { startTime, endTime, overnight: endDate > startDate }

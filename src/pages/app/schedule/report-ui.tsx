@@ -23,9 +23,9 @@ export function ReportMetrics({ result }: { result?: ReportPreview }) {
 }
 
 export function ReportChecks({ result }: { result: ReportPreview }) {
-  const issues = result.metrics.futureShifts || result.warnings.missingNumber.length || result.warnings.incompleteName.length
+  const issues = result.metrics.futureShifts || result.warnings.incompleteName.length
   if (!issues) return null
-  return <section className="report-checks" aria-label="Проверка перед выгрузкой"><h3>Проверка перед выгрузкой</h3>{!!result.warnings.missingNumber.length && <p className="report-hint">Табельный номер необязателен. Заполните его, если бухгалтерия использует номера в своей системе.</p>}{!!result.metrics.futureShifts && <p className="report-future"><ReportIcon kind="clock" /><span>Будущих смен: {result.metrics.futureShifts} · {reportNumber(result.metrics.futureHours)} ч — включены в итог.</span></p>}{(['missingNumber', 'incompleteName'] as const).map(key => !!result.warnings[key].length && <details key={key}><summary>{key === 'missingNumber' ? 'Без табельного номера' : 'Неполное ФИО'}: {result.warnings[key].length}</summary><ul>{result.warnings[key].map(member => <li key={member.id}>{member.name}</li>)}</ul></details>)}</section>
+  return <section className="report-checks" aria-label="Проверка перед выгрузкой"><h3>Проверка перед выгрузкой</h3>{!!result.metrics.futureShifts && <p className="report-future"><ReportIcon kind="clock" /><span>Будущих смен: {result.metrics.futureShifts} · {reportNumber(result.metrics.futureHours)} ч — включены в итог.</span></p>}{(['incompleteName'] as const).map(key => !!result.warnings[key].length && <details key={key}><summary>Неполное ФИО: {result.warnings[key].length}</summary><ul>{result.warnings[key].map(member => <li key={member.id}>{member.name}</li>)}</ul></details>)}</section>
 }
 
 // Full identifiers stay available to assistive technology, by hover and by copy.

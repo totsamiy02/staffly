@@ -3,8 +3,8 @@ import { rateLimit } from 'express-rate-limit'
 import { z } from 'zod'
 import { requireAuth, type AuthenticatedRequest } from '../auth.ts'
 import { ApiError } from '../api-error.ts'
-import { reportBody, templateBody, personnelBody } from './report-schemas.ts'
-import { buildReport, previewReport, reportWorkbook, reportOptions, reportMembers, saveReportTemplate, deleteReportTemplate, updatePersonnelNumber } from './report-service.ts'
+import { reportBody, templateBody } from './report-schemas.ts'
+import { buildReport, previewReport, reportWorkbook, reportOptions, reportMembers, saveReportTemplate, deleteReportTemplate } from './report-service.ts'
 
 const router = Router()
 router.use(requireAuth)
@@ -27,5 +27,4 @@ router.post(base + '/export', exportLimiter, async (request, response) => {
 router.post(base + '/templates', mutationLimiter, async (request, response) => { const { organizationId } = parse(params, request.params); response.status(201).json(await saveReportTemplate(user(request), organizationId, null, parse(templateBody, request.body))) })
 router.put(base + '/templates/:templateId', mutationLimiter, async (request, response) => { const { organizationId, templateId } = parse(templateParams, request.params); response.json(await saveReportTemplate(user(request), organizationId, templateId, parse(templateBody, request.body))) })
 router.delete(base + '/templates/:templateId', mutationLimiter, async (request, response) => { const { organizationId, templateId } = parse(templateParams, request.params); await deleteReportTemplate(user(request), organizationId, templateId); response.status(204).end() })
-router.patch('/organizations/:organizationId/members/:memberId/personnel-number', mutationLimiter, async (request, response) => { const { organizationId, memberId } = parse(params.extend({ memberId: z.uuid() }), request.params); await updatePersonnelNumber(user(request), organizationId, memberId, parse(personnelBody, request.body).personnelNumber); response.status(204).end() })
 export default router

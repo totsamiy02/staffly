@@ -83,3 +83,4 @@ input[aria-invalid=true]:focus-visible, textarea[aria-invalid=true]:focus-visibl
 [data-tone=rose] { --point-color: #ac526d; --point-bg: #fcf0f4; --point-border: #f0d4dd; }
 [data-tone=clay] { --point-color: #996145; --point-bg: #faf1e9; --point-border: #ead8c9; }
 .staffly-select__options--floating { z-index: 2000; min-width: 0; overscroll-behavior: contain; scrollbar-width: thin; box-sizing: border-box; }
+.staffly-select > button.staffly-select__profile {width:auto;min-height:26px;height:auto;padding:3px 0;margin-top:5px;border:0;background:transparent;font:inherit;font-size:11px;color:#777;cursor:pointer;text-align:left;}
