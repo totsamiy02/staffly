@@ -1,4 +1,5 @@
 import { startRequestMaintenance } from './requests/worker.ts'
+import { startEmailNotifications } from './profile/email-worker.ts'
 import teamPlanningRouter from './schedule/team-planning-routes.ts'
 import express from 'express'
 import { ZodError } from 'zod'
@@ -107,6 +108,26 @@ const port = Number(process.env.PORT || 3001)
 const stopStorageCleanup = startStorageCleanup()
 const stopRequestMaintenance = startRequestMaintenance()
 const stopEventNotifications = startEventNotifications()
-app.listen(port, () => console.log(`Staffly API: http://localhost:${port}`))
+const stopEmailNotifications = startEmailNotifications()
+const server = app.listen(port, () => console.log(`Staffly API: http://localhost:${port}`))
 
-process.on('SIGTERM', () => { stopStorageCleanup(); stopEventNotifications(); stopRequestMaintenance(); void prisma.$disconnect() })
+let shuttingDown = false
+async function shutdown() {
+  if (shuttingDown) return
+  shuttingDown = true
+  // tsx watch allows five seconds. Stop accepting HTTP work immediately, drain
+  // existing work, then disconnect Prisma. Bound stalled connections before tsx kills us.
+  const deadline = setTimeout(() => { server.closeAllConnections(); process.exit(Number(process.exitCode ?? 0)) }, 4_000)
+  deadline.unref()
+  try {
+    const closed = new Promise<void>(resolve => { server.close(() => resolve()); server.closeIdleConnections() })
+    await Promise.all([closed, stopStorageCleanup(), stopEventNotifications(), stopRequestMaintenance(), stopEmailNotifications()])
+    await prisma.$disconnect()
+    clearTimeout(deadline)
+  } catch (error) {
+    console.error('API shutdown failed:', error)
+    process.exitCode = 1
+  }
+}
+process.once('SIGTERM', () => { void shutdown() })
+process.once('SIGINT', () => { void shutdown() })

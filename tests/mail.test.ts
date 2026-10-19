@@ -20,40 +20,42 @@ after(() => {
   if (originalUser === undefined) delete process.env.SMTP_USER; else process.env.SMTP_USER = originalUser
   if (originalPassword === undefined) delete process.env.SMTP_APP_PASSWORD; else process.env.SMTP_APP_PASSWORD = originalPassword
 })
-it('renders invitation logo, inviter name, expiry and a safe registration-preserving link using the existing mail template', async () => {
-  await mail.deliverOrganizationInvitation('recipient@example.test', 'Кофейня <script>', 'Петров Иван', 'test-token', new Date('2026-10-01T12:00:00Z'), '/api/media/123')
+it('renders an invitation with escaped names, expiry and a registration-preserving link', async () => {
+  await mail.deliverOrganizationInvitation('recipient@example.test', 'Кофейня <script>', 'Петров Иван', 'test-token', new Date('2026-10-01T12:00:00Z'))
   const message = sent.at(-1)!
   assert.equal(message.to, 'recipient@example.test')
   assert.ok(message.html.includes('Петров Иван'))
-  assert.ok(message.html.includes('/api/media/123'))
   assert.ok(message.html.includes('Кофейня &lt;script&gt;'))
   assert.ok(!message.html.includes('<script>'))
   assert.ok(message.html.includes('/app?invite=test-token'))
   assert.ok(message.html.includes('15:00:00'))
-  assert.ok(message.html.includes('зарегистрируйтесь с этим адресом'))
-  await mail.deliverOrganizationInvitation('recipient@example.test', 'Кофейня', 'sender@example.test', 'fallback-token', new Date('2026-10-01T12:00:00Z'))
-  assert.ok(sent.at(-1)!.html.includes('text-align:center;font-size:22px'))
+  assert.ok(message.html.includes('зарегистрируйтесь с указанной почтой'))
+  assert.ok(!message.html.includes('Настроить уведомления'))
 })
-it('distinguishes assigned/changed/cancelled shifts and links to the exact shift', async () => {
-  for (const [type, title] of [['SHIFT_ASSIGNED', 'Назначена смена'], ['SHIFT_CHANGED', 'Смена изменена'], ['SHIFT_CANCELLED', 'Смена отменена']] as const) {
-    await mail.deliverShiftAssignment('recipient@example.test', 'org-id', 'Кофейня', new Date('2026-10-01T00:00:00Z'), new Date('2026-10-01T08:00:00Z'), 'Asia/Vladivostok', 'shift-id', type)
+it('keeps mandatory codes outside subscription controls with contextual instructions', async () => {
+  for (const kind of ['verification','reset'] as const) {
+    await mail.deliverSecurityCode(kind, 'recipient@example.test', '123456')
     const message = sent.at(-1)!
-    assert.ok(message.subject.startsWith(title))
-    assert.ok(message.html.includes('month=2026-10&amp;shift=shift-id'))
-    assert.ok(message.text.includes('shift=shift-id'))
+    assert.ok(message.html.includes('123 456'))
+    assert.ok(message.text.includes('10 минут'))
+    assert.ok(!message.html.includes('Настроить уведомления'))
+  }
+  for (const kind of ['ownership','deletion','location'] as const) {
+    await mail.deliverSensitiveActionCode(kind,'recipient@example.test','Север','654321','Анна Петрова')
+    assert.ok(sent.at(-1)!.html.includes('654 321'))
+    assert.ok(sent.at(-1)!.text.includes('Не запрашивали'))
+    assert.ok(!sent.at(-1)!.html.includes('Настроить уведомления'))
   }
 })
-it('renders request decisions and retains essential security email templates', async () => {
-  await mail.deliverRequestDecision('recipient@example.test', 'org-id', 'Кофейня', 'request-id', 'Отпуск', 'REJECTED', '<img onerror=bad>')
-  assert.equal(sent.at(-1)!.subject, 'Заявка отклонена — Staffly')
-  assert.ok(sent.at(-1)!.html.includes('request=request-id'))
-  assert.ok(sent.at(-1)!.html.includes('&lt;img onerror=bad&gt;'))
-  await mail.deliverRequestDecision('recipient@example.test', 'org-id', 'Кофейня', 'request-id', 'Отпуск', 'APPROVED', null)
-  assert.equal(sent.at(-1)!.subject, 'Заявка одобрена — Staffly')
-  await mail.deliverPasswordChanged('recipient@example.test')
-  assert.equal(sent.at(-1)!.subject, 'Пароль изменён — Staffly')
-  await mail.deliverSecurityCode('verification', 'recipient@example.test', '123456')
-  assert.ok(sent.at(-1)!.html.includes('123456'))
-  await mail.deliverRoleChanged('recipient@example.test', 'Кофейня', 'Администратор')
-  assert.ok(sent.at(-1)!.html.includes('Администратор'))
+it('renders rounded responsive working letters with readable plain text, before/after and preference link', () => {
+  const message = mail.renderEmail({title:'Ваша смена изменена',intro:'Расписание обновлено',optional:true,fields:[['Было','09:00–18:00'],['Стало','11:00–20:00'],['Причина','<img onerror=bad>']],action:{label:'Открыть смену',path:'/app/organizations/test/schedule?shift=shift-id&location=point-id'}})
+  assert.ok(message.html.includes('&lt;img onerror=bad&gt;'))
+  assert.ok(!message.html.includes('<img onerror'))
+  assert.ok(message.html.includes('section=notifications'))
+  assert.ok(message.html.includes('@media(max-width:600px)'))
+  assert.ok(message.html.includes('border-radius:16px'))
+  assert.ok(message.text.includes('Было: 09:00–18:00'))
+  assert.ok(message.text.includes('Стало: 11:00–20:00'))
+  assert.ok(message.html.includes('shift=shift-id&amp;location=point-id'))
+  assert.throws(()=>mail.renderEmail({title:'Test',intro:'Test',action:{label:'Open',path:'https://evil.example'}}),/Invalid email action URL/)
 })

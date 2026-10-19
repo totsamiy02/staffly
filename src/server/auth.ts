@@ -6,7 +6,8 @@ import { hash, verify, argon2id } from 'argon2'
 import { SignJWT, jwtVerify } from 'jose'
 import { z } from 'zod'
 import { prisma } from './db.ts'
-import { deliverPasswordChanged, deliverSecurityCode } from './mail.ts'
+import { deliverSecurityCode } from './mail.ts'
+import { queuePasswordChanged } from './profile/email-outbox.ts'
 import { mediaUrl } from './storage/image-service.ts'
 
 const jwtSecret = process.env.JWT_SECRET
@@ -320,11 +321,11 @@ router.post('/reset-password', accountLimiter, async (request, response) => {
     if (!updated.count || !nextHash) return false
     await tx.user.update({ where: { id: user.id }, data: { passwordHash: nextHash } })
     await tx.authSession.updateMany({ where: { userId: user.id, revokedAt: null }, data: { revokedAt: new Date(), lastActiveAt: null } })
+    await queuePasswordChanged(tx, user.id)
     return true
   })
   if (!changed) { response.status(400).json({ message: 'Неверный или истёкший код.' }); return }
   clearRefreshCookie(response)
-  void deliverPasswordChanged(user.email).catch((error) => console.error('Password-reset email failed:', error))
   response.json({ message: 'Пароль обновлён. Войдите снова.' })
 })
 
@@ -335,11 +336,11 @@ router.post('/change-password', loginLimiter, requireAuth, async (request: Authe
   if (!await verify(user.passwordHash, parsed.data.currentPassword)) { response.status(401).json({ message: 'Текущий пароль указан неверно.' }); return }
   if (parsed.data.currentPassword === parsed.data.newPassword) { response.status(400).json({ message: 'Новый пароль должен отличаться от текущего.' }); return }
   const nextHash = await passwordHash(parsed.data.newPassword)
-  await prisma.$transaction([
-    prisma.user.update({ where: { id: user.id }, data: { passwordHash: nextHash } }),
-    prisma.authSession.updateMany({ where: { userId: user.id, id: { not: request.auth!.sessionId }, revokedAt: null }, data: { revokedAt: new Date(), lastActiveAt: null } }),
-  ])
-  void deliverPasswordChanged(user.email).catch((error) => console.error('Password-changed email failed:', error))
+  await prisma.$transaction(async tx => {
+    await tx.user.update({ where: { id: user.id }, data: { passwordHash: nextHash } })
+    await tx.authSession.updateMany({ where: { userId: user.id, id: { not: request.auth!.sessionId }, revokedAt: null }, data: { revokedAt: new Date(), lastActiveAt: null } })
+    await queuePasswordChanged(tx, user.id)
+  })
   response.json({ message: 'Пароль обновлён. Другие сеансы завершены.' })
 })
 

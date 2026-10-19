@@ -1,13 +1,5 @@
 import { deliverEventStarts } from './service.ts'
+import { startBackgroundTask } from '../background-task.ts'
 export function startEventNotifications() {
-  let running = false
-  const tick = async () => {
-    if (running) return
-    running = true
-    try { await deliverEventStarts() } catch (error) { console.error('Event start notifications failed:', error) } finally { running = false }
-  }
-  const timer = setInterval(() => { void tick() }, 30000)
-  timer.unref()
-  void tick()
-  return () => clearInterval(timer)
+  return startBackgroundTask({ name: 'Event start notifications', intervalMs: 30_000, run: () => deliverEventStarts() })
 }

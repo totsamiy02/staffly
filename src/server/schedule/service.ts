@@ -11,7 +11,7 @@ import { prisma } from '../db.ts'
 import { ApiError } from '../api-error.ts'
 import { getMembership } from '../organizations/permissions.ts'
 import { addCalendarDays, startOfZonedDate, zonedDateTimeToUtc } from './timezone.ts'
-import { recordShiftNotification, sendImportantShiftEmail } from '../organizations/notification-service.ts'
+import { recordShiftNotification } from '../organizations/notification-service.ts'
 
 const dateText = (value: Date) => value.toISOString().slice(0, 10)
 export function shiftConflictMessage(shift: {scheduledStartAt:Date|string;scheduledEndAt:Date|string}, timezone:string) {
@@ -175,9 +175,6 @@ export async function createShiftBatch(userId: string, organizationId: string, i
       }
       return records
     }, { isolationLevel: 'Serializable' })
-    for (const item of result) {
-      void sendImportantShiftEmail(item.notification.id, item.created, item.created.member.user.email, actor.organization.name, actor.organization.timezone, 'SHIFT_ASSIGNED').catch(error => console.error('Shift email failed:', error))
-    }
     return { shifts: result.map(item => publicShift(item.created)) }
   } catch (error) {
     if (isOverlapError(error) || (error as { code?: string }).code === 'P2034') throw new ApiError(409, 'SHIFT_CONFLICT', 'Расписание изменилось или смены пересекаются. Пакет не сохранён. Проверьте даты и повторите.')
@@ -191,7 +188,7 @@ export async function updateShift(userId: string, organizationId: string, shiftI
   const current = await shiftInOrganization(prisma, organizationId, shiftId)
   if (current.status === 'CANCELLED') throw new ApiError(409, 'SHIFT_CANCELLED', 'Отменённую смену нельзя изменить.')
   if (current.scheduledEndAt <= new Date()) throw new ApiError(409, 'SHIFT_ALREADY_FINISHED', 'Для завершённой смены измените фактическое время.')
-  const target = await activeTarget(prisma, organizationId, input.memberId)
+  await activeTarget(prisma, organizationId, input.memberId)
   const startAt = zonedDateTimeToUtc(input.startDate, input.startTime, actor.organization.timezone)
   const endAt = zonedDateTimeToUtc(input.endDate, input.endTime, actor.organization.timezone)
   validateDuration(startAt, endAt, input.breakMinutes)
@@ -211,11 +208,6 @@ export async function updateShift(userId: string, organizationId: string, shiftI
       if (input.positionId && !position) throw new ApiError(400, 'POSITION_NOT_ASSIGNED', 'Выберите назначенную сотруднику должность.')
       return mutatePlannedShift(tx, actor, { current: fresh, input, startAt, endAt })
     }, { isolationLevel: 'Serializable' })
-    if (shift.notification) void sendImportantShiftEmail(shift.notification.id, shift.changed, target.user.email, actor.organization.name, actor.organization.timezone, current.memberId !== input.memberId ? 'SHIFT_ASSIGNED' : 'SHIFT_CHANGED', current).catch(error => console.error('Shift email failed:', error))
-    if (shift.previousAssignment) {
-      const previous = shift.previousAssignment
-      void sendImportantShiftEmail(previous.notification.id, previous.shift, previous.shift.member.user.email, actor.organization.name, actor.organization.timezone, 'SHIFT_CANCELLED').catch(error => console.error('Shift email failed:', error))
-    }
     return publicShift(shift.changed)
   } catch (error) {
     if (isOverlapError(error)) throw new ApiError(409, 'SHIFT_OVERLAP', 'У сотрудника уже есть пересекающаяся смена.')
@@ -270,7 +262,6 @@ export async function cancelShift(userId: string, organizationId: string, shiftI
     if (fresh.status === 'CANCELLED') throw new ApiError(409, 'SHIFT_CANCELLED', 'Смена уже отменена.')
     return mutatePlannedShift(tx, actor, { current: fresh, reason })
   }, { isolationLevel: 'Serializable' })
-  void sendImportantShiftEmail(shift.notification!.id, shift.changed, shift.changed.member.user.email, actor.organization.name, actor.organization.timezone, 'SHIFT_CANCELLED').catch(error => console.error('Shift email failed:', error))
   return publicShift(shift.changed)
 }
 
@@ -307,7 +298,7 @@ export async function mutatePlannedShift(tx: Prisma.TransactionClient, actor: Aw
     if (!current) throw new ApiError(400, 'SHIFT_REQUIRED', 'Выберите исходную смену.')
     const changed = await tx.workShift.update({ where: { id: current.id }, data: { status: 'CANCELLED', cancelledAt: new Date(), cancelledByMemberId: actor.id, cancellationReason: change.reason ?? 'Отмена в предварительном графике' }, include: shiftInclude })
     await cancelShiftRequests(tx, actor.organizationId, [current.id], actor.id, 'Исходная смена отменена.')
-    const notification = await recordShiftNotification(tx, changed, 'SHIFT_CANCELLED', actor.organization.timezone)
+    const notification = await recordShiftNotification(tx, changed, 'SHIFT_CANCELLED', actor.organization.timezone, undefined, actor.id)
     return { changed, notification, previousAssignment }
   }
   if (!startAt || !endAt) throw new ApiError(400, 'SHIFT_RANGE', 'Укажите время смены.')
@@ -325,10 +316,10 @@ export async function mutatePlannedShift(tx: Prisma.TransactionClient, actor: Aw
     if (current.memberId !== input.memberId) {
       const member = await tx.organizationMember.findUniqueOrThrow({ where: { id: current.memberId }, include: { user: { select: { email: true } } } })
       const shift = { ...current, member }
-      previousAssignment = { shift, notification: await recordShiftNotification(tx, shift, 'SHIFT_CANCELLED', actor.organization.timezone) }
+      previousAssignment = { shift, notification: await recordShiftNotification(tx, { ...shift, cancellationReason: 'Смена переназначена другому сотруднику' }, 'SHIFT_CANCELLED', actor.organization.timezone, undefined, actor.id) }
     }
   }
-  const notification = assignmentChanged ? await recordShiftNotification(tx, changed, !current || current.memberId !== input.memberId ? 'SHIFT_ASSIGNED' : 'SHIFT_CHANGED', actor.organization.timezone) : null
+  const notification = assignmentChanged ? await recordShiftNotification(tx, changed, !current || current.memberId !== input.memberId ? 'SHIFT_ASSIGNED' : 'SHIFT_CHANGED', actor.organization.timezone, current, actor.id) : null
   return { changed, notification, previousAssignment }
 }
 

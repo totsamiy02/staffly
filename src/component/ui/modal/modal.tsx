@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import './modal.scss'
+import './dialog-shell.scss'
 
 type ModalProps = {
   isOpen: boolean

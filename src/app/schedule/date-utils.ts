@@ -1,5 +1,18 @@
 import type { WorkShift } from './types.ts'
 
+// Reuse ICU formatters across cells and renders; constructing one per shift/day is expensive.
+const dateFormatters = new Map<string, Intl.DateTimeFormat>()
+function dateFormatter(kind: string, timezone: string, locale: string, options: Intl.DateTimeFormatOptions) {
+  const key = `${kind}:${timezone}`
+  let formatter = dateFormatters.get(key)
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat(locale, { ...options, timeZone: timezone })
+    if (dateFormatters.size >= 64) dateFormatters.delete(dateFormatters.keys().next().value!)
+    dateFormatters.set(key, formatter)
+  }
+  return formatter
+}
+
 export function dateKey(date: Date) {
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`
 }
@@ -11,7 +24,7 @@ export function addDays(value: string, amount: number) {
 }
 
 export function monthKeyInZone(date: Date, timezone: string) {
-  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit' }).formatToParts(date)
+  const parts = dateFormatter('month-key', timezone, 'en-CA', { year: 'numeric', month: '2-digit' }).formatToParts(date)
   const get = (name: string) => parts.find((part) => part.type === name)?.value ?? ''
   return `${get('year')}-${get('month')}`
 }
@@ -36,17 +49,17 @@ export function moveMonth(month: string, amount: number) {
 
 export function formatMonth(month: string) {
   const [year, number] = month.split('-').map(Number)
-  return new Intl.DateTimeFormat('ru-RU', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(Date.UTC(year, number - 1, 1)))
+  return dateFormatter('month', 'UTC', 'ru-RU', { month: 'long', year: 'numeric' }).format(new Date(Date.UTC(year, number - 1, 1)))
 }
 
 export function zonedDateAndTime(value: string, timezone: string) {
-  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(value))
+  const parts = dateFormatter('date-time', timezone, 'en-CA', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(value))
   const get = (name: string) => parts.find((part) => part.type === name)?.value ?? ''
   return { date: `${get('year')}-${get('month')}-${get('day')}`, time: `${get('hour')}:${get('minute')}` }
 }
 
 export function formatTime(value: string, timezone: string) {
-  return new Intl.DateTimeFormat('ru-RU', { timeZone: timezone, hour: '2-digit', minute: '2-digit' }).format(new Date(value))
+  return dateFormatter('time', timezone, 'ru-RU', { hour: '2-digit', minute: '2-digit' }).format(new Date(value))
 }
 
 export function formatDuration(minutes: number) {
@@ -57,7 +70,7 @@ export function formatDuration(minutes: number) {
 }
 
 export function displayDate(value: string) {
-  return new Intl.DateTimeFormat('ru-RU', { dateStyle: 'long', timeZone: 'UTC' }).format(new Date(`${value}T00:00:00Z`))
+  return dateFormatter('date', 'UTC', 'ru-RU', { dateStyle: 'long' }).format(new Date(`${value}T00:00:00Z`))
 }
 
 export function shiftState(shift: Pick<WorkShift, 'status' | 'scheduledStartAt' | 'scheduledEndAt' | 'actualStartAt' | 'actualEndAt'>, now = Date.now()) {
@@ -77,11 +90,25 @@ export function shiftTimeRange(startAt: string, endAt: string, timezone: string,
   return `${start.time}–${end.time}`
 }
 
-export function shiftCoversDate(shift: WorkShift, day: string, timezone: string) {
+export function shiftCoversDate(shift: Pick<WorkShift, 'scheduledStartAt' | 'scheduledEndAt'>, day: string, timezone: string) {
   const start = zonedDateAndTime(shift.scheduledStartAt, timezone)
   const end = zonedDateAndTime(shift.scheduledEndAt, timezone)
   const lastDay = end.time === '00:00' && end.date !== start.date ? addDays(end.date, -1) : end.date
   return day >= start.date && day <= lastDay
+}
+
+/** Convert each shift's timezone boundaries once, then place it in the requested calendar days. */
+export function shiftsByDate<T extends Pick<WorkShift, 'scheduledStartAt' | 'scheduledEndAt'>>(shifts: readonly T[], days: readonly string[], timezone: string) {
+  const result = new Map(days.map(day => [day, [] as T[]]))
+  if (!days.length) return result
+  const sortedDays = [...days].sort(), first = sortedDays[0], last = sortedDays.at(-1)!
+  for (const shift of shifts) {
+    const start = zonedDateAndTime(shift.scheduledStartAt, timezone)
+    const end = zonedDateAndTime(shift.scheduledEndAt, timezone)
+    const lastDay = end.time === '00:00' && end.date !== start.date ? addDays(end.date, -1) : end.date
+    for (let day = start.date < first ? first : start.date; day <= last && day <= lastDay; day = addDays(day, 1)) result.get(day)?.push(shift)
+  }
+  return result
 }
 
 // Convert a form's wall-clock value in the point timezone, independently of the browser zone.

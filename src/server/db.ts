@@ -1,4 +1,4 @@
-import { PrismaPg } from '@prisma/adapter-pg'
+import { SequentialPrismaPg } from './prisma-pg.ts'
 import { PrismaClient } from '../generated/prisma/client.ts'
 
 const rawUrl = process.env.DATABASE_URL
@@ -10,5 +10,5 @@ url.searchParams.delete('schema')
 if (url.hostname === 'localhost') url.hostname = '127.0.0.1'
 
 export const prisma = new PrismaClient({
-  adapter: new PrismaPg({ connectionString: url.toString() }),
+  adapter: new SequentialPrismaPg({ connectionString: url.toString() }),
 })

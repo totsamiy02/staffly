@@ -6,35 +6,16 @@ import { formatNotificationPeriod } from '../../app/organizations/notification-f
 import { getMembership } from './permissions.ts'
 import { ApiError } from '../api-error.ts'
 import { mediaUrl } from '../storage/image-service.ts'
-import { deliverShiftAssignment } from '../mail.ts'
 
 const labels = { SHIFT_ASSIGNED: 'Назначена смена', SHIFT_CHANGED: 'Смена изменена', SHIFT_CANCELLED: 'Смена отменена' } as const
 export type ShiftEventType = keyof typeof labels
 
 type ShiftEvent = { locationId?: string; id: string; organizationId: string; scheduledStartAt: Date; scheduledEndAt: Date; member: { userId: string } }
-export async function recordShiftNotification(tx: Prisma.TransactionClient, shift: ShiftEvent, type: ShiftEventType, timezone: string) {
-  return tx.accountNotification.create({ data: { userId: shift.member.userId, organizationId: shift.organizationId, shiftId: shift.id, type, title: labels[type], message: formatNotificationPeriod(shift.scheduledStartAt, shift.scheduledEndAt, timezone) } })
+export async function recordShiftNotification(tx: Prisma.TransactionClient, shift: ShiftEvent & { positionNameSnapshot?: string | null; cancellationReason?: string | null }, type: ShiftEventType, timezone: string, previous?: { scheduledStartAt: Date; scheduledEndAt: Date; positionNameSnapshot?: string | null }, actorMemberId?: string) {
+  return tx.accountNotification.create({ data: { userId: shift.member.userId, organizationId: shift.organizationId, shiftId: shift.id, type, title: labels[type], message: formatNotificationPeriod(shift.scheduledStartAt, shift.scheduledEndAt, timezone), emailContext: { actorMemberId, shiftId: shift.id, startAt: shift.scheduledStartAt.toISOString(), endAt: shift.scheduledEndAt.toISOString(), locationId: shift.locationId, timezone, position: shift.positionNameSnapshot ?? null, reason: shift.cancellationReason ?? null, ...(previous ? { previous: { startAt: previous.scheduledStartAt.toISOString(), endAt: previous.scheduledEndAt.toISOString(), position: previous.positionNameSnapshot ?? null } } : {}) } } })
 }
-
 export function isUrgentShiftEmail(start: Date, end: Date, now = new Date()) {
   return end > now && start.getTime() <= now.getTime() + 24 * 60 * 60 * 1000
-}
-
-// A durable reservation makes simultaneous bulk operations share the same email limit.
-export async function reserveShiftEmail(notificationId: string, userId: string, organizationId: string, now = new Date()) {
-  return prisma.$transaction(async tx => {
-    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${userId}, 0))::text`
-    const sent = await tx.accountNotification.findFirst({ where: { userId, organizationId, emailAttemptedAt: { gt: new Date(now.getTime() - 60 * 60 * 1000) } }, select: { id: true } })
-    if (sent) return false
-    const reserved = await tx.accountNotification.updateMany({ where: { id: notificationId, userId, organizationId, emailAttemptedAt: null }, data: { emailAttemptedAt: now } })
-    return reserved.count === 1
-  })
-}
-
-export async function sendImportantShiftEmail(notificationId: string, shift: ShiftEvent, email: string, organizationName: string, timezone: string, type: ShiftEventType, previous?: { scheduledStartAt: Date; scheduledEndAt: Date }) {
-  if (!isUrgentShiftEmail(shift.scheduledStartAt, shift.scheduledEndAt) && !(previous && isUrgentShiftEmail(previous.scheduledStartAt, previous.scheduledEndAt))) return
-  if (!await reserveShiftEmail(notificationId, shift.member.userId, shift.organizationId)) return
-  await deliverShiftAssignment(email, shift.organizationId, organizationName, shift.scheduledStartAt, shift.scheduledEndAt, timezone, shift.id, type, shift.locationId)
 }
 
 type HistoryRow = { vacationCampaignId:string|null;vacationYear:number|null; scheduleDraftId: string | null; shiftOfferId: string | null; eventId: string | null; eventLocationIds: string[]; requestSystemCode: string | null; locationId: string | null; locationName: string | null; actionable: boolean; documentId: string | null; absenceId: string | null; id: string; source: 'event' | 'invite'; type: string; title: string; message: string; createdAt: Date; readAt: Date | null; organizationId: string; organizationName: string; logoFileId: string | null; timezone: string; role: string | null; requestId: string | null; shiftId: string | null; shiftStartAt: Date | null; state: string | null; expiresAt: Date | null; inviter: string | null }

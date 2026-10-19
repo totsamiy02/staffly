@@ -1,3 +1,4 @@
+import { enqueueEmail } from '../profile/email-outbox.ts'
 import { ensureAccessRoles, hasPermission, requirePermission } from './access.ts'
 import type { Permission } from '../../app/access/catalog.ts'
 import { claimSensitiveToken, createSensitiveToken } from './sensitive-action-service.ts'
@@ -72,7 +73,9 @@ export async function archiveLocation(userId: string, organizationId: string, lo
     await assertLocationCanClose(tx, organizationId, locationId)
     if (!await claimSensitiveToken(tx, userId, organizationId, 'ARCHIVE_LOCATION', code, locationId)) return null
     await tx.organizationInvite.updateMany({ where: { locationId, acceptedAt: null, revokedAt: null }, data: { revokedAt: new Date() } })
-    return tx.organizationLocation.update({ where: { id: locationId }, data: { archivedAt: new Date() } })
+    const point = await tx.organizationLocation.update({ where: { id: locationId }, data: { archivedAt: new Date() } })
+    await enqueueEmail(tx, { userId, organizationId, sourceKind: 'MANDATORY', sourceKey: `location:closed:${point.id}:${point.archivedAt!.toISOString()}`, content: { title: 'Точка закрыта', eyebrow: 'Действие выполнено', organization: actor.organization.name, intro: `Точка «${point.name}» в организации «${actor.organization.name}» закрыта.`, action: { label: 'Открыть организацию', path: `/app/organizations/${organizationId}` }, footer: 'Это подтверждение выполненного действия.' } })
+    return point
   })
   if (!result) throw new ApiError(400, 'INVALID_VERIFICATION_CODE', 'Код неверен или срок его действия истёк.')
   return result

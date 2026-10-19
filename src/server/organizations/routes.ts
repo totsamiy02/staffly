@@ -11,10 +11,10 @@ import { Router, type Request } from 'express'
 import { rateLimit } from 'express-rate-limit'
 import { z } from 'zod'
 import { requireAuth, type AuthenticatedRequest } from '../auth.ts'
-import { deliverOrganizationCreated, deliverOrganizationInvitation, deliverSensitiveActionCode } from '../mail.ts'
+import { deliverOrganizationInvitation, deliverSensitiveActionCode } from '../mail.ts'
 import { ApiError } from '../api-error.ts'
 import { memberFieldVisible, changeMemberRole, createOrganization, getOrganization, listAccountNotifications, listMembers, listMembersPage, listOrganizations, readAccountNotification, updateOrganization } from './organization-service.ts'
-import { acceptCodeInvitation, acceptEmailInvitation, createCodeInvitation, createEmailInvitation, listActiveOrganizationInvitations, listPendingInvitations, previewCodeInvitation, previewEmailInvitation, rejectEmailInvitation, revokeInvitation } from './invitation-service.ts'
+import { resendEmailInvitation, acceptCodeInvitation, acceptEmailInvitation, createCodeInvitation, createEmailInvitation, listActiveOrganizationInvitations, listPendingInvitations, previewCodeInvitation, previewEmailInvitation, rejectEmailInvitation, revokeInvitation } from './invitation-service.ts'
 import { confirmOrganizationDeletion, confirmOwnershipTransfer, requestOrganizationDeletion, requestOwnershipTransfer } from './sensitive-action-service.ts'
 import { createOrganizationBody, emailInvitationBody, inviteCodeBody, inviteParams, memberListQuery, memberParams, organizationIdParams, ownershipRequestBody, roleBody, sensitiveCodeBody, updateOrganizationBody } from './schemas.ts'
 
@@ -67,7 +67,6 @@ router.post('/organizations', async (request, response) => {
   const input = parse(createOrganizationBody, request.body)
   const current = auth(request)
   const organization = await createOrganization(current.userId, input)
-  void deliverOrganizationCreated(current.email, organization.name).catch((error) => console.error('Organization-created email failed:', error))
   response.status(201).json({ organization })
 })
 
@@ -137,6 +136,15 @@ router.post('/organizations/:organizationId/invitations/email', invitationLimite
   catch (error) { emailDelivered = false; console.error('Organization invitation email failed:', error) }
   response.status(201).json({ invitation: { id: result.invitation.id, email, expiresAt: result.invitation.expiresAt }, emailDelivered })
 })
+router.post('/organizations/:organizationId/invitations/:invitationId/resend', invitationLimiter, async (request, response) => {
+  const { organizationId, invitationId } = parse(organizationIdParams.extend({ invitationId: z.uuid() }), request.params)
+  const result = await resendEmailInvitation(auth(request).userId, organizationId, invitationId)
+  let emailDelivered = true
+  try { await deliverOrganizationInvitation(result.email, result.organizationName, result.inviterName, result.token, result.expiresAt) }
+  catch { emailDelivered = false }
+  response.json({ emailDelivered })
+})
+
 
 router.post('/organizations/:organizationId/invitations/code', invitationLimiter, async (request, response) => {
   const { organizationId } = parse(organizationIdParams, request.params)
@@ -188,7 +196,7 @@ router.post('/organizations/:organizationId/ownership-transfer/request', sensiti
   const { organizationId } = parse(organizationIdParams, request.params)
   const { targetMemberId } = parse(ownershipRequestBody, request.body)
   const result = await requestOwnershipTransfer(auth(request).userId, organizationId, targetMemberId)
-  await deliverSensitiveActionCode('ownership', auth(request).email, result.organizationName, result.code)
+  await deliverSensitiveActionCode('ownership', auth(request).email, result.organizationName, result.code, 'targetName' in result ? result.targetName : undefined)
   response.status(202).json({ message: 'Код подтверждения отправлен владельцу.' })
 })
 

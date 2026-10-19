@@ -23,6 +23,10 @@ model User {
   bio                 String?   @db.VarChar(500)
   lastSeenAt          DateTime? @map("last_seen_at") @db.Timestamptz(3)
   avatarFileId        String?   @unique @map("avatar_file_id") @db.Uuid
+  emailNotificationsEnabled Boolean @default(true) @map("email_notifications_enabled")
+  emailNotificationCategories Json @default("{\"shiftChanges\":true,\"publishedSchedule\":true,\"shiftOffers\":true,\"scheduleDiscussion\":true,\"requestResults\":true,\"documents\":true,\"importantEvents\":true}") @map("email_notification_categories")
+  emailPreferencesRevision Int @default(0) @map("email_preferences_revision")
+  emailDeliveries EmailDelivery[]
 
   sessions                 AuthSession[]
   emailVerificationTokens  EmailVerificationToken[]
@@ -40,6 +44,28 @@ model User {
 
   @@index([lastSeenAt])
   @@map("users")
+}
+
+model EmailDelivery {
+  eventOrder BigInt @default(autoincrement()) @map("event_order")
+  id String @id @default(uuid()) @db.Uuid
+  userId String @map("user_id") @db.Uuid
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organizationId String? @map("organization_id") @db.Uuid
+  sourceKey String @unique @map("source_key") @db.VarChar(240)
+  sourceKind String @map("source_kind") @db.VarChar(32)
+  sourceId String? @map("source_id") @db.Uuid
+  category String? @db.VarChar(40)
+  payload Json @default("{}")
+  status String @default("PENDING") @db.VarChar(16)
+  attempts Int @default(0)
+  availableAt DateTime @default(now()) @map("available_at") @db.Timestamptz(3)
+  lockedUntil DateTime? @map("locked_until") @db.Timestamptz(3)
+  deliveredAt DateTime? @map("delivered_at") @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  @@index([status, availableAt])
+  @@index([userId, category])
+  @@map("email_deliveries")
 }
 
 enum OrganizationRole {
@@ -242,6 +268,7 @@ model AccountNotification {
   requestId        String?                 @map("request_id") @db.Uuid
   shiftId          String?                 @map("shift_id") @db.Uuid
   emailAttemptedAt DateTime?               @map("email_attempted_at") @db.Timestamptz(3)
+  emailContext Json? @map("email_context")
   type             AccountNotificationType
   title            String                  @db.VarChar(160)
   message          String                  @db.VarChar(500)
@@ -933,6 +960,7 @@ enum EventAudienceMode {
 }
 
 model OrganizationEvent {
+  important Boolean @default(false)
   audienceAccessRoleIds String[] @default([]) @map("audience_access_role_ids") @db.Uuid
   id String @id @default(uuid()) @db.Uuid
   organizationId String @map("organization_id") @db.Uuid

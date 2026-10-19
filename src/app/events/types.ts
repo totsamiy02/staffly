@@ -2,6 +2,7 @@ export type EventAudienceMode = 'ALL' | 'ROLES' | 'SELECTED'
 export type EventLocation = { id: string; name: string; timezone: string; archivedAt: string | null }
 export type EventRecipient = { id: string; name: string; avatarUrl: string | null; role: 'OWNER' | 'ADMIN' | 'MEMBER' }
 export type StaffEvent = {
+  important?: boolean;
   id: string; organizationId: string; title: string; description: string | null; typeLabel: string | null;
   startAt: string; endAt: string | null; timezone: string; place: string | null; meetingUrl: string | null;
   shared: boolean; locations: EventLocation[]; audienceMode: EventAudienceMode; audienceRoles: Array<'ADMIN' | 'MEMBER'>; audienceAccessRoleIds?: string[];
@@ -13,6 +14,7 @@ export type StaffEvent = {
 }
 export type EventPage = { events: StaffEvent[]; markedDays: string[]; pagination: { page: number; pageSize: number; total: number; pages: number } }
 export type EventFormInput = {
+  important?: boolean;
   title: string; description: string; typeLabel: string; startDate: string; startTime: string; endDate: string | null; endTime: string | null;
   place: string; meetingUrl: string; shared: boolean; locationIds: string[]; audienceMode: EventAudienceMode;
   audienceRoles: Array<'ADMIN' | 'MEMBER'>; audienceAccessRoleIds?: string[]; memberIds: string[]; refreshRecipients: boolean; revision?: number;

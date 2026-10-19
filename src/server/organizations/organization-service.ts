@@ -5,7 +5,6 @@ import { onlineSessions } from '../profile/presence.ts'
 import type { OrganizationRole, Prisma } from '../../generated/prisma/client.ts'
 import { prisma } from '../db.ts'
 import { ApiError } from '../api-error.ts'
-import { deliverRoleChanged } from '../mail.ts'
 import { assertCanChangeRole, assertCanRemoveMember, getMembership } from './permissions.ts'
 import { mediaUrl } from '../storage/image-service.ts'
 import { seedSystemRequestTypes } from '../requests/service.ts'
@@ -173,7 +172,6 @@ export async function changeMemberRole(actorUserId: string, organizationId: stri
     await tx.accountNotification.create({ data: { userId: target.userId, organizationId, type: 'ROLE_CHANGED', title: 'Роль изменена', message: `В организации «${actor.organization.name}» вам назначена роль «${roleName}».` } })
     return updated
   })
-  void deliverRoleChanged(target.user.email, actor.organization.name, roleName).catch((error) => console.error('Role-changed email failed:', error))
   return member
 }
 

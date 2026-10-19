@@ -12,7 +12,6 @@ import { ApiError } from '../api-error.ts'
 import { getMembership } from '../organizations/permissions.ts'
 import { addCalendarDays, startOfZonedDate, zonedDateTimeToUtc } from '../schedule/timezone.ts'
 import { activeTarget, assertNoApprovedAbsence } from '../schedule/service.ts'
-import { deliverRequestDecision } from '../mail.ts'
 import { recordShiftNotification } from '../organizations/notification-service.ts'
 import { mediaUrl } from '../storage/image-service.ts'
 
@@ -411,10 +410,7 @@ export async function resolveRequest(userId: string, organizationId: string, req
     if (error && typeof error === 'object' && 'code' in error && error.code === 'P2034') throw new ApiError(409, 'REQUEST_CONFLICT', 'Расписание изменилось одновременно с решением. Проверьте заявку и повторите действие.')
     throw error
   })
-  if (result.status!=='PENDING' && current.creator.userId !== userId) {
-    const creator = await prisma.user.findUnique({ where: { id: current.creator.userId }, select: { email: true } })
-    if (creator) void deliverRequestDecision(creator.email, organizationId, actor.organization.name, requestId, current.typeNameSnapshot, decision, comment, current.locationId).catch(error => console.error('Request-decision email failed:', error))
-  }
+
   return result
 }
 

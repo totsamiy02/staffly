@@ -2,14 +2,17 @@ import TimeCorrectionAction from './time-correction-action.tsx'
 import MemberProfileLink from '../../../component/ui/member-profile-link.tsx'
 import MemberAvatar from '../../../component/ui/member-avatar.tsx'
 import ActionSurface from '../../../component/ui/action-surface.tsx'
-import { useLayoutEffect, useRef, type CSSProperties } from 'react'
-import { displayDate, shiftCoversDate, shiftState, shiftTimeRange, zonedDateAndTime } from '../../../app/schedule/date-utils.ts'
+import { useLayoutEffect, useMemo, useRef, type CSSProperties } from 'react'
+import { displayDate, shiftsByDate, shiftState, shiftTimeRange, zonedDateAndTime } from '../../../app/schedule/date-utils.ts'
 import type { WorkShift } from '../../../app/schedule/types.ts'
 
 type Props = { days: string[]; shifts: WorkShift[]; timezone: string; timeline?: boolean; order?: 'asc' | 'desc'; onShift: (day: string, shift: WorkShift) => void }
 
 export default function ScheduleAgenda({ days, shifts, timezone, timeline = false, order = 'asc', onShift }: Props) {
-  const groups = days.map(day => ({ day, shifts: shifts.filter(shift => shiftCoversDate(shift, day, timezone)).sort((a, b) => a.scheduledStartAt.localeCompare(b.scheduledStartAt)) }))
+  const groups = useMemo(() => {
+    const byDate = shiftsByDate(shifts, days, timezone)
+    return days.map(day => ({ day, shifts: (byDate.get(day) ?? []).sort((a, b) => a.scheduledStartAt.localeCompare(b.scheduledStartAt)) }))
+  }, [days, shifts, timezone])
   const scroll = useRef<HTMLDivElement>(null)
   const firstStart = groups[0]?.shifts[0]?.scheduledStartAt
   const day = days[0]

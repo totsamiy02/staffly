@@ -317,4 +317,4 @@ export async function actOnOffer(userId: string, organizationId: string, offerId
   return publicOffer(await prisma.shiftOffer.findUniqueOrThrow({ where: { id: result.id }, include }), actor)
 }
 
-export async function maintainShiftOffers(){const locations=await prisma.organizationLocation.findMany({where:{archivedAt:null,organization:{deletedAt:null}},select:{id:true,organizationId:true}});for(const l of locations)await transaction(l.organizationId,tx=>reconcile(tx,l.organizationId,l.id))}
+export async function maintainShiftOffers(shouldContinue=()=>true){const locations=await prisma.organizationLocation.findMany({where:{archivedAt:null,organization:{deletedAt:null}},select:{id:true,organizationId:true}});for(const l of locations){if(!shouldContinue())return;await transaction(l.organizationId,tx=>reconcile(tx,l.organizationId,l.id))}}

@@ -33,7 +33,7 @@ export function eventVisibility(actor: Actor): Prisma.OrganizationEventWhereInpu
 function dto(event: LoadedEvent, actor: Actor, now = new Date()) {
   const active = event.recipients.filter(row => !row.member.leftAt && !row.member.user.deletedAt)
   return {
-    id: event.id, organizationId: event.organizationId, title: event.title, description: event.description, typeLabel: event.typeLabel,
+    important: event.important, id: event.id, organizationId: event.organizationId, title: event.title, description: event.description, typeLabel: event.typeLabel,
     startAt: event.startAt, endAt: event.endAt, timezone: event.timezone, place: event.place, meetingUrl: event.meetingUrl,
     shared: event.shared, locations: event.locations.map(({ location }) => ({ id: location.id, name: location.name, timezone: location.timezone, archivedAt: location.archivedAt })),
     audienceMode: event.audienceMode, audienceRoles: event.audienceRoles, audienceAccessRoleIds: event.audienceAccessRoleIds,
@@ -73,7 +73,7 @@ function payload(input: EventInput, timezone: string) {
   const startAt = zonedDateTimeToUtc(input.startDate, input.startTime, timezone)
   const endAt = input.endDate && input.endTime ? zonedDateTimeToUtc(input.endDate, input.endTime, timezone) : null
   if (endAt && endAt <= startAt) throw new ApiError(400, 'EVENT_INVALID_PERIOD', 'Окончание должно быть позже начала.')
-  return { title: input.title, description: input.description, typeLabel: input.typeLabel, startAt, endAt, timezone, place: input.place, meetingUrl: input.meetingUrl, shared: input.shared, audienceAccessRoleIds: input.audienceAccessRoleIds ?? [], audienceMode: input.audienceMode, audienceRoles: [...new Set(input.audienceRoles)].sort() }
+  return { important: input.important, title: input.title, description: input.description, typeLabel: input.typeLabel, startAt, endAt, timezone, place: input.place, meetingUrl: input.meetingUrl, shared: input.shared, audienceAccessRoleIds: input.audienceAccessRoleIds ?? [], audienceMode: input.audienceMode, audienceRoles: [...new Set(input.audienceRoles)].sort() }
 }
 async function resolveRecipients(tx: Prisma.TransactionClient, organizationId: string, input: EventInput, ids: string[]) {
   const candidates = await audience(tx, organizationId, input.shared, ids, input.audienceMode === 'ROLES' && !input.audienceAccessRoleIds?.length ? input.audienceRoles : undefined)
@@ -97,7 +97,7 @@ async function notify(tx: Prisma.TransactionClient, event: OrganizationEvent, me
 }
 async function recordChange(tx: Prisma.TransactionClient, event: LoadedEvent, actor: Actor, action: string) {
   await tx.eventChange.create({ data: { organizationId: event.organizationId, eventId: event.id, memberId: actor.id, revision: event.revision, action,
-    snapshot: { title: event.title, description: event.description, typeLabel: event.typeLabel, startAt: event.startAt.toISOString(), endAt: event.endAt?.toISOString() ?? null, timezone: event.timezone, place: event.place, meetingUrl: event.meetingUrl, shared: event.shared, locationIds: event.locations.map(row => row.locationId), memberIds: event.recipients.map(row => row.memberId), audienceMode: event.audienceMode, audienceRoles: event.audienceRoles, audienceAccessRoleIds: event.audienceAccessRoleIds, cancelledAt: event.cancelledAt?.toISOString() ?? null } } })
+    snapshot: { important: event.important, title: event.title, description: event.description, typeLabel: event.typeLabel, startAt: event.startAt.toISOString(), endAt: event.endAt?.toISOString() ?? null, timezone: event.timezone, place: event.place, meetingUrl: event.meetingUrl, shared: event.shared, locationIds: event.locations.map(row => row.locationId), memberIds: event.recipients.map(row => row.memberId), audienceMode: event.audienceMode, audienceRoles: event.audienceRoles, audienceAccessRoleIds: event.audienceAccessRoleIds, cancelledAt: event.cancelledAt?.toISOString() ?? null } } })
 }
 export async function createEvent(userId: string, organizationId: string, input: EventInput) {
   return prisma.$transaction(async tx => {
@@ -156,7 +156,7 @@ export async function updateEvent(userId: string, organizationId: string, eventI
     const audienceChanged = previous.audienceAccessRoleIds.join() !== (input.audienceAccessRoleIds ?? []).join() || previous.audienceMode !== input.audienceMode || [...previous.audienceRoles].sort().join() !== data.audienceRoles.join() || input.audienceMode === 'SELECTED' && [...new Set(input.memberIds)].sort().join() !== [...oldIds].sort().join()
     const nextIds = input.refreshRecipients || scopeChanged || audienceChanged ? await resolveRecipients(tx, organizationId, input, selected.ids) : oldIds
     const removed = oldIds.filter(id => !nextIds.includes(id)), added = nextIds.filter(id => !oldIds.includes(id))
-    const material = startChanged || (data.endAt?.getTime() ?? null) !== (previous.endAt?.getTime() ?? null) || data.timezone !== previous.timezone || data.place !== previous.place || data.meetingUrl !== previous.meetingUrl || scopeChanged
+    const material = data.important !== previous.important || startChanged || (data.endAt?.getTime() ?? null) !== (previous.endAt?.getTime() ?? null) || data.timezone !== previous.timezone || data.place !== previous.place || data.meetingUrl !== previous.meetingUrl || scopeChanged
     await tx.eventLocation.deleteMany({ where: { eventId } })
     await tx.eventLocation.createMany({ data: selected.ids.map(locationId => ({ organizationId, eventId, locationId })) })
     if (removed.length) await tx.eventRecipient.updateMany({ where: { eventId, memberId: { in: removed } }, data: { removedAt: new Date() } })

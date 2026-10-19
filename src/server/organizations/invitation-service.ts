@@ -116,6 +116,17 @@ export async function listPendingInvitations(userEmail: string) {
   }))
 }
 
+export async function resendEmailInvitation(userId: string, organizationId: string, invitationId: string) {
+  const actor = await getMembership(userId, organizationId)
+  requirePermission(actor, 'members.invite')
+  const invite = await prisma.organizationInvite.findFirst({ where: { id: invitationId, organizationId, ...locationWhere(organizationId), type: 'EMAIL', ...activeInviteWhere() }, include: { invitedBy: true } })
+  if (!invite?.invitedEmail) throw new ApiError(404, 'INVITATION_NOT_FOUND', 'Действующее приглашение не найдено.')
+  const token = randomBytes(32).toString('base64url')
+  const changed = await prisma.organizationInvite.updateMany({ where: { id: invite.id, tokenHash: invite.tokenHash, ...activeInviteWhere() }, data: { tokenHash: digest(token) } })
+  if (!changed.count) throw new ApiError(409, 'INVITATION_CHANGED', 'Приглашение уже изменилось. Обновите список.')
+  return { token, email: invite.invitedEmail, organizationName: actor.organization.name, inviterName: inviterIdentity(invite.invitedBy), expiresAt: invite.expiresAt }
+}
+
 export async function listActiveOrganizationInvitations(actorUserId: string, organizationId: string) {
   const actor = await getMembership(actorUserId, organizationId)
   requirePermission(actor, 'members.invite')

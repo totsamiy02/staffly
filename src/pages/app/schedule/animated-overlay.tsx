@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import '../../../component/ui/modal/dialog-shell.scss'
 
 const overlayStack: symbol[] = []
 
 type Props = {
-  variant: 'modal' | 'drawer'
+  variant: 'modal'
   className?: string
   dismissible?: boolean
   onClose: () => void
@@ -29,6 +30,6 @@ export default function AnimatedOverlay({ variant, className = '', dismissible =
     return () => document.removeEventListener('keydown', escape)
   }, [requestClose])
 
-  const base = variant === 'modal' ? 'schedule-modal' : 'schedule-drawer-backdrop'
+  const base = `schedule-${variant}`
   return <div className={`${base}${className ? ` ${className}` : ''}${closing ? ' is-closing' : ''}`} onMouseDown={(event) => { if (event.target === event.currentTarget) requestClose() }}>{children(requestClose)}</div>
 }

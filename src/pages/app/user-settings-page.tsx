@@ -1,3 +1,4 @@
+import EmailNotificationSettings from './email-notification-settings.tsx'
 import SegmentedNav from '../../component/ui/segmented-nav/segmented-nav.tsx'
 import PersonalDocuments from './documents/personal-documents.tsx'
 import { useToastFeedback } from '../../component/ui/toast/toast-context.ts'
@@ -52,8 +53,12 @@ export default function UserSettingsPage() {
   const [profileError, setProfileError] = useState('')
   const [passwordError, setPasswordError] = useState('')
   const [message, setMessage] = useState('')
-  const [section, setSection] = useState<'profile' | 'security' | 'documents'>(() => new URLSearchParams(window.location.search).get('section') === 'documents' ? 'documents' : 'profile')
-  useEffect(() => { if (new URLSearchParams(location.search).get('section') === 'documents') setSection('documents') }, [location.key, location.search])
+  type Section = 'profile' | 'security' | 'documents' | 'notifications'
+  const requestedSection = new URLSearchParams(location.search).get('section')
+  const selectedSection: Section = requestedSection === 'security' || requestedSection === 'documents' || requestedSection === 'notifications' ? requestedSection : 'profile'
+  const [section, setSection] = useState<Section>(selectedSection)
+  useEffect(() => { setSection(selectedSection) }, [selectedSection])
+  function selectSection(value: Section) { const params = new URLSearchParams(location.search); params.set('section', value); navigate({ pathname: location.pathname, search: params.toString() }, { replace: true, state: location.state }); setSection(value) }
   const sessions = useQuery({ ...liveQueryOptions, queryKey: ['auth-sessions'], queryFn: () => apiRequest<{ sessions: ActiveSession[] }>('/auth/sessions'), enabled: section === 'security' })
   const revokeSession = useMutation({ mutationFn: (session: ActiveSession) => apiRequest(`/auth/sessions/${session.id}`, { method: 'DELETE' }), onSuccess: async (_, session) => { if (session.current) { await logout(); navigate('/', { replace: true }) } else await queryClient.invalidateQueries({ queryKey: ['auth-sessions'] }) } })
   const revokeOthers = useMutation({ mutationFn: () => apiRequest('/auth/sessions/revoke-others', { method: 'POST', body: {} }), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['auth-sessions'] }) })
@@ -105,10 +110,10 @@ export default function UserSettingsPage() {
   const returnLabel = returnTo.startsWith('/app/organizations/') ? 'Вернуться в организацию' : 'К организациям'
   return <div className="app-page"><AppTopbar /><main className="account-settings-page">
     <Link className="app-back" to={returnTo}>{returnLabel}</Link>
-    <header><p className="app-eyebrow">Личный профиль</p><h1>Настройки</h1>{section === 'profile' && <p>Данные профиля видят ваши коллеги в организациях Staffly.</p>}</header>
-    <SegmentedNav label="Разделы настроек"><button className={section === 'profile' ? 'active' : ''} onClick={() => setSection('profile')}>Профиль</button><button className={section === 'security' ? 'active' : ''} onClick={() => setSection('security')}>Безопасность</button><button className={section === 'documents' ? 'active' : ''} onClick={() => setSection('documents')}>Документы</button></SegmentedNav>
-
-
+    <header><p className="app-eyebrow">Личный профиль</p><h1>Настройки</h1><p>Личные данные, безопасность и настройки вашего аккаунта.</p></header>
+    <SegmentedNav label="Разделы настроек"><button className={section === 'profile' ? 'active' : ''} onClick={() => selectSection('profile')}>Профиль</button><button className={section === 'security' ? 'active' : ''} onClick={() => selectSection('security')}>Безопасность</button><button className={section === 'documents' ? 'active' : ''} onClick={() => selectSection('documents')}>Документы</button><button className={section === 'notifications' ? 'active' : ''} onClick={() => selectSection('notifications')}>Уведомления</button></SegmentedNav>
+    <div className="account-settings-content">
+    {section === 'notifications' && <EmailNotificationSettings />}
     {section === 'documents' && <PersonalDocuments organizationId={organizationId} />}
     {section === 'profile' && <section className="profile-editor">
       <aside><ImageUpload endpoint="/profile/avatar" imageUrl={user?.avatarUrl ?? null} name={user?.displayName ?? initial} avatarClassName="account-profile-card__avatar" onChange={(avatarUrl) => { if (user) updateUser({ ...user, avatarUrl }); void queryClient.invalidateQueries({ queryKey: ['organization-members'] }) }} onMessage={setMessage} onError={setProfileError} /><div className="profile-editor__identity"><span>Ваша учетная запись</span><h2>{user?.displayName}</h2><p>{user?.email}</p></div></aside>
@@ -129,5 +134,6 @@ export default function UserSettingsPage() {
 
     {section === 'security' && <><section className="password-editor"><div><p className="app-eyebrow">Безопасность</p><h2>Изменить пароль</h2><p>Введите текущий пароль и придумайте новый. После сохранения остальные сеансы будут завершены, а на почту придёт уведомление.</p></div><form onSubmit={changePassword} autoComplete="off"><PasswordField label="Текущий пароль" value={currentPassword} onChange={setCurrentPassword} autoComplete="current-password" /><PasswordField label="Новый пароль" value={newPassword} onChange={setNewPassword} autoComplete="new-password" /><PasswordField label="Повторите новый пароль" value={confirmPassword} onChange={setConfirmPassword} autoComplete="new-password" />{newPassword && <div className="password-requirements" aria-label="Требования к паролю">{passwordRequirements.map((requirement) => <span className={requirement.test(newPassword) ? 'password-requirement password-requirement--valid' : 'password-requirement'} key={requirement.label}>{requirement.label}</span>)}</div>}{passwordError && <p className="form-inline-error" role="alert">{passwordError}</p>}<button className="app-primary" disabled={passwordBusy || !currentPassword || !newPassword || !confirmPassword}>{passwordBusy ? 'Обновляем…' : 'Изменить пароль'}</button></form></section>
       <section className="sessions-editor"><header><div><p className="app-eyebrow">Устройства</p><h2>Активные сеансы</h2><p>Устройства, на которых выполнен вход в ваш аккаунт.</p></div><div><button className="app-secondary" disabled={revokeOthers.isPending} onClick={() => revokeOthers.mutate()}>Выйти везде, кроме этого устройства</button><button className="sessions-editor__danger" disabled={revokeAll.isPending} onClick={() => revokeAll.mutate()}>Завершить все сеансы</button></div></header>{sessions.isLoading ? <div className="app-state"><span className="app-spinner" />Загружаем устройства…</div> : sessions.isError ? <div className="app-state">Не удалось загрузить активные сеансы.</div> : <div className="sessions-list">{sessions.data?.sessions.map((session) => <article key={session.id}><span className={`session-device-icon session-device-icon--${session.kind}`}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><rect x={session.kind === 'mobile' ? '7' : '3'} y={session.kind === 'mobile' ? '2' : '4'} width={session.kind === 'mobile' ? '10' : '18'} height={session.kind === 'mobile' ? '20' : '13'} rx="2" />{session.kind === 'desktop' && <path d="M8 21h8M12 17v4" />}</svg></span><div><strong>{session.device} · {session.browser}</strong><span className={session.current ? 'session-current' : ''}><i />{session.current ? 'Это устройство · активно сейчас' : `Последняя активность ${new Date(session.lastUsedAt).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' })}`}</span><small>{session.ipAddress ? `IP: ${session.ipAddress}` : 'IP не определён'} · вход {new Date(session.createdAt).toLocaleDateString('ru-RU')}</small></div><button disabled={revokeSession.isPending} onClick={() => revokeSession.mutate(session)}>{session.current ? 'Выйти' : 'Отключить'}</button></article>)}</div>}</section></>}
+    </div>
   </main></div>
 }

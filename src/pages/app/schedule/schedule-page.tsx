@@ -25,12 +25,14 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '../../../app/auth/auth-context.tsx'
 import { useOrganizationMembers, useLocations } from '../../../app/organizations/queries.ts'
 import type { OrganizationSummary } from '../../../app/organizations/types.ts'
-import { addDays, calendarRange, displayDate, formatDuration, formatMonth, monthKeyInZone, moveMonth, shiftState, shiftCoversDate, shiftTimeRange, zonedDateAndTime } from '../../../app/schedule/date-utils.ts'
+import { addDays, calendarRange, displayDate, formatDuration, formatMonth, monthKeyInZone, moveMonth, shiftState, shiftsByDate, shiftCoversDate, shiftTimeRange, zonedDateAndTime } from '../../../app/schedule/date-utils.ts'
 import { useSchedule, useShiftDetails } from '../../../app/schedule/queries.ts'
 import type { WorkShift } from '../../../app/schedule/types.ts'
 import AnimatedOverlay from './animated-overlay.tsx'
 import ScheduleSectionHeader from './schedule-section-header.tsx'
 import ShiftFormModal from './shift-form-modal.tsx'
+import DaySchedulePanel from './day-schedule-panel.tsx'
+import ModuleIcon from '../../../component/ui/module-icon.tsx'
 import './schedule.scss'
 import './schedule-redesign.scss'
 
@@ -81,6 +83,7 @@ export default function SchedulePage({ organization, historyMode = false }: { or
   const range = useMemo(() => calendarRange(month, true), [month])
   const coverage = useCoverage(organization.id, range.from, range.to, coverageEnabled)
   const schedule = useSchedule(organization.id, range.from, range.to, historyMode ? 'history' : 'current')
+  const calendarShifts = useMemo(() => shiftsByDate((schedule.data?.shifts ?? []).filter(shift => shift.status !== 'CANCELLED'), range.days, organization.timezone), [schedule.data?.shifts, range.days, organization.timezone])
   const members = useOrganizationMembers(organization.id)
   const ownMemberId = organization.viewerMemberId ?? members.data?.members.find((member) => member.userId === user?.id)?.id
   const [calendarView, setCalendarView] = useState<'month' | 'week' | 'day' | 'list'>('month')
@@ -97,7 +100,6 @@ export default function SchedulePage({ organization, historyMode = false }: { or
   const visibleAbsences = (schedule.data?.absences ?? []).filter(absence => (shiftView === 'all' || absence.memberId === ownMemberId))
   const selectedShifts = selectedDate ? visibleShifts.filter((shift) => shiftCoversDate(shift, selectedDate, organization.timezone)) : []
   if (selectedDate && linkedShift && shiftCoversDate(linkedShift, selectedDate, organization.timezone) && !selectedShifts.some(shift => shift.id === linkedShift.id)) selectedShifts.unshift(linkedShift)
-  const focusedShiftVisible = selectedShifts.some((shift) => shift.id === focusedShiftId)
   const selectedAbsences = selectedDate ? visibleAbsences.filter((absence) => selectedDate >= absence.startDate && selectedDate <= absence.endDate) : []
   const monthHasShifts = visibleShifts.some((shift) => {
     const start = zonedDateAndTime(shift.scheduledStartAt, organization.timezone).date
@@ -117,11 +119,6 @@ export default function SchedulePage({ organization, historyMode = false }: { or
     setSearchParams((current) => { const next = new URLSearchParams(current); next.delete('shift'); return next }, { replace: true })
   }, [organization.timezone, schedule.data, schedule.isPlaceholderData, searchParams, setSearchParams, linkedDetails.data])
 
-  useEffect(() => {
-    if (!focusedShiftId || !selectedDate || !focusedShiftVisible) return
-    const frame = window.requestAnimationFrame(() => document.getElementById(`day-shift-${focusedShiftId}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }))
-    return () => window.cancelAnimationFrame(frame)
-  }, [focusedShiftId, focusedShiftVisible, selectedDate])
 
   useLayoutEffect(() => {
     const nextMonth = searchParams.get('month')
@@ -200,13 +197,13 @@ export default function SchedulePage({ organization, historyMode = false }: { or
       </DocumentActionsMenu></div>
 
 
-    <AsyncPanel pending={schedule.isLoading || schedule.isPlaceholderData} identity={`${month}:${calendarView}`} minHeight={630} label="Загружаем расписание">{schedule.isLoading ? <div className="schedule-state"><span className="app-spinner" />Загружаем расписание…</div> : schedule.isError ? <div className="schedule-state"><strong>Не удалось загрузить расписание</strong><p>{schedule.error instanceof Error ? schedule.error.message : 'Попробуйте ещё раз.'}</p><button className="app-secondary" onClick={() => void schedule.refetch()}>Повторить</button></div> : <>
+    <AsyncPanel pending={schedule.isLoading || schedule.isPlaceholderData} identity={`${month}:${calendarView}`} minHeight={630} label="Загружаем расписание" pendingContent={calendarView === 'month' || calendarView === 'week' ? <div className="schedule-calendar-skeleton" aria-hidden="true">{weekDays.map(day => <span key={day}>{day}</span>)}{displayedDays.map(day => <div key={day}><i /><i /><i /></div>)}</div> : undefined}>{schedule.isLoading ? <div className="schedule-state"><span className="app-spinner" />Загружаем расписание…</div> : schedule.isError ? <div className="schedule-state"><strong>Не удалось загрузить расписание</strong><p>{schedule.error instanceof Error ? schedule.error.message : 'Попробуйте ещё раз.'}</p><button className="app-secondary" onClick={() => void schedule.refetch()}>Повторить</button></div> : <>
       <div className="schedule-workspace"><div className="schedule-workspace__main" data-view={calendarView}>{calendarView === 'day' || calendarView === 'list' ? <ScheduleAgenda days={calendarView === 'day' ? [previewDate] : range.days.filter(day => day.startsWith(month))} shifts={visibleShifts} timezone={organization.timezone} timeline={calendarView === 'day'} onShift={(day, shift) => { setPreviewDate(day); chooseDay(day); setFocusedShiftId(shift.id) }} /> : <div className={`schedule-calendar-wrap${schedule.isPlaceholderData ? ' is-updating' : ''}`} ref={calendarRef} style={{ '--calendar-weeks': displayedDays.length / 7 } as CSSProperties} aria-busy={schedule.isPlaceholderData}>
         <div className={`schedule-calendar${coverageEnabled && showCoverage ? ' schedule-calendar--coverage' : ''}`} role="group" aria-label={`Календарь: ${formatMonth(month)}`}>
           {weekDays.map(day => <div className="schedule-calendar__weekday" aria-hidden="true" key={day}>{day}</div>)}
           {displayedDays.map((day, index) => {
             // Size the day from the same full dataset in both display filters.
-            const dayShifts = (schedule.data?.shifts ?? []).filter(shift => shift.status !== 'CANCELLED' && shiftCoversDate(shift, day, organization.timezone))
+            const dayShifts = calendarShifts.get(day) ?? []
             const shifts = dayShifts.filter(shift => shiftView === 'all' || shift.memberId === ownMemberId).sort((a, b) => Number(b.memberId === ownMemberId) - Number(a.memberId === ownMemberId))
             const absences = visibleAbsences.filter(absence => day >= absence.startDate && day <= absence.endDate)
             const ownCount = dayShifts.filter(shift => shift.memberId === ownMemberId).length
@@ -218,7 +215,7 @@ export default function SchedulePage({ organization, historyMode = false }: { or
             return <ActionSurface type="button" className={`schedule-day${inMonth ? '' : ' schedule-day--outside'}${today ? ' schedule-day--today' : ''}${ownCount ? ' schedule-day--mine' : ''}${day === previewDate ? ' schedule-day--selected' : ''}`} key={day} aria-label={`${displayDate(day)}${today ? ', сегодня' : ''}, смен: ${shifts.length}, ваших: ${ownCount}, отсутствий: ${absences.length}${coverageEnabled&&showCoverage&&coverage.data?.days.find(d=>d.date===day)?.shortageIntervals?', не хватает сотрудников':''}`}  aria-pressed={day === previewDate} aria-current={today ? 'date' : undefined} disabled={schedule.isPlaceholderData} onClick={() => setPreviewDate(day)} onKeyDown={event => moveCalendarFocus(event, index)}>
               <span className="schedule-day__number">{Number(day.slice(-2))}</span>{coverageEnabled && showCoverage && <CoverageIndicator day={coverage.data?.days.find(d=>d.date===day)}/>}
               <span className="schedule-day__shifts" style={daySlots}>{previews.map(shift => { const state = shiftState(shift), mine = shift.memberId === ownMemberId; return <span key={shift.id} className={`schedule-shift-chip schedule-shift-chip--${state.key}${mine ? ' schedule-shift-chip--mine' : ''}`} title={`${shift.memberName} · ${state.label}${shift.activeOffer ? ' · есть предложение' : ''}`}><MemberAvatar memberId={shift.memberId} url={shift.memberAvatarUrl} name={shift.memberName} className="schedule-chip-avatar" /><span className="schedule-chip-copy"><span>{shift.memberName}</span><small>{shiftTimeRange(shift.scheduledStartAt, shift.scheduledEndAt, organization.timezone)}</small></span>{shift.activeOffer && <span className="offer-chip-indicator" title="Смена участвует в предложении" aria-label="Смена участвует в предложении">⇄</span>}</span> })}{absences.length > 0 && <small className="schedule-day__absence">{absences.some(item => item.memberId === ownMemberId) ? 'Вы отсутствуете' : `Отсутствуют: ${absences.length}`}</small>}{shifts.length > previews.length && <small className="schedule-day__more">+{shifts.length - previews.length}</small>}</span>
-              <span className="schedule-day__mobile"><span className="schedule-day__faces">{previews.slice(0,4).map(shift=><MemberAvatar memberId={shift.memberId} key={shift.id} url={shift.memberAvatarUrl} name={shift.memberName} className="schedule-chip-avatar"/>)}</span>{ownCount > 0 ? <strong>Вы{ownCount > 1 ? `: ${ownCount}` : ''}</strong> : shifts.length > 0 ? <span>{shifts.length} смен.</span> : absences.length > 0 ? <span>Отсут.</span> : null}{absences.some(item => item.memberId === ownMemberId) && shifts.length > 0 && <small>Вы отсутствуете</small>}{ownCount > 0 && shifts.length > ownCount && <small>Всего {shifts.length}</small>}</span>
+              <span className="schedule-day__mobile"><span className="schedule-day__faces">{previews.slice(0,4).map(shift=><MemberAvatar memberId={shift.memberId} key={shift.id} url={shift.memberAvatarUrl} name={shift.memberName} className="schedule-chip-avatar"/>)}</span>{ownCount > 0 ? <strong>Вы{ownCount > 1 ? `: ${ownCount}` : ''}</strong> : shifts.length > 0 ? <span>{shifts.length} смен.</span> : absences.length > 0 ? <span>Отсут.</span> : null}{absences.some(item => item.memberId === ownMemberId) && shifts.length > 0 && <small title="Вы отсутствуете">Отс.</small>}{ownCount > 0 && shifts.length > ownCount && <small title={`Всего смен: ${shifts.length}`}>+{shifts.length - ownCount}</small>}</span>
             </ActionSurface>
           })}
         </div><span className="schedule-calendar-loading">Обновляем месяц…</span>
@@ -233,12 +230,42 @@ export default function SchedulePage({ organization, historyMode = false }: { or
     {offersOpen && <ShiftOffersPanel organization={organization} offerId={searchParams.get('offer')} onOffer={id => openOffer(id)} onClose={closeOffers} />}
     {offeringShift && <ShiftOfferForm organization={organization} shift={offeringShift} onClose={() => setOfferingShift(null)} onCreated={id => openOffer(id)} />}
     {dayOffShift && <AnimatedOverlay variant="modal" onClose={() => setDayOffShift(null)}>{close => <RequestForm organization={organization} initialSystemCode="DAY_OFF" initialShiftId={dayOffShift.id} onClose={close} />}</AnimatedOverlay>}
-    {selectedDate && !adding && !editing && !offersOpen && !offeringShift && !searchParams.has('absences') && <AnimatedOverlay variant="drawer" onClose={() => { setSelectedDate(null); setFocusedShiftId(null); setLinkedShift(null); if (returnToRequest) navigate(returnToRequest, { replace: true }) }}>{(close) => <aside className="schedule-drawer" role="dialog" aria-modal="true" aria-labelledby="day-title"><header><div><p className="app-eyebrow">{linkedShift?.status === 'CANCELLED' ? 'История смены' : 'Расписание на день'}</p><h2 id="day-title">{displayDate(selectedDate)}</h2><p>{selectedShifts.length ? `${selectedShifts.length} ${selectedShifts.length === 1 ? 'смена' : 'смены'}` : 'Свободный день'}</p></div><button aria-label="Закрыть" onClick={close}>×</button></header><div className="schedule-drawer__list">
-      {!selectedShifts.length && !selectedAbsences.length && <div className="schedule-drawer__empty">На этот день смен и отсутствий нет.</div>}
-      {selectedAbsences.map((absence) => <article className="day-absence" key={absence.id}><div className="absence-person"><MemberAvatar memberId={absence.memberId} url={absence.memberAvatarUrl ?? members.data?.members.find(member => member.id === absence.memberId)?.avatarUrl} name={absence.memberName} className="statistics-avatar" /><MemberProfileLink memberId={absence.memberId}><strong>{absence.memberName}</strong></MemberProfileLink></div><span>{absenceNames[absence.type]}</span><small>{displayDate(absence.startDate)} — {displayDate(absence.endDate)}</small>{(canManage || absence.memberId === ownMemberId) && <button className="app-secondary" onClick={() => setSearchParams(current => { const next = new URLSearchParams(current); next.set('absences', '1'); next.set('absence', absence.id); return next })}>Открыть отсутствие</button>}</article>)}
-      {canAccess(organization,'staffing.create') && !historyMode && <Link className="app-secondary" to={`/app/organizations/${organization.id}/requests?location=${organization.locationId}&tab=staffing&staffing=1&proposalDate=${selectedDate}`}>Нужен сотрудник на подмену</Link>}
-      {selectedShifts.map((shift) => { const state = shiftState(shift); const mine = shift.memberId === ownMemberId; return <article id={`day-shift-${shift.id}`} className={`day-shift day-shift--${state.key}${mine ? ' day-shift--mine' : ''}${focusedShiftId === shift.id ? ' day-shift--focused' : ''}`} key={shift.id}><div className="day-shift__heading"><MemberAvatar memberId={shift.memberId} url={shift.memberAvatarUrl} name={shift.memberName} className="day-shift__avatar" /><div><MemberProfileLink memberId={shift.memberId}><strong>{mine ? `${shift.memberName} · ваша смена` : shift.memberName}</strong></MemberProfileLink><small>{shift.attendance==='NO_SHOW'?'Неявка':shift.attendance==='PARTIAL'?'Частично отработана':state.label}{shift.adjusted ? ' · есть изменения' : ''}</small></div></div><div className="day-shift__time"><strong>{shiftTimeRange(shift.scheduledStartAt, shift.scheduledEndAt, organization.timezone)}</strong><span>{formatDuration(shift.effectiveMinutes)}</span></div>{(shift.actualStartAt || shift.actualEndAt || shift.attendance === 'NO_SHOW') && <p>Учтено: {accountedTimeLabel(shift, organization.timezone)}</p>}{shift.positionName && <p>Должность: {shift.positionName}</p>}{shift.description && <p>{shift.description}</p>}{shift.cancellationReason && <p>Причина отмены: {shift.cancellationReason}</p>}{shift.activeOffer && <button className="offer-shift-badge" onClick={() => openOffer(shift.activeOffer!.id)}>{shift.activeOffer.status === 'AWAITING_APPROVAL' ? 'Ожидает согласования' : shift.activeOffer.kind === 'SWAP' ? 'Предложен обмен' : 'Предложена передача'}</button>}{mine && (canAccess(organization,'offers.transfer') || canAccess(organization,'offers.swap')) && state.key === 'future' && !shift.activeOffer && <button className="app-secondary offer-shift-action" disabled={!offersEnabled || !!shift.actualStartAt || !!shift.actualEndAt || shift.actualBreakMinutes !== null} title={!offersEnabled ? 'Передача и обмен выключены владельцем' : undefined} onClick={() => { setSelectedDate(null); setOfferingShift(shift) }}>Передать или обменять</button>}{mine && canAccess(organization,'requests.create') && !canManage && state.key === 'future' && <footer><button className="app-secondary" onClick={() => { setSelectedDate(null); setDayOffShift(shift) }}>Взять отгул</button><Link className="app-secondary" to={'/app/organizations/' + organization.id + '/requests?tab=mine&changeShift=' + shift.id}>Попросить изменить смену</Link></footer>}{canManage && shift.status !== 'CANCELLED' && <footer>{mine && canAccess(organization,'requests.create') && state.key === 'future' && <button className="app-secondary" onClick={() => { setSelectedDate(null); setDayOffShift(shift) }}>Взять отгул</button>}<TimeCorrectionAction shift={shift} />{canAccess(organization,'schedule.edit') && state.key !== 'completed' && <button className="app-secondary" onClick={() => setEditing(shift)}>Изменить расписание</button>}{canAccess(organization,'schedule.cancel') && <button className="schedule-cancel-button" onClick={() => { setCancelling(shift); setCancelReason(''); setActionError('') }}>Отменить смену</button>}</footer>}</article> })}
-    </div>{!historyMode && canAccess(organization,'requests.create') && !canManage && selectedDate >= todayDate && <Link className="app-primary schedule-drawer__add" to={'/app/organizations/' + organization.id + '/requests?tab=mine&proposeShift=1&proposalDate=' + selectedDate}>Предложить свою смену на эту дату</Link>}{!historyMode && canAccess(organization,'schedule.create') && <button className="app-primary schedule-drawer__add"  onClick={() => setAdding(true)}>Добавить смену на эту дату</button>}</aside>}</AnimatedOverlay>}
+    {selectedDate && !adding && !editing && !offersOpen && !offeringShift && !searchParams.has('absences') && <AnimatedOverlay variant="modal" className="day-schedule-overlay" onClose={() => { setSelectedDate(null); setFocusedShiftId(null); setLinkedShift(null); if (returnToRequest) navigate(returnToRequest, { replace: true }) }}>{close => <DaySchedulePanel
+      key={selectedDate}
+      date={selectedDate}
+      timezone={organization.timezone}
+      locationName={organization.location?.name ?? points.data?.locations.find(point => point.id === organization.locationId)?.name}
+      locationId={organization.locationId}
+      shifts={selectedShifts}
+      absences={selectedAbsences.map(absence => ({ ...absence, memberAvatarUrl: absence.memberAvatarUrl ?? members.data?.members.find(member => member.id === absence.memberId)?.avatarUrl }))}
+      ownMemberId={ownMemberId}
+      focusedShiftId={focusedShiftId}
+      historical={linkedShift?.status === 'CANCELLED'}
+      coverage={coverageEnabled ? <CoveragePanel day={coverage.data?.days.find(day => day.date === selectedDate)} timezone={organization.timezone} loading={coverage.isLoading} error={coverage.error?.message} /> : undefined}
+      canOpenAbsence={absence => canManage || absence.memberId === ownMemberId}
+      onAbsence={absence => setSearchParams(current => { const next = new URLSearchParams(current); next.set('absences', '1'); next.set('absence', absence.id); return next })}
+      onClose={close}
+      actions={!historyMode && <>
+        {canAccess(organization,'schedule.create') && <button type="button" className="app-primary" onClick={() => setAdding(true)}><span aria-hidden="true">＋</span>Добавить смену</button>}
+        {canAccess(organization,'requests.create') && !canManage && selectedDate >= todayDate && <Link className="app-primary" to={'/app/organizations/' + organization.id + '/requests?tab=mine&proposeShift=1&proposalDate=' + selectedDate}>Предложить свою смену</Link>}
+        {canAccess(organization,'staffing.create') && <Link className="app-secondary" to={`/app/organizations/${organization.id}/requests?location=${organization.locationId ?? ''}&tab=staffing&staffing=1&proposalDate=${selectedDate}`}><ModuleIcon section="employees" />Создать заявку на подмену</Link>}
+      </>}
+      renderShiftActions={shift => {
+        const state = shiftState(shift), mine = shift.memberId === ownMemberId
+        return <>
+          {shift.activeOffer && <button type="button" className="offer-shift-badge" onClick={() => openOffer(shift.activeOffer!.id)}>{shift.activeOffer.status === 'AWAITING_APPROVAL' ? 'Ожидает согласования' : shift.activeOffer.kind === 'SWAP' ? 'Предложен обмен' : 'Предложена передача'}</button>}
+          {mine && (canAccess(organization,'offers.transfer') || canAccess(organization,'offers.swap')) && state.key === 'future' && !shift.activeOffer && <button type="button" className="app-secondary" disabled={!offersEnabled || !!shift.actualStartAt || !!shift.actualEndAt || shift.actualBreakMinutes !== null} title={!offersEnabled ? 'Передача и обмен выключены владельцем' : undefined} onClick={() => { setSelectedDate(null); setOfferingShift(shift) }}>Передать или обменять</button>}
+          {mine && canAccess(organization,'requests.create') && state.key === 'future' && <button type="button" className="app-secondary" onClick={() => { setSelectedDate(null); setDayOffShift(shift) }}>Взять отгул</button>}
+          {mine && canAccess(organization,'requests.create') && !canManage && state.key === 'future' && <Link className="app-secondary" to={'/app/organizations/' + organization.id + '/requests?tab=mine&changeShift=' + shift.id}>Попросить изменить смену</Link>}
+          {canManage && shift.status !== 'CANCELLED' && <>
+            <TimeCorrectionAction shift={shift} locationId={organization.locationId} icon />
+            {canAccess(organization,'schedule.edit') && state.key !== 'completed' && <button type="button" className="app-secondary" onClick={() => setEditing(shift)}>Изменить расписание</button>}
+            {canAccess(organization,'schedule.cancel') && <button type="button" className="schedule-cancel-button" onClick={() => { setCancelling(shift); setCancelReason(''); setActionError('') }}>Отменить смену</button>}
+          </>}
+        </>
+      }}
+    />}</AnimatedOverlay>}
+
 
     {(adding || editing) && selectedDate && <ShiftFormModal organization={organization} members={members.data?.members ?? []} date={selectedDate} shift={editing} onClose={() => { setAdding(false); setEditing(null); setSelectedDate(null); if (returnToRequest) navigate(returnToRequest, { replace: true }) }} />}
     {cancelling && <AnimatedOverlay variant="modal" onClose={() => { setCancelling(null); setCancelReason('') }}>{(close) => <div className="cancel-shift-modal"><p className="app-eyebrow">Отмена смены</p><h2>Отменить смену {cancelling.memberName}?</h2><p>Смена останется в истории и перестанет учитываться в рабочем времени.</p><label><span>Причина отмены</span><textarea value={cancelReason} onChange={(event) => setCancelReason(event.target.value)} maxLength={500} rows={3} autoFocus /></label>{actionError && <p className="form-inline-error">{actionError}</p>}<footer><button className="app-secondary" disabled={busy} onClick={close}>Назад</button><button className="app-danger" disabled={busy || cancelReason.trim().length < 3} onClick={() => void cancel(close)}>{busy ? 'Отменяем…' : 'Отменить смену'}</button></footer></div>}</AnimatedOverlay>}

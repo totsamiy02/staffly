@@ -3,7 +3,7 @@ import { prisma } from '../db.ts'
 import type { Prisma } from '../../generated/prisma/client.ts'
 import { ApiError } from '../api-error.ts'
 import { getMembership, requireOrganizationRole } from './permissions.ts'
-import { deliverRoleChanged } from '../mail.ts'
+import { enqueueEmail } from '../profile/email-outbox.ts'
 
 const configuredSecret = process.env.JWT_SECRET
 if (!configuredSecret) throw new Error('JWT_SECRET is missing')
@@ -45,7 +45,7 @@ export async function requestOwnershipTransfer(userId: string, organizationId: s
   if (!target || target.user.deletedAt) throw new ApiError(404, 'MEMBER_NOT_FOUND', 'Участник не найден.')
   if (target.role === 'OWNER' || target.userId === userId) throw new ApiError(400, 'INVALID_OWNERSHIP_TARGET', 'Выберите другого участника организации.')
   const code = await createSensitiveToken(userId, organizationId, 'TRANSFER_OWNERSHIP', target.userId)
-  return { code, organizationName: actor.organization.name }
+  return { code, organizationName: actor.organization.name, targetName: [target.user.lastName,target.user.firstName].filter(Boolean).join(' ') || target.user.email }
 }
 
 export async function requestOrganizationDeletion(userId: string, organizationId: string) {
@@ -87,12 +87,12 @@ export async function confirmOwnershipTransfer(userId: string, organizationId: s
       { userId: target.userId, organizationId, type: 'ROLE_CHANGED', title: 'Вы стали владельцем', message: `Вам передано владение организацией «${actor.organization.name}».` },
       { userId, organizationId, type: 'ROLE_CHANGED', title: 'Владение передано', message: `Вы передали организацию «${actor.organization.name}» новому владельцу. Ваша новая роль — «Администратор».` },
     ] })
-    return { ownerUserId: target.userId, targetEmail: target.user.email }
+    const targetName = [target.user.lastName,target.user.firstName].filter(Boolean).join(' ') || target.user.email
+    const action = { label: 'Открыть организацию', path: `/app/organizations/${organizationId}` }
+    await enqueueEmail(tx, { userId: target.userId, organizationId, sourceKind: 'MANDATORY', sourceKey: `ownership:new:${token.id}`, content: { title: 'Вы стали владельцем', eyebrow: 'Владение передано', organization: actor.organization.name, intro: `Вам передано владение организацией «${actor.organization.name}».`, fields: [['Прежний владелец', actorUser.email], ['Новый владелец', targetName]], action, footer: 'Это подтверждение критического изменения доступа.' } })
+    await enqueueEmail(tx, { userId, organizationId, sourceKind: 'MANDATORY', sourceKey: `ownership:previous:${token.id}`, content: { title: 'Владение передано', eyebrow: 'Безопасность', organization: actor.organization.name, intro: `Вы передали организацию «${actor.organization.name}» участнику ${targetName}.`, fields: [['Ваша новая роль', 'Администратор']], action, footer: 'Если это сделали не вы, немедленно восстановите доступ.' } })
+    return { ownerUserId: target.userId }
   }, { isolationLevel: 'Serializable' })
-  void Promise.all([
-    deliverRoleChanged(result.targetEmail, actor.organization.name, 'Владелец'),
-    deliverRoleChanged(actorUser.email, actor.organization.name, 'Администратор'),
-  ]).catch((error) => console.error('Ownership-transfer email failed:', error))
   return { ownerUserId: result.ownerUserId }
 }
 
@@ -100,11 +100,12 @@ export async function confirmOrganizationDeletion(userId: string, organizationId
   const actor = await getMembership(userId, organizationId)
   requireOrganizationRole(actor.role, ['OWNER'])
   return prisma.$transaction(async (tx) => {
-    await claimSensitiveToken(tx, userId, organizationId, 'DELETE_ORGANIZATION', code)
+    const token = await claimSensitiveToken(tx, userId, organizationId, 'DELETE_ORGANIZATION', code)
     const now = new Date()
     const deleted = await tx.organization.updateMany({ where: { id: organizationId, deletedAt: null }, data: { deletedAt: now } })
     if (!deleted.count) throw new ApiError(404, 'ORGANIZATION_NOT_FOUND', 'Организация не найдена.')
     await tx.organizationInvite.updateMany({ where: { organizationId, acceptedAt: null, rejectedAt: null, revokedAt: null }, data: { revokedAt: now } })
+    await enqueueEmail(tx, { userId, organizationId, sourceKind: 'MANDATORY', sourceKey: `organization:deleted:${token!.id}`, content: { title: 'Организация удалена', eyebrow: 'Подтверждение действия', intro: `Удаление организации «${actor.organization.name}» подтверждено. Доступ к ней закрыт.`, fields: [['Дата и время', now.toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' }) + ' МСК']], action: { label: 'К моим организациям', path: '/app' }, footer: 'Если это сделали не вы, проверьте безопасность аккаунта.' } })
     return { deleted: true }
   }, { isolationLevel: 'Serializable' })
 }

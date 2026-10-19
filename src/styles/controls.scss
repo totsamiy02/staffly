@@ -60,7 +60,7 @@ input[type=time]::-webkit-calendar-picker-indicator { display: none; }
 .staffly-select__empty { padding: 12px; color: #727780; font-size: 13px; }
 .auth input:disabled { color: #a4a4ab !important; background-color: #292929 !important; }
 .auth input[readonly] { color: #dedee3 !important; }
-.staffly-calendar { width: min(280px, 100%); min-width: 0; }
+.staffly-calendar--floating { z-index:2000; min-width:0; overscroll-behavior:contain; box-sizing:border-box; }
 .staffly-control[aria-readonly=true] { background: #f5f5f6; color: #454b54; cursor: default; }
 input[aria-invalid=true]:focus-visible, textarea[aria-invalid=true]:focus-visible, input:user-invalid:focus-visible, textarea:user-invalid:focus-visible { outline-color: #a34b4b !important; }
 .auth__field:has(input:focus-visible), .account-password-field > div:has(input:focus-visible) { outline: 2px solid #686868; outline-offset: 2px; }

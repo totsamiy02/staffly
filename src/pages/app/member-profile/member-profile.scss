@@ -1,5 +1,5 @@
-.member-profile-overlay { z-index: 180; padding: 22px; }
-.member-profile-dialog.request-modal { width: min(1080px, calc(100vw - 44px)); max-width: 1080px; max-height: calc(100dvh - 44px); padding: 24px; overflow: auto; background: #fff; border-radius: 16px; color: #222;
+.member-profile-overlay { z-index: 180; padding:var(--dialog-viewport-gap); }
+.member-profile-dialog.request-modal { width: min(1080px,100%); max-width: 1080px; max-height: calc(100dvh - 2 * var(--dialog-viewport-gap)); padding: 24px; overflow: auto; background: #fff; border-radius:var(--dialog-radius); color: #222;
   >header { margin-bottom: 22px; h2 { font-size: 23px; letter-spacing: -.5px; } }
   >.staffly-segmented { margin: 20px 0; }
 }
@@ -21,7 +21,7 @@
 .member-profile-child-overlay {z-index:190;}
 .member-profile-time-editor { position:relative; z-index:200; .schedule-modal {z-index:200;} }
 @media(max-width:800px){.member-profile-workspace{grid-template-columns:190px minmax(0,1fr);gap:14px;}.member-profile-metrics{grid-template-columns:repeat(2,minmax(0,1fr));}}
-@media(max-width:600px){.member-profile-overlay{padding:0;align-items:stretch;}.member-profile-dialog.request-modal{width:100%;max-width:none;max-height:100dvh;height:100dvh;border-radius:0;padding:20px 16px;}.member-profile-heading h3{font-size:18px;}.member-profile-heading .app-avatar{width:52px;height:52px;flex-basis:52px;}.member-profile-workspace{display:flex;flex-direction:column;}.member-profile-content{order:0;}.member-profile-about{order:1;width:100%;box-sizing:border-box;}.member-profile-filters{gap:8px;}.member-profile-row{flex-wrap:wrap;gap:8px;padding:12px;}.member-profile-row strong{flex-basis:45%;}.member-profile-child-overlay{padding:10px;}.member-profile-dialog>.staffly-segmented{overflow-x:auto;}.member-profile-dialog>.staffly-segmented button{white-space:nowrap;flex-shrink:0;}}
+@media(max-width:600px){.member-profile-overlay{padding:var(--dialog-viewport-gap);}.member-profile-dialog.request-modal{width:100%;max-width:none;max-height:calc(100dvh - 2 * var(--dialog-viewport-gap));height:calc(100dvh - 2 * var(--dialog-viewport-gap));border-radius:var(--dialog-radius);padding:20px 16px;}.member-profile-heading h3{font-size:18px;}.member-profile-heading .app-avatar{width:52px;height:52px;flex-basis:52px;}.member-profile-workspace{display:flex;flex-direction:column;}.member-profile-content{order:0;}.member-profile-about{order:1;width:100%;box-sizing:border-box;}.member-profile-filters{gap:8px;}.member-profile-row{flex-wrap:wrap;gap:8px;padding:12px;}.member-profile-row strong{flex-basis:45%;}.member-profile-child-overlay{padding:var(--dialog-viewport-gap);}.member-profile-dialog>.staffly-segmented{overflow-x:auto;}.member-profile-dialog>.staffly-segmented button{white-space:nowrap;flex-shrink:0;}}
 
 .member-profile-dialog>.staffly-segmented { display:flex; width:100%; box-sizing:border-box; >button{flex:1;} }
 .member-profile-heading>.document-actions-menu {margin-left:auto;flex-shrink:0;>summary{padding:9px 12px;border:1px solid #ddd;border-radius:8px;font-size:12px;}}
@@ -31,11 +31,11 @@
 @media(max-width:600px){.member-profile-heading{align-items:flex-start;}.member-profile-heading>div{flex:1 1 calc(100% - 68px);}}
 // Stable shell: changing a section never collapses and recentres the whole dialog.
 .member-profile-dialog.request-modal {
- height:min(780px,calc(100dvh - 44px)); display:flex; flex-direction:column; overflow:hidden;
+ height:min(780px,calc(100dvh - 2 * var(--dialog-viewport-gap))); display:flex; flex-direction:column; overflow:hidden;
  >header,>.member-profile-heading,>.staffly-segmented {flex-shrink:0;}
  >.member-profile-workspace {flex:1;min-height:0;overflow:auto;align-content:start;scrollbar-gutter:stable;}
 }
-@media(max-width:600px){.member-profile-dialog.request-modal{height:100dvh;}.member-profile-dialog>.member-profile-workspace{flex-direction:column;}.member-profile-content{flex-shrink:0;}}
+@media(max-width:600px){.member-profile-dialog.request-modal{height:calc(100dvh - 2 * var(--dialog-viewport-gap));}.member-profile-dialog>.member-profile-workspace{flex-direction:column;}.member-profile-content{flex-shrink:0;}}
 .member-profile-panel {display:flex;flex-direction:column;gap:16px;min-width:0;}
 .member-profile-time-actions {display:flex;align-items:center;justify-content:flex-end;gap:8px;}
 button.member-profile-details-action {display:inline-flex;align-items:center;justify-content:center;gap:10px;min-height:32px;padding:6px 10px;border:1px solid #e4e2e9;border-radius:7px;background:#f8f7fa;color:#655972;font:inherit;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;span{font-size:16px;line-height:1;color:#8c819a;}&:hover{background:#eeeaf4;border-color:#c6bed3;}}

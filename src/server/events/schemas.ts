@@ -3,6 +3,7 @@ const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(value => { const par
 const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/)
 const optionalText = (limit: number) => z.string().trim().max(limit).nullable().optional().transform(value => value || null)
 export const eventBody = z.object({
+  important: z.boolean().default(false),
   title: z.string().trim().min(1).max(160), description: optionalText(4000), typeLabel: optionalText(80),
   startDate: date, startTime: time, endDate: date.nullable().optional(), endTime: time.nullable().optional(),
   place: optionalText(300), meetingUrl: optionalText(2048).refine(value => !value || /^https?:\/\//i.test(value) && z.url().safeParse(value).success, 'Используйте ссылку http или https'),

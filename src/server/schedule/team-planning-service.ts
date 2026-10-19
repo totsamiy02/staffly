@@ -7,7 +7,7 @@ import { ApiError } from '../api-error.ts'
 import { getMembership } from '../organizations/permissions.ts'
 import { hasPermission, requirePermission } from '../organizations/access.ts'
 import { mediaUrl } from '../storage/image-service.ts'
-import { sendImportantShiftEmail } from '../organizations/notification-service.ts'
+import { enqueueEmail } from '../profile/email-outbox.ts'
 import { activeTarget, assertNoApprovedAbsence, mutatePlannedShift, publicShift, shiftInclude, shiftConflictMessage, validateDuration, type ShiftInput } from './service.ts'
 import { displayDate, formatTime, zonedDateAndTime } from '../../app/schedule/date-utils.ts'
 import { addCalendarDays, startOfZonedDate, zonedDateTimeToUtc } from './timezone.ts'
@@ -408,13 +408,20 @@ export async function actOnDraft(userId:string,organizationId:string,id:string,i
       await notification(tx,changed,recipients.map(r=>r.memberId),input.action==='EXTEND'?'Срок обсуждения изменён':input.action==='CLOSE'?'Обсуждение завершено досрочно':'Обсуждение графика отменено',d.title+(input.explanation?' · '+input.explanation:''))
     }
     await history(tx,changed,actor,input.action,{explanation:input.explanation,confirm:input.confirm,deadline,snapshot: snapshot ?? null,changes:effects.map(e=>({shiftId:e.changed.id,notificationId:e.notification?.id}))})
-    // Applied changes use only ordinary shift notifications, with no duplicate discussion result.
+    if (input.action === 'APPLY') {
+      const memberIds = [...new Set([...effects.map(e => e.changed.memberId), ...effects.flatMap(e => e.previousAssignment ? [e.previousAssignment.shift.memberId] : [])])]
+      for (const memberId of memberIds) {
+        const member = await tx.organizationMember.findUnique({ where: { id: memberId }, include: { user: true } })
+        if (member && member.user.emailNotificationsEnabled && (member.user.emailNotificationCategories as Record<string, unknown>)?.publishedSchedule === true) {
+          await enqueueEmail(tx, { userId: member.userId, organizationId, sourceKind: 'SCHEDULE', sourceId: d.id, sourceKey: `schedule:${d.id}:${memberId}`, category: 'publishedSchedule' })
+          const notificationIds = effects.flatMap(e => [e.notification?.id, e.previousAssignment?.notification.id]).filter((value): value is string => !!value)
+          await tx.emailDelivery.updateMany({ where: { userId: member.userId, sourceId: { in: notificationIds }, category: 'shiftChanges', status: 'PENDING' }, data: { status: 'SKIPPED' } })
+        }
+      }
+    }
+
     return {draft:publicDraft(changed),effects,actor}
   })
-  for(const effect of result.effects) {
-    if(effect.notification)void sendImportantShiftEmail(effect.notification.id,effect.changed,effect.changed.member.user.email,result.actor.organization.name,result.actor.organization.timezone,effect.notification.type as 'SHIFT_ASSIGNED'|'SHIFT_CHANGED'|'SHIFT_CANCELLED').catch(error=>console.error('Shift email failed:',error))
-    if(effect.previousAssignment) {const previous=effect.previousAssignment;void sendImportantShiftEmail(previous.notification.id,previous.shift,previous.shift.member.user.email,result.actor.organization.name,result.actor.organization.timezone,'SHIFT_CANCELLED').catch(error=>console.error('Shift email failed:',error))}
-  }
   return result.draft
 }
 export async function respondToDraft(userId:string,organizationId:string,id:string,input:z.infer<typeof schemas.draftResponseBody>) {

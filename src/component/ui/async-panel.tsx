@@ -1,14 +1,14 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import './async-panel.scss'
 
-function PendingPanel({ label }: { label: string }) {
+function PendingPanel({ label, children }: { label: string; children?: ReactNode }) {
   const [visible, setVisible] = useState(false)
   useEffect(() => { const timer = window.setTimeout(() => setVisible(true), 180); return () => window.clearTimeout(timer) }, [])
-  return <div className={`async-panel__pending${visible ? ' is-visible' : ''}`} role="status" aria-label={label}><span /><span /><span /></div>
+  return <div className={`async-panel__pending${visible ? ' is-visible' : ''}${children ? ' async-panel__pending--custom' : ''}`} role="status" aria-label={label}>{children ?? <><span /><span /><span /></>}</div>
 }
 
 /** Keeps layout steady without showing stale rows under new filters. */
-export default function AsyncPanel({ pending, identity = '', minHeight = 240, label = 'Загружаем раздел', className = '', children }: { pending: boolean; identity?: string; minHeight?: number; label?: string; className?: string; children: ReactNode }) {
+export default function AsyncPanel({ pending, identity = '', minHeight = 240, label = 'Загружаем раздел', className = '', pendingContent, children }: { pending: boolean; identity?: string; minHeight?: number; label?: string; className?: string; pendingContent?: ReactNode; children: ReactNode }) {
   const root = useRef<HTMLDivElement>(null), content = useRef<HTMLDivElement>(null), lastHeight = useRef(0)
   const paginationFocus = useRef<string | null>(null)
   useLayoutEffect(() => {
@@ -31,5 +31,5 @@ export default function AsyncPanel({ pending, identity = '', minHeight = 240, la
     observer.observe(body)
     return () => { observer.disconnect(); animations.forEach(animation => animation.cancel()) }
   }, [pending, identity, minHeight])
-  return <div ref={root} className={`async-panel ${className}`} style={{ minHeight }} aria-busy={pending} onFocusCapture={event => { const target = event.target as HTMLElement; paginationFocus.current = target.closest('.members-pagination, .document-pagination') ? target.textContent : null }}><div ref={content} className="async-panel__content">{pending ? <PendingPanel label={label} /> : children}</div></div>
+  return <div ref={root} className={`async-panel ${className}`} style={{ minHeight }} aria-busy={pending} onFocusCapture={event => { const target = event.target as HTMLElement; paginationFocus.current = target.closest('.members-pagination, .document-pagination') ? target.textContent : null }}><div ref={content} className="async-panel__content">{pending ? <PendingPanel label={label}>{pendingContent}</PendingPanel> : children}</div></div>
 }

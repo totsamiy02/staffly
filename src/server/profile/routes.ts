@@ -6,6 +6,7 @@ import { ApiError } from '../api-error.ts'
 import { requireAuth, type AuthenticatedRequest } from '../auth.ts'
 import { updateProfileBody } from './schemas.ts'
 import { mediaUrl } from '../storage/image-service.ts'
+import { emailPreferencesBody, getEmailPreferences, saveEmailPreferences } from './email-preferences.ts'
 
 const router = Router()
 router.use(requireAuth)
@@ -31,6 +32,13 @@ function profileUser(user: { id: string; email: string; firstName: string | null
 router.get('/profile', async (request, response) => {
   const user = await prisma.user.findUniqueOrThrow({ where: { id: auth(request).userId } })
   response.json({ user: profileUser(user) })
+})
+
+router.get('/profile/email-preferences', async (request, response) => {
+  response.json(await getEmailPreferences(auth(request).userId))
+})
+router.patch('/profile/email-preferences', async (request, response) => {
+  response.json(await saveEmailPreferences(auth(request).userId, emailPreferencesBody.parse(request.body)))
 })
 
 router.patch('/profile', async (request, response) => {

@@ -45,3 +45,13 @@
 .vacation-selected-person { display:flex; align-items:center; gap:8px; width:100%; padding:10px 0 0; border:0; background:transparent; text-align:left; cursor:pointer; .app-avatar { width:27px; height:27px; flex:0 0 27px; font-size:10px; } >span:nth-child(2) { display:grid; flex:1; min-width:0; gap:4px; strong { font-size:11px; font-weight:500; overflow-wrap:anywhere; } small { font-size:9px; color:#9297a2; } } >span:last-of-type { font-size:19px; color:#b1a7bc; } }
 .vacation-day-overlap>b { font-weight:500; }
 @media(max-width:640px){.vacation-calendar .vacation-day-overlap{position:absolute;right:3px;top:6px;min-width:13px;text-align:center;>span{display:none;}}}
+
+.vacation-planning {container:vacation-planning / inline-size;}
+@container vacation-planning (max-width:1200px) {.vacation-layout {grid-template-columns:minmax(0,1fr);}}
+.vacation-calendar .vacation-day-person>.member-profile-link:not(.app-avatar) {flex:1;min-width:0;overflow:hidden;white-space:nowrap;font-size:11px;>span {overflow:hidden;text-overflow:ellipsis;}}
+@container planning-month (max-width:900px) {
+ .vacation-calendar .vacation-day-person {padding:2px;>.member-profile-link:not(.app-avatar),>span:last-child:not(.app-avatar) {display:none;}.app-avatar {width:18px;height:18px;flex-basis:18px;}}
+ .vacation-calendar .vacation-day-people {display:flex;flex-wrap:wrap;justify-content:center;gap:3px;}
+ .vacation-calendar .vacation-day-overlap {position:absolute;right:3px;top:6px;padding:2px;font-size:10px;>span {display:none;}}
+ .vacation-calendar .planning-month__grid>.staffly-action-surface {min-height:88px;padding:5px 2px;}
+}

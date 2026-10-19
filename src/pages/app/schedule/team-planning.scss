@@ -19,8 +19,8 @@
 .planning-empty { padding:26px 16px; text-align:center; color:#828696; line-height:1.65; font-size:13px; >strong {display:block;color:#474b59;font-size:15px;} >p {margin:8px 0 16px;} }
 .planning-notice { padding:12px 14px; border:1px solid #f3d39e; background:#fff8eb; color:#8c541d; border-radius:8px; font-size:12px; line-height:1.5; &--violet {border-color:#e7dfff;background:#f5f1ff;color:#6555a2;} &--error {border-color:#f0c3cb;background:#fff1f3;color:#a6324b;} }
 .planning-text-button { padding:7px 0; border:0; background:transparent; color:#6b55c8; font-size:13px; cursor:pointer; text-align:left; }
-.planning-dialog { width:min(620px,calc(100vw - 28px)); max-height:calc(100dvh - 40px); overflow:auto; }
-.planning-review-dialog {width:min(800px,calc(100vw - 28px));}
+.planning-dialog { width:min(620px,100%); max-height:calc(100dvh - 2 * var(--dialog-viewport-gap)); overflow:auto; }
+.planning-review-dialog {width:min(800px,100%);}
 .planning-dialog-form { padding:4px 24px 24px;gap:16px; }
 .planning-header-actions {display:flex;gap:12px;align-items:center;flex-wrap:wrap;}
 .demand-page {max-width:1200px;.planning-card {display:grid;gap:20px;} }
@@ -83,7 +83,7 @@
   .demand-toolbar{align-items:stretch;flex-direction:column;>label{max-width:none;}}.demand-weekdays{gap:4px;button{padding:8px 0;flex:1;min-width:0;}}
   .demand-table__head{display:none;}.demand-table__row{grid-template-columns:minmax(0,1fr) 36px;padding:14px;gap:12px;>label{grid-column:1;} .demand-times{grid-column:1;grid-row:2;}.demand-stepper{grid-column:1;width:fit-content;grid-row:3;}.demand-remove{grid-column:2;grid-row:1;}}
   .demand-mobile-label{display:block;}.demand-times input:not([type=checkbox]){min-width:54px;}.demand-copy{gap:10px;>span{flex-basis:100%;}}
-  .planning-dialog-form{padding:4px 16px 16px;}.planning-dialog{max-height:calc(100dvh - 24px);}.draft-metrics{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;>div{padding:12px;gap:3px 8px;}strong{font-size:20px;}small{font-size:10px;}}
+  .planning-dialog-form{padding:4px 16px 16px;}.planning-dialog{max-height:calc(100dvh - 2 * var(--dialog-viewport-gap));}.draft-metrics{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;>div{padding:12px;gap:3px 8px;}strong{font-size:20px;}small{font-size:10px;}}
   .draft-deadline{font-size:11px;}.draft-calendar-toolbar>div{gap:8px;strong{font-size:11px;}}.draft-calendar-toolbar>.app-primary{width:100%;}
   .draft-calendar th:first-child{min-width:140px;width:140px;}.draft-calendar .draft-person{align-items:flex-start;>.app-avatar{width:24px;height:24px;}strong{font-size:11px;}}
   .draft-coverage{grid-template-columns:1fr;padding:16px;}.draft-workspace-footer{position:static;padding:14px;>div{width:100%;}>div:last-child>*{flex:1 1 auto;justify-content:center;text-align:center;}}.draft-change-counts{justify-content:space-between;gap:5px!important;}
@@ -126,17 +126,17 @@
 .schedule-coverage-key{flex-basis:100%;color:#8c6b7a;font-size:10px;}
 
 /* Keep dialog contents and avatars independent from generic settings/form rules. */
-.document-dialog.planning-dialog{padding:0;max-height:calc(100dvh - 40px);overflow:auto;>header{padding:22px 24px 18px;border-bottom:1px solid #edf0f4;margin:0;h2{font-size:21px;line-height:1.3;}}.planning-dialog-form{padding:22px 24px 24px;margin:0;gap:17px;}footer{margin:4px 0 0;}.planning-checkbox{display:flex;}}
+.document-dialog.planning-dialog{padding:0;max-height:calc(100dvh - 2 * var(--dialog-viewport-gap));overflow:auto;>header{padding:22px 24px 18px;border-bottom:1px solid #edf0f4;margin:0;h2{font-size:21px;line-height:1.3;}}.planning-dialog-form{padding:22px 24px 24px;margin:0;gap:17px;}footer{margin:4px 0 0;}.planning-checkbox{display:flex;}}
 .team-planning .media-avatar,.draft-person-avatar{display:grid!important;place-items:center;flex:0 0 32px!important;width:32px!important;min-width:32px!important;max-width:32px!important;height:32px!important;min-height:32px;aspect-ratio:1;border-radius:50%;overflow:hidden;background:#eeeff2;gap:0!important;color:#727886;font-size:12px;img{width:100%;height:100%;object-fit:cover;}}
 .planning-settings .planning-options{max-width:none;overflow:visible;display:grid;}
 .draft-workspace-footer{position:static;box-shadow:none;margin-top:4px;}
 .draft-view-mode{display:flex;flex-wrap:wrap;gap:8px;button{padding:10px 14px;background:#fff;border:1px solid #e2e4eb;border-radius:8px;font-size:12px;color:#7b8291;cursor:pointer;&[aria-pressed=true]{color:#63508f;border-color:#c3b0e0;background:#f7f3ff;}}}
 .draft-workflow{display:flex;flex-wrap:wrap;gap:12px 22px;font-size:11px;color:#a1a6b0;span.is-current{color:#66508e;font-weight:650;}}
 .draft-next-action{display:flex;align-items:center;justify-content:space-between;gap:20px;background:#fff;border:1px solid #ded5ee;border-radius:10px;padding:18px;>div{display:grid;gap:7px;min-width:0;}strong{font-size:14px;}p{font-size:12px;line-height:1.6;color:#858b98;}button{flex-shrink:0;}}
-.draft-month-workspace{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(270px,1fr);gap:20px;align-items:start;}
+.draft-month-workspace{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:20px;align-items:start;}
 .draft-month-calendar{display:grid;gap:16px;}
 .draft-month-calendar .planning-month__grid>.staffly-action-surface{min-height:102px;}
-.draft-month-chip{display:grid;gap:3px;border:1px solid #e8e9ee;background:#f8f9fb;border-radius:4px;padding:4px 3px;min-width:0;line-height:1.3;>span{font-size:9px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}small{font-size:8px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}}
+.draft-month-chip{display:grid;gap:3px;border:1px solid #e8e9ee;background:#f8f9fb;border-radius:4px;padding:4px 3px;min-width:0;line-height:1.3;>span{font-size:11px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}small{font-size:10px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}}
 .draft-calendar-key{display:flex;gap:12px;flex-wrap:wrap;font-size:10px;color:#9197a3;span::before{content:'';display:inline-block;width:7px;height:7px;border-radius:2px;background:#c9cdd5;margin-right:5px;}span:nth-child(1)::before{background:#9ad9b9;}span:nth-child(2)::before{background:#bba2e3;}span:nth-child(3)::before{background:#e8acbb;}}
 .draft-day-detail{display:grid;gap:18px;>header{display:grid;gap:14px;>div{display:grid;gap:7px;}h3{font-size:15px;}p{font-size:11px;color:#969ba6;}}}
 .draft-day-detail__list{display:grid;gap:9px;max-height:480px;overflow:auto;overscroll-behavior:contain;}
@@ -145,7 +145,7 @@
 .draft-inbox__cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;>a{display:grid;gap:10px;color:inherit;text-decoration:none;strong{font-size:15px;}p,small{font-size:11px;color:#8e95a3;line-height:1.6;}b{font-size:11px;color:#7c5baf;margin-top:6px;}}}
 @media(max-width:1100px){.demand-workspace{grid-template-columns:minmax(280px,.9fr) minmax(300px,1fr);gap:16px;}.draft-month-workspace{grid-template-columns:1fr;}.draft-day-detail>header{display:flex;align-items:center;justify-content:space-between;gap:12px;}}
 @media(max-width:800px){.demand-workspace{grid-template-columns:1fr;}.demand-calendar-card{position:static;}.draft-next-action{align-items:stretch;flex-direction:column;}.schedule-display-options>div{right:auto;left:0;}}
-@media(max-width:700px){.coverage-indicator{max-width:calc(100% - 4px);left:2px;right:2px;bottom:2px;top:auto;font-size:8px;}.coverage-indicator__desktop{display:none;}.coverage-indicator__mobile{display:inline;}.schedule-calendar--coverage .schedule-day{padding-bottom:20px;min-height:75px;}.draft-month-calendar .planning-month__grid>.staffly-action-surface{min-height:76px;}.draft-month-chip>span{font-size:8px;}.draft-month-chip small{font-size:7px;}.draft-month-workspace{gap:14px;}.document-dialog.planning-dialog{max-height:calc(100dvh - 16px);width:100%;border-radius:14px 14px 0 0;>header{padding:18px 16px;}.planning-dialog-form{padding:18px 16px;}}.draft-day-detail>header{flex-wrap:wrap;}.draft-day-detail>header>button{width:100%;}.demand-interval{padding:14px;}}
+@media(max-width:700px){.coverage-indicator{max-width:calc(100% - 4px);left:2px;right:2px;bottom:2px;top:auto;font-size:8px;}.coverage-indicator__desktop{display:none;}.coverage-indicator__mobile{display:inline;}.schedule-calendar--coverage .schedule-day{padding-bottom:20px;min-height:75px;}.draft-month-calendar .planning-month__grid>.staffly-action-surface{min-height:76px;}.draft-month-chip>span{font-size:8px;}.draft-month-chip small{font-size:7px;}.draft-month-workspace{gap:14px;}.document-dialog.planning-dialog{max-height:calc(100dvh - 2 * var(--dialog-viewport-gap));width:100%;border-radius:var(--dialog-radius) 14px 0 0;>header{padding:18px 16px;}.planning-dialog-form{padding:18px 16px;}}.draft-day-detail>header{flex-wrap:wrap;}.draft-day-detail>header>button{width:100%;}.demand-interval{padding:14px;}}
 .demand-stepper { width:fit-content; }
 @media(max-width:640px) {
  .demand-page > .staffly-segmented { overflow:visible; align-items:stretch; >button { flex:1 1 0; min-width:0; white-space:normal; text-align:center; } }
@@ -174,7 +174,7 @@
 .demand-page .planning-month__grid>.staffly-action-surface:has(.demand-day-plan.is-focused){border-color:#8d72b5;box-shadow:inset 0 0 0 1px #8d72b5;}
 .demand-workspace--unified .demand-calendar-card {position:static;}
 .demand-page {width:100%;grid-template-columns:minmax(0,1fr);}
-.demand-page>.staffly-segmented {min-width:0;width:100%;overflow-x:auto;}
+.demand-page>.staffly-segmented {min-width:0;width:100%;overflow:visible;}
 /* Shared form actions and readable day states. */
 .demand-workspace--unified {grid-template-columns:minmax(0,1.2fr) minmax(320px,.8fr);}
 .demand-page .demand-calendar-card .planning-month__grid>.staffly-action-surface {min-height:76px;padding:9px;border-color:#d8dde6;}
@@ -191,3 +191,20 @@
 
 .demand-day-plan__compact {display:none;}
 @media(max-width:600px){.demand-day-plan__full{display:none;}.demand-day-plan__compact{display:inline;}}
+
+// Rich calendars collapse before seven columns lose readable text width.
+.team-planning {container:team-planning / inline-size;}
+@container team-planning (max-width:1250px) {.draft-month-workspace {grid-template-columns:minmax(0,1fr);}}
+@container team-planning (max-width:1050px) {.demand-workspace--unified {grid-template-columns:minmax(0,1fr);}}
+.draft-month-count {display:none;}
+@container planning-month (max-width:900px) {
+ .draft-month-calendar .draft-month-chip,.draft-month-calendar .planning-month__hint {display:none;}
+ .draft-month-count {display:block;font-size:11px;line-height:1.4;text-align:center;}
+ .draft-month-calendar .planning-month__number {text-align:center;}
+ .draft-month-calendar .planning-month__grid>.staffly-action-surface {min-height:76px;padding-inline:2px;}
+}
+@container planning-month (max-width:620px) {
+ .demand-day-plan__full {display:none;}
+ .demand-day-plan__compact {display:inline;}
+ .demand-page .demand-calendar-card .planning-month__grid>.staffly-action-surface {padding-inline:3px;}
+}

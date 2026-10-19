@@ -1,5 +1,6 @@
+import { createPortal } from 'react-dom'
 import { formatTimeEntry } from './time-format'
-import { useEffect, useId, useRef, useState, type InputHTMLAttributes, type ChangeEvent, type KeyboardEvent } from 'react'
+import { useEffect, useLayoutEffect, useId, useRef, useState, type InputHTMLAttributes, type CSSProperties, type ChangeEvent, type KeyboardEvent } from 'react'
 
 type Props = InputHTMLAttributes<HTMLInputElement>
 const iso = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
@@ -15,24 +16,45 @@ export default function DatePicker({ value, onChange, min, max, disabled, readOn
   const [focusedDay, setFocusedDay] = useState(text || iso(new Date()))
   const pendingFocus = useRef<string | null>(null)
   const host = useRef<HTMLDivElement>(null)
+  const popup = useRef<HTMLDivElement>(null)
+  const [popupStyle, setPopupStyle] = useState<CSSProperties>({ visibility: 'hidden' })
   const trigger = useRef<HTMLButtonElement>(null)
   const panelId = useId()
   const allowed = (day: string) => (!min || day >= String(min)) && (!max || day <= String(max))
 
   useEffect(() => {
     setLabel(host.current?.closest('label')?.querySelector(':scope > span')?.textContent ?? '')
-    function outside(event: PointerEvent) { if (!host.current?.contains(event.target as Node)) setOpen(false) }
+    function outside(event: PointerEvent) { if (!host.current?.contains(event.target as Node) && !popup.current?.contains(event.target as Node)) setOpen(false) }
     const otherOpened = (event: Event) => { if ((event as CustomEvent<string>).detail !== panelId) setOpen(false) }
     document.addEventListener('staffly:popover-open', otherOpened)
     document.addEventListener('pointerdown', outside, true)
     return () => { document.removeEventListener('pointerdown', outside, true); document.removeEventListener('staffly:popover-open', otherOpened) }
   }, [panelId])
   useEffect(() => { setInvalid(false) }, [value])
-  useEffect(() => {
-    if (!open || !pendingFocus.current) return
-    host.current?.querySelector<HTMLButtonElement>(`[data-date="${pendingFocus.current}"]`)?.focus()
+  useLayoutEffect(() => {
+    if (!open || popupStyle.visibility !== 'visible' || !pendingFocus.current) return
+    popup.current?.querySelector<HTMLButtonElement>(`[data-date="${pendingFocus.current}"]`)?.focus()
     pendingFocus.current = null
-  }, [open, month])
+  }, [open, month, popupStyle.visibility])
+
+  useLayoutEffect(() => {
+    if (!open) return
+    function position() {
+      const rect = trigger.current?.getBoundingClientRect()
+      if (!rect) return
+      const inset = 12, gap = 6, width = Math.min(280, window.innerWidth - inset * 2)
+      const below = window.innerHeight - rect.bottom - inset - gap, above = rect.top - inset - gap
+      const upward = below < (popup.current?.scrollHeight ?? 320) && above > below
+      setPopupStyle({ position: 'fixed', width, maxWidth: width, minWidth: 0, maxHeight: Math.max(80, upward ? above : below), overflowY: 'auto', left: Math.max(inset, Math.min(rect.left, window.innerWidth - width - inset)), ...(upward ? { bottom: window.innerHeight - rect.top + gap, top: 'auto' } : { top: Math.max(inset, rect.bottom + gap), bottom: 'auto' }), visibility: 'visible' })
+    }
+    position()
+    const observer = new ResizeObserver(position)
+    if (trigger.current) observer.observe(trigger.current)
+    function scroll(event: Event) { if (!popup.current?.contains(event.target as Node)) position() }
+    window.addEventListener('resize', position)
+    window.addEventListener('scroll', scroll, true)
+    return () => { observer.disconnect(); window.removeEventListener('resize', position); window.removeEventListener('scroll', scroll, true) }
+  }, [open, month, required, text])
 
   function openCalendar() {
     if (readOnly || disabled) return
@@ -43,6 +65,7 @@ export default function DatePicker({ value, onChange, min, max, disabled, readOn
     setFocusedDay(day)
     pendingFocus.current = day
     setMonth(firstOfMonth(parse(day)))
+    setPopupStyle({ visibility: 'hidden' })
     setOpen(true)
   }
   function choose(day: string) {
@@ -81,21 +104,22 @@ export default function DatePicker({ value, onChange, min, max, disabled, readOn
   }
   const offset = (month.getDay() + 6) % 7
   const count = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate()
-  return <div className="staffly-date" ref={host} onBlur={event => { if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) setOpen(false) }} onKeyDown={event => {
+  return <div className="staffly-date" ref={host} onBlur={event => { if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget) && !popup.current?.contains(event.relatedTarget)) setOpen(false) }} onKeyDown={event => {
+    if (event.key === 'Tab' && open && popup.current?.contains(event.target as Node)) { event.preventDefault(); event.stopPropagation(); setOpen(false); trigger.current?.focus() }
     if (event.key === 'Escape' && open) { event.stopPropagation(); setOpen(false); trigger.current?.focus() }
   }}>
     <input {...props} type="text" value={text} onChange={() => undefined} disabled={disabled} required={required && !readOnly} tabIndex={-1} aria-hidden="true" onFocus={() => trigger.current?.focus()} className="staffly-select__validation" onInvalid={event => { event.preventDefault(); setInvalid(true); openCalendar() }} />
     <button id={id} ref={trigger} type="button" className={`staffly-control${text ? '' : ' is-placeholder'}`} disabled={disabled} aria-label={props['aria-label'] ?? (label || 'Дата')} aria-labelledby={props['aria-labelledby']} aria-describedby={props['aria-describedby']} aria-haspopup="dialog" aria-expanded={open} aria-controls={panelId} aria-required={required} aria-invalid={props['aria-invalid'] ?? invalid} aria-readonly={readOnly} onClick={event => { event.preventDefault(); event.stopPropagation(); if (open) setOpen(false); else openCalendar() }}>
       {text ? parse(text).toLocaleDateString('ru-RU') : 'Выберите дату'}<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 5h12v12H4zM7 3v4m6-4v4M4 9h12" /></svg>
     </button>
-    {open && <div id={panelId} role="dialog" aria-label="Выбор даты" className="staffly-calendar">
+    {open && createPortal(<div ref={popup} style={popupStyle} id={panelId} role="dialog" aria-label="Выбор даты" className="staffly-calendar staffly-calendar--floating">
       <header><button type="button" aria-label="Предыдущий месяц" disabled={!!min && iso(new Date(month.getFullYear(), month.getMonth(), 0)) < String(min)} onClick={() => moveMonth(-1)}>‹</button><strong aria-live="polite">{month.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })}</strong><button type="button" aria-label="Следующий месяц" disabled={!!max && iso(new Date(month.getFullYear(), month.getMonth() + 1, 1)) > String(max)} onClick={() => moveMonth(1)}>›</button></header>
       <div className="staffly-calendar__days">{['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map(day => <span key={day}>{day}</span>)}{Array.from({ length: offset }, (_, index) => <span key={`empty-${index}`} />)}{Array.from({ length: count }, (_, index) => {
         const day = iso(new Date(month.getFullYear(), month.getMonth(), index + 1))
         return <button type="button" key={day} disabled={!allowed(day)} tabIndex={focusedDay === day ? 0 : -1} aria-label={parse(day).toLocaleDateString('ru-RU', { dateStyle: 'full' })} aria-pressed={text === day} onFocus={() => setFocusedDay(day)} onClick={() => choose(day)} onKeyDown={event => moveFocus(event, day)} data-date={day}>{index + 1}</button>
       })}</div>
       {!required && text && <button type="button" className="staffly-calendar__clear" onClick={() => choose('')}>Очистить дату</button>}
-    </div>}
+    </div>, document.body)}
   </div>
 }
 

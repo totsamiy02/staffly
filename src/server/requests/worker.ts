@@ -2,10 +2,12 @@ import { maintainShiftOffers } from '../schedule/offer-service.ts'
 import { prisma } from '../db.ts'
 import { notifyStage } from './workflow.ts'
 import { reconcileShiftRequests } from './shift-conflicts.ts'
-export async function maintainRequests(now=new Date()){
-  await maintainShiftOffers()
+import { startBackgroundTask } from '../background-task.ts'
+export async function maintainRequests(now=new Date(),shouldContinue=()=>true){
+  await maintainShiftOffers(shouldContinue)
   const orgs=await prisma.organization.findMany({where:{deletedAt:null},select:{id:true}})
   for(const org of orgs){
+    if (!shouldContinue()) return
     await reconcileShiftRequests(org.id)
     await prisma.$transaction(async tx=>{
       await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${org.id},1))::text`
@@ -18,4 +20,4 @@ export async function maintainRequests(now=new Date()){
     })
   }
 }
-export function startRequestMaintenance(){let running=false;const run=async()=>{if(running)return;running=true;try{await maintainRequests()}catch(e){console.error('Request maintenance failed:',e)}finally{running=false}};void run();const timer=setInterval(()=>void run(),60_000);timer.unref();return()=>clearInterval(timer)}
+export function startRequestMaintenance(){return startBackgroundTask({name:'Request maintenance',intervalMs:60_000,retryExpiredTransaction:true,run:shouldContinue=>maintainRequests(new Date(),shouldContinue)})}

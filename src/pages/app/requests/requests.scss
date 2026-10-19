@@ -32,10 +32,6 @@
 .requests-empty { margin-top: 18px; padding: 55px 24px; border: 1px dashed #ccc; border-radius: 16px; text-align: center; }
 .requests-empty h2 { font-size: 20px; }
 .requests-empty p { max-width: 500px; margin: 8px auto 0; color: #777; font-size: 12px; }
-.request-modal { width: min(100%, 610px); max-height: calc(100dvh - 48px); overflow-y: auto; padding: 28px; border-radius: 18px; background: #fff; }
-.request-modal > header, .request-drawer > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
-.request-modal > header h2, .request-drawer > header h2 { font-size: 23px; }
-.request-modal > header > button, .request-drawer > header > button { display: grid; width: 35px; height: 35px; place-items: center; border-radius: 9px; color: #777; cursor: pointer; font-size: 24px; }
 .request-modal form { display: grid; gap: 16px; margin-top: 24px; }
 .request-modal label, .request-review label { display: grid; gap: 7px; }
 .request-modal label > span, .request-review label > span { color: #555; font-size: 11px; font-weight: 700; }
@@ -51,9 +47,6 @@
 .request-file-field input { padding: 10px; }
 .request-file-field ul { display: grid; gap: 4px; padding: 10px 12px; border-radius: 9px; background: #f5f5f5; color: #555; font-size: 10px; }
 .request-modal footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
-.request-drawer { width: min(100%, 570px); height: 100%; overflow-y: auto; padding: 28px; background: #f7f7f7; }
-.request-drawer > header { position: sticky; z-index: 3; top: -28px; margin: -28px -28px 0; padding: 28px; border-bottom: 1px solid #e2e2e2; background: rgb(247 247 247 / 94%); backdrop-filter: blur(10px); }
-.request-drawer > header .request-status { margin-top: 9px; }
 .request-detail-person { display: flex; align-items: center; gap: 12px; margin-top: 25px; padding: 17px; border: 1px solid #dedede; border-radius: 14px; background: #fff; }
 .request-detail-person .app-avatar { width: 48px; height: 48px; flex-basis: 48px; }
 .request-detail-person > div { display: grid; min-width: 0; }
@@ -118,7 +111,7 @@
 .request-type-form .request-type-check { display: flex; align-items: center; flex-direction: row; }
 .request-type-form .request-type-check input { width: 17px; min-height: 17px; }
 .request-type-form footer { display: flex; justify-content: flex-end; gap: 8px; }
-@media (max-width: 700px) { .requests-heading { align-items: stretch; flex-direction: column; } .requests-heading .app-primary { width: 100%; } .requests-filters label { width: 100%; } .request-card { grid-template-columns: minmax(0, 1fr) auto; padding: 14px; } .request-card time { display: none; } .request-date-fields, .request-detail-grid, .request-shift-proposal > div { grid-template-columns: 1fr; } .request-modal { width: 100%; max-height: 92dvh; padding: 22px; border-radius: 18px 18px 0 0; } .request-drawer { padding: 22px; } .request-drawer > header { top: -22px; margin: -22px -22px 0; padding: 22px; } }
+@media (max-width: 700px) { .requests-heading { align-items: stretch; flex-direction: column; } .requests-heading .app-primary { width: 100%; } .requests-filters label { width: 100%; } .request-card { grid-template-columns: minmax(0, 1fr) auto; padding: 14px; } .request-card time { display: none; } .request-date-fields, .request-detail-grid, .request-shift-proposal > div { grid-template-columns: 1fr; } }
 .request-card { grid-template-columns: minmax(0, 1fr) auto; }
 .request-card > div { min-width: 0; }
 .request-card strong { overflow-wrap: anywhere; }

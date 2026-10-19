@@ -5,7 +5,7 @@ import { absenceDays } from '../src/app/schedule/absence-format.ts'
 import { writeFile, access } from 'node:fs/promises'
 import path from 'node:path'
 import { planningData, savePosition, saveTemplate, assignPositions, saveWorkload, templateBody } from '../src/server/schedule/planning.ts'
-import { decodeNotificationCursor, isUrgentShiftEmail, listNotificationHistory, readHistoryNotification, updateAllNotifications, reserveShiftEmail } from '../src/server/organizations/notification-service.ts'
+import { decodeNotificationCursor, isUrgentShiftEmail, listNotificationHistory, readHistoryNotification, updateAllNotifications } from '../src/server/organizations/notification-service.ts'
 import { invitationTimeRemaining } from '../src/app/organizations/invitation-time.ts'
 import assert from 'node:assert/strict'
 import { after, before, describe, it } from 'node:test'
@@ -1081,14 +1081,8 @@ describe('notification history, invitation presentation and email policy', { con
     assert.ok(history.notifications.some(item => item.type === 'SHIFT_CANCELLED' && item.href?.includes(`shift=${shift.id}`)))
   })
 
-  it('limits concurrent urgent shift email attempts per employee and organization while retaining every in-app event', async () => {
+  it('keeps the urgent time window explicit; personal delivery limits are tested with the outbox', async () => {
     const now = new Date('2042-01-01T00:00:00Z')
-    const events = await prisma.accountNotification.createManyAndReturn({ data: Array.from({ length: 3 }, () => ({ userId: receiver.id, organizationId: organization.id, type: 'SHIFT_CHANGED' as const, title: 'Изменение', message: 'Тест' })) })
-    const results = await Promise.all(events.map(event => reserveShiftEmail(event.id, receiver.id, organization.id, now)))
-    assert.equal(results.filter(Boolean).length, 1)
-    assert.equal(await prisma.accountNotification.count({ where: { id: { in: events.map(item => item.id) } } }), 3)
-    assert.equal(await reserveShiftEmail(events[results.findIndex(value => !value)].id, receiver.id, organization.id, new Date(now.getTime() + 3_600_000)), true)
-    assert.equal(await reserveShiftEmail(events[results.findIndex(Boolean)].id, receiver.id, organization.id, new Date(now.getTime() + 7_200_000)), false)
     assert.equal(isUrgentShiftEmail(new Date(now.getTime() + 23 * 3_600_000), new Date(now.getTime() + 25 * 3_600_000), now), true)
     assert.equal(isUrgentShiftEmail(new Date(now.getTime() + 25 * 3_600_000), new Date(now.getTime() + 26 * 3_600_000), now), false)
     assert.equal(isUrgentShiftEmail(new Date(now.getTime() - 10_000), new Date(now.getTime() - 1), now), false)

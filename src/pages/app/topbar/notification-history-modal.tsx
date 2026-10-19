@@ -26,7 +26,7 @@ export default function NotificationHistoryModal({ organizationId, locationId, o
   const items = history.data?.notifications ?? []
   function reset() { setCursors([undefined]); list.current?.scrollTo(0, 0) }
   const busy = actions.read.isPending || actions.invitation.isPending || actions.remove.isPending || actions.readAll.isPending
-  return <AnimatedOverlay variant="drawer" className="notification-history-backdrop" onClose={onClose}>{close => <DocumentDialog drawer title="Уведомления" onClose={close} className="notification-panel" headerContent={<header className="notification-panel__header">
+  return <AnimatedOverlay variant="modal" className="notification-history-backdrop" onClose={onClose}>{close => <DocumentDialog title="Уведомления" onClose={close} className="notification-panel" headerContent={<header className="notification-panel__header">
     <div className="notification-heading"><h2>Уведомления</h2>{count > 0 && <span className="notification-count">{count}</span>}<button className="notification-close" type="button" aria-label="Закрыть уведомления" onClick={close}>×</button></div>
     <div className="notification-panel__intro"><p>Все важное по вашим сменам и команде</p>{count > 0 && <button className="notification-read-all" disabled={busy} onClick={() => actions.readAll.mutate()}>Прочитать все</button>}</div>
   </header>}>

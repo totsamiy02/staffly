@@ -82,8 +82,8 @@
 .access-text-button { display: inline-flex; min-height: 34px; align-items: center; gap: 7px; padding: 4px 7px; border-radius: 7px; color: #929099; cursor: pointer; font-size: 11px; .access-icon { width: 15px; height: 15px; } &:hover { background: #f6f5f8; color: #655b71; } }
 
 // Employee assignment and confirmation dialogs reuse DocumentDialog and Select.
-.access-dialog.document-dialog { display: flex; width: min(760px, calc(100vw - 40px)); max-height: 90dvh; flex-direction: column; gap: 20px; padding: 26px; border: 1px solid #eeeef1; border-radius: 18px; overflow-y: auto; > * { flex-shrink: 0; } > header { margin: 0; h2 { font-size: 23px; letter-spacing: -.035em; } .app-eyebrow { margin-bottom: 5px; color: #a19aa9; font-size: 9px; letter-spacing: .09em; } } label { min-width: 0; } > footer { position: sticky; z-index: 2; bottom: -26px; display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 -26px -26px; padding: 18px 26px; border-top: 1px solid #eeeef1; background: #fff; .app-primary, .app-secondary, .app-danger { min-height: 40px; font-size: 12px; } } }
-.access-delete-dialog.document-dialog, .access-confirm-dialog.document-dialog { width: min(580px, calc(100vw - 40px)); }
+.access-dialog.document-dialog { display: flex; width: min(760px,100%); max-height:calc(100dvh - 2 * var(--dialog-viewport-gap)); flex-direction: column; gap: 20px; padding: 26px; border: 1px solid #eeeef1; border-radius:var(--dialog-radius); overflow-y: auto; > * { flex-shrink: 0; } > header { margin: 0; h2 { font-size: 23px; letter-spacing: -.035em; } .app-eyebrow { margin-bottom: 5px; color: #a19aa9; font-size: 9px; letter-spacing: .09em; } } label { min-width: 0; } > footer { position: sticky; z-index: 2; bottom: -26px; display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 -26px -26px; padding: 18px 26px; border-top: 1px solid #eeeef1; background: #fff; .app-primary, .app-secondary, .app-danger { min-height: 40px; font-size: 12px; } } }
+.access-delete-dialog.document-dialog, .access-confirm-dialog.document-dialog { width: min(580px,100%); }
 .access-dialog .access-field > span { color: #77717f; font-size: 11px; font-weight: 600; }
 .access-member-summary { display: flex; align-items: center; gap: 13px; padding: 16px; border: 1px solid #eae8ee; border-radius: 12px; background: #fbfafc; > div { display: grid; gap: 4px; min-width: 0; flex: 1; } strong { color: #4d4756; font-size: 13px; overflow-wrap: anywhere; } small { color: #7f7488; font-size: 11px; overflow-wrap: anywhere; } > .access-tag { margin-left: auto; } }
 .access-member-avatar { display: grid; width: 42px; height: 42px; flex: 0 0 42px; place-items: center; border-radius: 50%; background: #34313b; color: white; font-size: 13px; font-weight: 600; overflow: hidden; }
@@ -137,7 +137,7 @@
   .access-permission-content { max-height: none; gap: 18px; padding: 16px 12px; }
   .access-permission-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .access-editor-footer { flex-wrap: wrap; gap: 12px; > .access-actions { width: 100%; } > .access-actions:last-child { justify-content: flex-end; } }
-  .access-dialog.document-dialog { width: calc(100vw - 24px); max-height: 92dvh; gap: 16px; padding: 20px; > footer { bottom: -20px; margin-inline: -20px; margin-bottom: -20px; padding: 16px 20px; flex-wrap: wrap; } }
+  .access-dialog.document-dialog { width:100%; max-height:calc(100dvh - 2 * var(--dialog-viewport-gap)); gap: 16px; padding: 20px; > footer { bottom: -20px; margin-inline: -20px; margin-bottom: -20px; padding: 16px 20px; flex-wrap: wrap; } }
   .access-member-summary { gap: 10px; padding: 12px; > .access-tag { display: none; } }
   .access-scope-card { padding: 14px; }
   .access-audit { padding-inline: 18px; > div { flex-wrap: wrap; time { margin-left: 20px; } } }
@@ -156,7 +156,7 @@
 
 // A fixed identity and footer surround one scrolling content area.
 .access-member-dialog.access-dialog.document-dialog {
-  width:min(1000px,calc(100vw - 40px)); padding:0; gap:0; overflow:hidden;
+  width:min(1000px,100%); padding:0; gap:0; overflow:hidden;
   >header { padding:24px 28px 20px; border-bottom:1px solid #eeeef2; }
   .access-member-context { display:grid; gap:16px; padding:20px 28px; }
   .access-member-summary { strong { color:#30313a; font-size:14px; } small { color:#7c7d89; font-size:12px; } }
@@ -187,7 +187,7 @@
 }
 @media(max-width:700px) {
   .access-member-dialog.access-dialog.document-dialog {
-    width:calc(100vw - 24px); >header { padding:20px; } .access-member-context { padding:16px 20px; } .access-member-body { padding:0 16px 18px; } >footer { padding:14px 20px; }
+    width:100%; >header { padding:20px; } .access-member-context { padding:16px 20px; } .access-member-body { padding:0 16px 18px; } >footer { padding:14px 20px; }
     .staffly-segmented { width:100%; button { flex:1; justify-content:center; padding:10px; } }
     .access-effective-layout { grid-template-columns:1fr; gap:16px; }
     .access-effective-nav { position:static; display:flex; overflow-x:auto; gap:4px; padding:5px; button { flex:0 0 auto; white-space:nowrap; padding:10px; } }

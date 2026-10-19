@@ -7,3 +7,5 @@
 .async-panel__pending>span:nth-child(3) {width:75%;}
 // Keep the small content slide inside its own area; navigation and filters stay still.
 .async-panel {overflow-x:clip;}
+
+.async-panel__pending--custom {padding:0;}

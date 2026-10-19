@@ -2,6 +2,7 @@ import { requirePermission } from '../organizations/access.ts'
 import { createHash, randomUUID } from 'node:crypto'
 import sharp from 'sharp'
 import { prisma } from '../db.ts'
+import { startBackgroundTask } from '../background-task.ts'
 import { ApiError } from '../api-error.ts'
 import type { StoredFilePurpose } from '../../generated/prisma/enums.ts'
 import { storage } from './provider.ts'
@@ -83,18 +84,7 @@ export async function stageStoredFile(data: { objectKey: string; mimeType: strin
 }
 
 export function startStorageCleanup() {
-  let running = false
-  const run = async () => {
-    if (running) return
-    running = true
-    try { await cleanupPendingFiles() }
-    catch (error) { console.error('Pending image cleanup failed:', error) }
-    finally { running = false }
-  }
-  void run()
-  const timer = setInterval(() => void run(), 10 * 60 * 1000)
-  timer.unref()
-  return () => clearInterval(timer)
+  return startBackgroundTask({ name: 'Pending image cleanup', intervalMs: 10 * 60_000, run: () => cleanupPendingFiles() })
 }
 
 export async function replaceUserAvatar(userId: string, input: unknown) {

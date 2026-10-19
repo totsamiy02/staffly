@@ -37,24 +37,24 @@
   .topbar-invitations { display:block; padding:0 20px; gap:0; max-height:min(470px, calc(100dvh - 230px)); }
   .notifications-history-link { align-items:center; justify-content:center; gap:13px; padding:15px 20px; border-top:1px solid #eceef2; font-size:12px; font-weight:550; }
  }
- .notification-history-backdrop { z-index:160; background:#20273340; backdrop-filter:none; }
- .schedule-drawer.document-drawer.notification-panel { width:min(460px, 100vw); height:100dvh; max-height:100dvh; display:flex; flex-direction:column; overflow:hidden; padding:0; background:white; box-shadow:-12px 0 48px #1a25301c;
-  >header { display:block; padding:24px 22px 12px; border:0; background:white; h2 { margin:0; font-size:22px; } button { font-size:11px; } .notification-close { margin-left:auto; font-size:24px; } }
+ .notification-history-backdrop { z-index:160; }
+ .request-modal.document-dialog.notification-panel { width:min(610px, 100%); max-height:calc(100dvh - 2 * var(--dialog-viewport-gap)); display:flex; flex-direction:column; overflow:hidden; padding:0; background:white;
+  >header { display:block; padding:24px 24px 12px; border:0; background:white; h2 { margin:0; font-size:20px; } button { font-size:11px; } .notification-close { margin-left:auto; font-size:24px; } }
   :focus-visible { outline:2px solid #788494; outline-offset:3px; }
   button:disabled { opacity:.45; cursor:default; }
  }
  .notification-panel__intro { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-top:10px; p { margin:0; max-width:235px; color:#7b8492; font-size:11px; line-height:1.6; } }
- .notification-panel__filters { flex:0 0 auto; padding:0 22px 12px; .staffly-segmented { gap:24px; >button { font-size:12px; gap:7px; } } }
+ .notification-panel__filters { flex:0 0 auto; padding:0 24px 12px; .staffly-segmented { gap:24px; >button { font-size:12px; gap:7px; } } }
  .notification-categories { display:flex; flex-wrap:wrap; align-items:center; gap:7px; padding:14px 0 4px; >button { flex:0 0 auto; min-height:30px; padding:5px 10px; border:1px solid #e6e9ef; border-radius:9px; background:#f6f7f9; color:#687284; font-size:11px; cursor:pointer; &[aria-pressed=true] { color:#202938; background:white; border-color:#aab3c1; } &:hover { border-color:#aab3c1; } } .staffly-select { width:125px; } .staffly-control { min-height:30px; height:30px; padding:5px 9px; border-radius:9px; font-size:11px; } }
  .notification-organization-filter { display:grid; gap:6px; margin-top:12px; color:#7b8492; font-size:11px; .staffly-control { min-height:34px; font-size:12px; } }
- .notification-panel__list { flex:1; min-height:0; overflow-y:auto; overscroll-behavior:contain; padding:0 22px 12px; }
+ .notification-panel__list { flex:1; min-height:0; overflow-y:auto; overscroll-behavior:contain; padding:0 24px 12px; }
  .notification-day { margin:16px 0 0; padding:0 0 2px; color:#4b5667; font-size:12px; font-weight:550; }
- .notification-panel__footer { flex:0 0 auto; padding:15px 22px; border-top:1px solid #eceef2; color:#9097a2; font-size:10px; nav { display:flex; align-items:center; justify-content:space-between; gap:10px; } button { color:#3a4556; font-size:11px; cursor:pointer; } }
+ .notification-panel__footer { display:block; margin:0; flex:0 0 auto; padding:15px 24px; border-top:1px solid #eceef2; color:#9097a2; font-size:10px; nav { display:flex; align-items:center; justify-content:space-between; gap:10px; } button { color:#3a4556; font-size:11px; cursor:pointer; } }
  .notification-state { display:flex; min-height:240px; flex-direction:column; align-items:center; justify-content:center; gap:12px; padding:30px 10px; text-align:center; color:#7b8492; font-size:12px; strong { color:#354051; font-size:14px; font-weight:600; } p { max-width:270px; margin:0; line-height:1.6; } >svg { width:24px; height:24px; } button { padding:7px 12px; color:#303b4d; font-size:12px; cursor:pointer; text-decoration:underline; text-underline-offset:3px; } }
  .notification-state__symbol { display:grid; place-items:center; width:52px; height:52px; border-radius:14px; background:#f3f5f8; svg { width:25px; height:25px; } }
  @media(max-width:600px) {
   .topbar-popover--notifications { width:auto; >header { padding:16px; } .topbar-invitations { padding:0 16px; } }
-  .schedule-drawer.document-drawer.notification-panel >header { padding:20px 18px 10px; }
+  .request-modal.document-dialog.notification-panel >header { padding:20px 18px 10px; }
   .notification-panel__filters { padding-inline:18px; }
   .notification-panel__list { padding-inline:18px; }
   .notification-item { gap:11px; }
