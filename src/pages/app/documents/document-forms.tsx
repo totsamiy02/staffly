@@ -13,7 +13,7 @@ import { useAuth } from '../../../app/auth/auth-context.tsx'
 import Select from '../../../component/ui/select/select.tsx'
 import type { DocumentItem, Folder, Visibility } from '../../../app/documents/types.ts'
 import { documentPath, sizeLabel, visibilityLabels } from '../../../app/documents/types.ts'
-import DocumentDialog from './document-dialog.tsx'
+import DocumentDialog from '../../../component/ui/modal/document-dialog.tsx'
 
 export function DocumentForm({ organizationId, folders, folderId, item, revision, onClose, onSaved, targetMemberId, onBusy, uploadMaxBytes, personal = false }: { organizationId: string; folders: Folder[]; folderId: string; item?: DocumentItem; revision?: DocumentItem; targetMemberId?: string; onClose: () => void; onSaved: (id?: string) => Promise<unknown>; uploadMaxBytes?: number; personal?: boolean; onBusy: (busy: boolean) => void }) {
   const { apiRequest, uploadFile } = useAuth(); const toast = useToast();

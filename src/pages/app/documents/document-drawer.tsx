@@ -10,7 +10,7 @@ import { useAuth } from '../../../app/auth/auth-context.tsx'
 import type { DocumentItem, Folder, Recipient } from '../../../app/documents/types.ts'
 import { documentPath, sizeLabel, stateLabels, visibilityLabels } from '../../../app/documents/types.ts'
 import { useDocumentRefresh } from '../../../app/documents/queries.ts'
-import DocumentDialog from './document-dialog.tsx'
+import DocumentDialog from '../../../component/ui/modal/document-dialog.tsx'
 
 function FileIcon() {
   return <svg viewBox="0 0 32 40" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M5 2h14l8 8v28H5V2Z" /><path d="M19 2v9h8M10 20h12M10 26h12" /></svg>

@@ -13,8 +13,8 @@ import DatePicker, { TimeInput } from '../../../component/ui/date-picker/date-pi
 import Select from '../../../component/ui/select/select.tsx'
 import SegmentedNav from '../../../component/ui/segmented-nav/segmented-nav.tsx'
 import { useToast } from '../../../component/ui/toast/toast-context.ts'
-import DocumentDialog from '../documents/document-dialog.tsx'
-import AnimatedOverlay from '../schedule/animated-overlay.tsx'
+import DocumentDialog from '../../../component/ui/modal/document-dialog.tsx'
+import AnimatedOverlay from '../../../component/ui/modal/animated-overlay.tsx'
 import { EventIcon } from './event-elements.tsx'
 import { eventTimezoneLabel } from '../../../app/events/format.ts'
 function initial(organization: OrganizationSummary, event?: StaffEvent): EventFormInput {

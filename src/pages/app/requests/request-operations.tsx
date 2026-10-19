@@ -8,7 +8,7 @@ import { definitionOf } from '../../../app/requests/workflow.ts'
 import type { StaffRequest } from '../../../app/requests/types.ts'
 import type { OrganizationSummary } from '../../../app/organizations/types.ts'
 import DatePicker from '../../../component/ui/date-picker/date-picker.tsx'
-import './workflow.scss'
+import './types/workflow.scss'
 export default function RequestOperations({organization,request:r,onEdit}:{organization:OrganizationSummary;request:StaffRequest;onEdit:()=>void}){
   const {apiRequest}=useAuth(),client=useQueryClient(),[error,setError]=useState(''),[busy,setBusy]=useState(false),[reason,setReason]=useState(''),[start,setStart]=useState(r.activeAbsence?.startDate??r.startDate??''),[end,setEnd]=useState(r.activeAbsence?.endDate??r.endDate??''),[consent,setConsent]=useState(false),[recall,setRecall]=useState(false),[change,setChange]=useState(false)
   const d=definitionOf(r.formSnapshot),own=r.isOwn,editable=['DRAFT','RETURNED'].includes(r.status),isVacation=r.systemCodeSnapshot==='VACATION',manager=!!r.canReview

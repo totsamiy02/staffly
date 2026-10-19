@@ -1,11 +1,11 @@
-import { hasPermission, requirePermission, ensureAccessRoles, locationsFor } from './access.ts'
+import { hasPermission, requirePermission, ensureAccessRoles, locationsFor } from './access/access.ts'
 import { locationMemberWhere, scopedLocationId } from './location-context.ts'
 import { listNotificationHistory } from './notification-service.ts'
 import { onlineSessions } from '../profile/presence.ts'
 import type { OrganizationRole, Prisma } from '../../generated/prisma/client.ts'
 import { prisma } from '../db.ts'
 import { ApiError } from '../api-error.ts'
-import { assertCanChangeRole, assertCanRemoveMember, getMembership } from './permissions.ts'
+import { assertCanChangeRole, assertCanRemoveMember, getMembership } from './access/permissions.ts'
 import { mediaUrl } from '../storage/image-service.ts'
 import { seedSystemRequestTypes } from '../requests/service.ts'
 

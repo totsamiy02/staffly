@@ -5,7 +5,7 @@ import { useAuth } from '../../../app/auth/auth-context.tsx'
 import { useAccessRoles } from '../../../app/access/queries.ts'
 import { useDocumentMembers } from '../../../app/documents/queries.ts'
 import HelpTip from '../../../component/ui/help-tip/help-tip.tsx'
-import MemberPicker from '../member-profile/profile-member-picker.tsx'
+import MemberPicker from '../members/profile/profile-member-picker.tsx'
 import './document-audience.scss'
 export type Audience = { audienceRoleIds: string[]; audienceMemberIds: string[]; inheritAccess: boolean }
 export default function DocumentAudience({ organizationId,value,onChange,pointId,folderId,visibility,targetMemberId,disabled=false }: { organizationId:string;value:Audience;onChange:(v:Audience)=>void;pointId:string;folderId?:string;visibility:string;targetMemberId?:string;disabled?:boolean }) {

@@ -6,8 +6,8 @@ import type { StaffEvent } from '../../../app/events/types.ts'
 import { useToast } from '../../../component/ui/toast/toast-context.ts'
 import { eventDate, eventTime, eventTimezoneLabel } from '../../../app/events/format.ts'
 import { displayDate } from '../../../app/schedule/date-utils.ts'
-import DocumentDialog from '../documents/document-dialog.tsx'
-import AnimatedOverlay from '../schedule/animated-overlay.tsx'
+import DocumentDialog from '../../../component/ui/modal/document-dialog.tsx'
+import AnimatedOverlay from '../../../component/ui/modal/animated-overlay.tsx'
 import { EventIcon, EventScope, EventState } from './event-elements.tsx'
 export default function EventDetail({ organizationId, eventId, onClose, onEdit }: { organizationId: string; eventId: string; onClose: () => void; onEdit: (event: StaffEvent) => void }) {
   const query = useEvent(organizationId, eventId), actions = useEventActions(organizationId), toast = useToast()

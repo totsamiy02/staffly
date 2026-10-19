@@ -1,4 +1,4 @@
-import { requirePermission } from '../organizations/access.ts'
+import { requirePermission } from '../organizations/access/access.ts'
 import { createHash, randomUUID } from 'node:crypto'
 import sharp from 'sharp'
 import { prisma } from '../db.ts'
@@ -6,7 +6,7 @@ import { startBackgroundTask } from '../background-task.ts'
 import { ApiError } from '../api-error.ts'
 import type { StoredFilePurpose } from '../../generated/prisma/enums.ts'
 import { storage } from './provider.ts'
-import { getMembership } from '../organizations/permissions.ts'
+import { getMembership } from '../organizations/access/permissions.ts'
 
 export const MAX_IMAGE_BYTES = 8 * 1024 * 1024
 const MAX_INPUT_PIXELS = 25_000_000

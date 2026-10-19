@@ -1,10 +1,10 @@
-import { requirePermission } from './access.ts'
+import { requirePermission } from './access/access.ts'
 import { locationWhere } from './location-context.ts'
 import { createHash, createCipheriv, createDecipheriv, randomBytes, randomInt } from 'node:crypto'
 import { prisma } from '../db.ts'
 import { mediaUrl } from '../storage/image-service.ts'
 import { ApiError } from '../api-error.ts'
-import { getMembership } from './permissions.ts'
+import { getMembership } from './access/permissions.ts'
 
 // Domain-separated key keeps invitation material encrypted across navigation/restarts.
 function codeKey() {

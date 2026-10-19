@@ -1,0 +1,175 @@
+import assert from 'node:assert/strict'
+import { before, after, describe, it } from 'node:test'
+import { randomUUID } from 'node:crypto'
+import { prisma } from '../../src/server/db.ts'
+import { createOrganization } from '../../src/server/organizations/organization-service.ts'
+import { previewDeparture, confirmDeparture, departureCandidates } from '../../src/server/organizations/departure-service.ts'
+import { activeTarget } from '../../src/server/schedule/service.ts'
+import { locationContext } from '../../src/server/organizations/location-context.ts'
+import type { DepartureInput } from '../../src/app/organizations/departure.ts'
+
+const orgs: string[] = [], users: string[] = []
+async function fixture() {
+  const people = await Promise.all(['Owner', 'Leaving', 'Replacement'].map(async firstName => { const u = await prisma.user.create({ data: { email: `departure-${randomUUID()}@example.test`, passwordHash: 'test', firstName } }); users.push(u.id); return u }))
+  const org = await createOrganization(people[0].id, { name: 'Departure QA', description: null, timezone: 'Europe/Moscow' }); orgs.push(org.id)
+  const owner = await prisma.organizationMember.findUniqueOrThrow({ where: { organizationId_userId: { organizationId: org.id, userId: people[0].id } } })
+  const members = await Promise.all(people.slice(1).map(p => prisma.organizationMember.create({ data: { organizationId: org.id, userId: p.id } })))
+  await prisma.locationMember.createMany({ data: members.map(m => ({ organizationId: org.id, locationId: org.locationId, memberId: m.id })) })
+  const scoped = <T>(fn: () => T) => locationContext.run({ organizationId: org.id, locationId: org.locationId }, fn)
+  const preview = (scope: 'organization' | 'location' = 'organization') => scoped(() => previewDeparture(people[0].id, org.id, members[0].id, scope))
+  const confirm = (input: DepartureInput) => scoped(() => confirmDeparture(people[0].id, org.id, members[0].id, input))
+  const shift = (offset = 2, memberId = members[0].id, locationId = org.locationId) => prisma.workShift.create({ data: { organizationId: org.id, locationId, memberId, createdByMemberId: owner.id, scheduledStartAt: new Date(Date.now() + offset * 86400000), scheduledEndAt: new Date(Date.now() + offset * 86400000 + 8 * 3600000) } })
+  return { org, people, owner, leaving: members[0], replacement: members[1], scoped, preview, confirm, shift }
+}
+const input = (token: string, overrides: Partial<DepartureInput> = {}): DepartureInput => ({ scope: 'organization', token, reason: '', choices: [], keepCurrent: false, acknowledgeDrafts: false, acknowledgeWorkload: false, ...overrides })
+const code = (wanted: string) => (error: unknown) => (error as { code?: string }).code === wanted
+
+describe('employee departure preview and atomic decisions', () => {
+  before(async () => {
+    const old = await prisma.organization.findMany({ where: { name: 'Departure QA', members: { some: { user: { email: { startsWith: 'departure-' } } } } }, select: { id: true } }); orgs.push(...old.map(o => o.id))
+    const oldUsers = await prisma.user.findMany({ where: { email: { startsWith: 'departure-', endsWith: '@example.test' } }, select: { id: true } }); users.push(...oldUsers.map(u => u.id))
+  })
+  after(async () => {
+    await prisma.shiftOffer.deleteMany({ where: { organizationId: { in: orgs } } })
+    await prisma.scheduleDraft.deleteMany({ where: { organizationId: { in: orgs } } })
+    await prisma.organizationRequest.deleteMany({ where: { organizationId: { in: orgs } } })
+    await prisma.workShift.deleteMany({ where: { organizationId: { in: orgs } } })
+    await prisma.documentFolder.deleteMany({ where: { organizationId: { in: orgs } } })
+    await prisma.organization.deleteMany({ where: { id: { in: orgs } } })
+    await prisma.user.deleteMany({ where: { id: { in: users } } })
+    await prisma.$disconnect()
+  })
+  it('excludes with no upcoming shifts and keeps historical hours', async () => {
+    const f = await fixture(), past = await f.shift(-3)
+    const p = await f.preview(); assert.equal(p.shifts.length, 0)
+    await f.confirm(input(p.token))
+    assert.ok((await prisma.organizationMember.findUniqueOrThrow({ where: { id: f.leaving.id } })).leftAt)
+    assert.equal((await prisma.workShift.findUniqueOrThrow({ where: { id: past.id } })).status, 'SCHEDULED')
+    assert.equal(await prisma.accessAudit.count({ where: { organizationId: f.org.id, action: 'MEMBER_EXCLUDED' } }), 1)
+  })
+  it('requires a fresh preview and explicit decisions; rolls back all changes on error', async () => {
+    const f = await fixture(), s = await f.shift(), p = await f.preview()
+    await f.shift(3)
+    await assert.rejects(f.confirm(input(p.token, { choices: [{ shiftId: s.id, action: 'cancel' }], reason: 'Уход' })), code('DEPARTURE_CHANGED'))
+    const fresh = await f.preview()
+    await assert.rejects(f.confirm(input(fresh.token)), code('DEPARTURE_CHANGED'))
+    await assert.rejects(f.confirm(input(fresh.token, { choices: fresh.shifts.map(s => ({ shiftId: s.id, action: 'cancel' })) })), code('REASON_REQUIRED'))
+    assert.equal((await prisma.organizationMember.findUniqueOrThrow({ where: { id: f.leaving.id } })).leftAt, null)
+    assert.equal(await prisma.workShift.count({ where: { organizationId: f.org.id, status: 'CANCELLED' } }), 0)
+  })
+  it('supports mixed cancellation/reassignment and records transfer history and notifications', async () => {
+    const f = await fixture(), a = await f.shift(2), b = await f.shift(3), p = await f.preview()
+    const result = await f.confirm(input(p.token, { reason: 'Сотрудник ушёл', choices: [{ shiftId: a.id, action: 'reassign', memberId: f.replacement.id }, { shiftId: b.id, action: 'cancel' }] }))
+    assert.equal(result.reassigned, 1); assert.equal(result.cancelled, 1)
+    assert.equal((await prisma.workShift.findUniqueOrThrow({ where: { id: a.id } })).memberId, f.replacement.id)
+    assert.equal((await prisma.workShift.findUniqueOrThrow({ where: { id: b.id } })).cancellationReason, 'Сотрудник ушёл')
+    assert.equal(await prisma.workShiftAdjustment.count({ where: { shiftId: a.id, kind: 'TRANSFER' } }), 1)
+    assert.equal(await prisma.accountNotification.count({ where: { shiftId: a.id, userId: f.replacement.userId, type: 'SHIFT_ASSIGNED' } }), 1)
+  })
+  it('shows conflicts in replacement selection and refuses conflicting reassignment', async () => {
+    const f = await fixture(), s = await f.shift()
+    await f.shift(2, f.replacement.id)
+    const candidates = await f.scoped(() => departureCandidates(f.people[0].id, f.org.id, f.leaving.id, 'organization', s.id, 'Replacement', 1))
+    assert.match(candidates.candidates[0].reason!, /пересекающаяся/)
+    const p = await f.preview()
+    await assert.rejects(f.confirm(input(p.token, { choices: [{ shiftId: s.id, action: 'reassign', memberId: f.replacement.id }] })), code('SHIFT_OVERLAP'))
+    assert.equal((await prisma.organizationMember.findUniqueOrThrow({ where: { id: f.leaving.id } })).leftAt, null)
+  })
+  it('keeps current shift and accounted time only after an explicit decision', async () => {
+    const f = await fixture(), s = await f.shift(-0.1), p = await f.preview()
+    assert.equal(p.shifts[0].current, true)
+    await assert.rejects(f.confirm(input(p.token)), code('CURRENT_SHIFT'))
+    const result = await f.confirm(input(p.token, { keepCurrent: true }))
+    assert.equal(result.retainedCurrent, 1)
+    const retained = await prisma.workShift.findUniqueOrThrow({ where: { id: s.id } })
+    assert.equal(retained.status, 'SCHEDULED'); assert.equal(+retained.scheduledEndAt, +s.scheduledEndAt)
+  })
+  it('removes one location only, revokes its local role, preserves other shifts and organization membership', async () => {
+    const f = await fixture(), second = await prisma.organizationLocation.create({ data: { organizationId: f.org.id, name: 'Second', city: '', address: '', timezone: 'Europe/Moscow' } })
+    await prisma.locationMember.create({ data: { organizationId: f.org.id, locationId: second.id, memberId: f.leaving.id } })
+    const role = await prisma.accessRole.findFirstOrThrow({ where: { organizationId: f.org.id, systemCode: 'MEMBER' } })
+    await prisma.accessAssignment.create({ data: { organizationId: f.org.id, locationId: f.org.locationId, memberId: f.leaving.id, roleId: role.id } })
+    const local = await f.shift(), other = await f.shift(3, f.leaving.id, second.id), p = await f.preview('location')
+    assert.equal(p.shifts.length, 1); assert.deepEqual(p.remainingLocations, ['Second'])
+    await f.confirm(input(p.token, { scope: 'location', reason: 'Уход из точки', choices: [{ shiftId: local.id, action: 'cancel' }] }))
+    assert.equal((await prisma.organizationMember.findUniqueOrThrow({ where: { id: f.leaving.id } })).leftAt, null)
+    assert.equal((await prisma.workShift.findUniqueOrThrow({ where: { id: other.id } })).status, 'SCHEDULED')
+    assert.equal(await prisma.accessAssignment.count({ where: { memberId: f.leaving.id, locationId: f.org.locationId } }), 0)
+  })
+  it('keeps ordinary pending requests and requires acknowledgment of draft consequences', async () => {
+    const f = await fixture()
+    const type = await prisma.requestType.findFirstOrThrow({ where: { organizationId: f.org.id, systemCode: 'DAY_OFF' } })
+    const request = await prisma.organizationRequest.create({ data: { organizationId: f.org.id, locationId: f.org.locationId, createdByMemberId: f.leaving.id, requestTypeId: type.id, typeNameSnapshot: type.name, systemCodeSnapshot: 'DAY_OFF' } })
+    const draft = await prisma.scheduleDraft.create({ data: { organizationId: f.org.id, locationId: f.org.locationId, authorMemberId: f.owner.id, title: 'Future', fromDate: new Date('2030-01-01'), toDate: new Date('2030-02-01'), timezone: 'Europe/Moscow', recipients: { create: { memberId: f.leaving.id, requiredRevision: 1 } } } })
+    const p = await f.preview(); assert.equal(p.pendingRequests, 1); assert.equal(p.drafts[0].id, draft.id)
+    await assert.rejects(f.confirm(input(p.token)), code('DRAFTS_REVIEW'))
+    await f.confirm(input(p.token, { acknowledgeDrafts: true }))
+    assert.equal((await prisma.organizationRequest.findUniqueOrThrow({ where: { id: request.id } })).status, 'PENDING')
+  })
+  it('closes active offers and releases reservations atomically', async () => {
+    const f = await fixture(), shift = await f.shift()
+    const offer = await prisma.shiftOffer.create({ data: { organizationId: f.org.id, locationId: f.org.locationId, initiatorMemberId: f.leaving.id, recipientMemberId: f.replacement.id, sourceShiftId: shift.id, kind: 'TRANSFER', mode: 'AUTO', sourceSnapshot: {}, reservations: { create: { shiftId: shift.id } } } })
+    const p = await f.preview(); assert.equal(p.offers, 1)
+    await f.confirm(input(p.token, { reason: 'Уход сотрудника', choices: [{ shiftId: shift.id, action: 'cancel' }] }))
+    assert.equal((await prisma.shiftOffer.findUniqueOrThrow({ where: { id: offer.id } })).status, 'CANCELLED')
+    assert.equal(await prisma.shiftOfferReservation.count({ where: { offerId: offer.id } }), 0)
+  })
+  it('checks replacement absence and monthly workload without partial changes', async () => {
+    const f = await fixture(), s = await f.shift()
+    await prisma.organizationLocation.update({ where: { id: f.org.locationId }, data: { monthlyWorkMinutes: 60 } })
+    let p = await f.preview()
+    const choice = { shiftId: s.id, action: 'reassign' as const, memberId: f.replacement.id }
+    await assert.rejects(f.confirm(input(p.token, { choices: [choice] })), code('WORKLOAD_WARNING'))
+    assert.equal((await prisma.workShift.findUniqueOrThrow({ where: { id: s.id } })).memberId, f.leaving.id)
+    const absence = await prisma.employeeAbsence.create({ data: { organizationId: f.org.id, memberId: f.replacement.id, type: 'VACATION', startDate: new Date(s.scheduledStartAt.toISOString().slice(0, 10)), endDate: new Date(s.scheduledEndAt.toISOString().slice(0, 10)) } })
+    await assert.rejects(f.confirm(input(p.token, { choices: [choice], acknowledgeWorkload: true })), code('VACATION_CONFLICT'))
+    await prisma.employeeAbsence.delete({ where: { id: absence.id } })
+    p = await f.preview()
+    await f.confirm(input(p.token, { choices: [choice], acknowledgeWorkload: true }))
+  })
+  it('shows configured coverage impact and detects demand changes', async () => {
+    const f = await fixture(), s = await f.shift()
+    const position = await prisma.organizationPosition.create({ data: { organizationId: f.org.id, name: 'Barista' } })
+    await prisma.workShift.update({ where: { id: s.id }, data: { positionId: position.id, positionNameSnapshot: position.name } })
+    await prisma.organizationLocation.update({ where: { id: f.org.locationId }, data: { coverageEnabled: true } })
+    const demand = await prisma.demandVersion.create({ data: { organizationId: f.org.id, locationId: f.org.locationId, effectiveFrom: new Date('2020-01-01'), days: Array.from({ length: 7 }, () => [{ positionId: position.id, startTime: '00:00', endTime: '00:00', endDayOffset: 1, needed: 1 }]) } })
+    const p = await f.preview(); assert.ok(p.coverage.length > 0); assert.ok(p.coverage.every(c => c.shiftIds.includes(s.id)))
+    await prisma.demandVersion.update({ where: { id: demand.id }, data: { days: Array.from({ length: 7 }, () => []) } })
+    await assert.rejects(f.confirm(input(p.token, { reason: 'Уход', choices: [{ shiftId: s.id, action: 'cancel' }] })), code('DEPARTURE_CHANGED'))
+    assert.equal((await f.preview()).coverage.length, 0)
+  })
+  it('blocks future shifts with actual time and validates permissions again on commit', async () => {
+    const f = await fixture(), s = await f.shift()
+    await prisma.workShift.update({ where: { id: s.id }, data: { actualStartAt: s.scheduledStartAt } })
+    let p = await f.preview(); assert.equal(p.shifts[0].hasActual, true)
+    await assert.rejects(f.confirm(input(p.token, { reason: 'Уход', choices: [{ shiftId: s.id, action: 'cancel' }] })), code('SHIFT_HAS_ACTUAL'))
+    const role = await prisma.accessRole.create({ data: { organizationId: f.org.id, name: 'Exclude only', permissions: ['members.exclude'] } })
+    await prisma.organizationMember.update({ where: { id: f.replacement.id }, data: { accessConfigured: true, accessRoleId: role.id } })
+    p = await f.scoped(() => previewDeparture(f.replacement.userId, f.org.id, f.leaving.id, 'organization'))
+    assert.equal(p.shifts[0].canCancel, false)
+    await assert.rejects(f.scoped(() => confirmDeparture(f.replacement.userId, f.org.id, f.leaving.id, input(p.token, { reason: 'Уход', choices: [{ shiftId: s.id, action: 'cancel' }] }))), code('INSUFFICIENT_PERMISSIONS'))
+  })
+  it('allows only one of two concurrent confirmations', async () => {
+    const f = await fixture(), s = await f.shift(), p = await f.preview()
+    const request = input(p.token, { reason: 'Уход', choices: [{ shiftId: s.id, action: 'cancel' }] })
+    const results = await Promise.allSettled([f.confirm(request), f.confirm(request)])
+    assert.equal(results.filter(r => r.status === 'fulfilled').length, 1)
+    assert.equal(await prisma.accessAudit.count({ where: { organizationId: f.org.id, action: 'MEMBER_EXCLUDED' } }), 1)
+  })
+  it('revokes future temporary access without rewriting its dates or removing its history', async () => {
+    const f = await fixture(), second = await prisma.organizationLocation.create({ data: { organizationId: f.org.id, name: 'Source', city: '', address: '', timezone: 'Europe/Moscow' } })
+    const startAt = new Date(Date.now() + 86400000), endAt = new Date(Date.now() + 3 * 86400000)
+    const transfer = await prisma.locationTransfer.create({ data: { organizationId: f.org.id, memberId: f.leaving.id, createdByMemberId: f.owner.id, fromLocationId: second.id, toLocationId: f.org.locationId, temporary: true, startAt, endAt } })
+    const p = await f.preview('location')
+    await f.confirm(input(p.token, { scope: 'location' }))
+    const stored = await prisma.locationTransfer.findUniqueOrThrow({ where: { id: transfer.id } })
+    assert.ok(stored.revokedAt); assert.equal(+stored.startAt, +startAt); assert.equal(+stored.endAt!, +endAt)
+    await assert.rejects(f.scoped(() => activeTarget(prisma, f.org.id, f.leaving.id, startAt, endAt)), code('MEMBER_NOT_IN_LOCATION'))
+  })
+  it('prevents unauthorized, owner and cross-organization operations', async () => {
+    const f = await fixture(), other = await fixture()
+    await assert.rejects(f.scoped(() => previewDeparture(f.people[1].id, f.org.id, f.replacement.id, 'organization')), code('INSUFFICIENT_PERMISSIONS'))
+    await assert.rejects(f.scoped(() => previewDeparture(f.people[0].id, f.org.id, f.owner.id, 'organization')), code('INSUFFICIENT_PERMISSIONS'))
+    await assert.rejects(f.scoped(() => previewDeparture(f.people[0].id, f.org.id, other.leaving.id, 'organization')), code('MEMBER_NOT_FOUND'))
+  })
+})

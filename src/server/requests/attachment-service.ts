@@ -1,6 +1,6 @@
 import { definitionOf } from '../../app/requests/workflow.ts'
 import { lockRequest,notifyStage } from './workflow.ts'
-import { requirePermission } from '../organizations/access.ts'
+import { requirePermission } from '../organizations/access/access.ts'
 import { createHash, randomUUID } from 'node:crypto'
 import sharp from 'sharp'
 import { prisma } from '../db.ts'

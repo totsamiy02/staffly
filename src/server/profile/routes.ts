@@ -6,7 +6,7 @@ import { ApiError } from '../api-error.ts'
 import { requireAuth, type AuthenticatedRequest } from '../auth.ts'
 import { updateProfileBody } from './schemas.ts'
 import { mediaUrl } from '../storage/image-service.ts'
-import { emailPreferencesBody, getEmailPreferences, saveEmailPreferences } from './email-preferences.ts'
+import { emailPreferencesBody, getEmailPreferences, saveEmailPreferences } from '../mail/email-preferences.ts'
 
 const router = Router()
 router.use(requireAuth)

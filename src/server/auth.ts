@@ -6,8 +6,8 @@ import { hash, verify, argon2id } from 'argon2'
 import { SignJWT, jwtVerify } from 'jose'
 import { z } from 'zod'
 import { prisma } from './db.ts'
-import { deliverSecurityCode } from './mail.ts'
-import { queuePasswordChanged } from './profile/email-outbox.ts'
+import { deliverSecurityCode } from './mail/transport.ts'
+import { queuePasswordChanged } from './mail/email-outbox.ts'
 import { mediaUrl } from './storage/image-service.ts'
 
 const jwtSecret = process.env.JWT_SECRET

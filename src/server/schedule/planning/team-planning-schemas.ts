@@ -1,0 +1,15 @@
+import { z } from 'zod'
+import { date, shiftBody, uuid } from '../schemas.ts'
+const time = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/)
+export const demandInterval = z.object({ positionId: uuid, startTime: time, endTime: time, endDayOffset: z.number().int().min(0).max(1), needed: z.number().int().min(1).max(500) })
+export const demandVersionBody = z.object({ effectiveFrom: date, days: z.array(z.array(demandInterval).max(100).nullable()).length(7) })
+export const demandExceptionBody = z.object({ date, intervals: z.array(demandInterval).max(100).nullable() })
+export const demandDatesBody = z.object({ dates: z.array(demandExceptionBody).max(62), repeat: demandVersionBody.optional() }).refine(value => value.dates.length > 0 || !!value.repeat, 'Выберите даты или неделю для повторения.').refine(value => new Set(value.dates.map(day => day.date)).size === value.dates.length, 'Каждая дата должна встречаться один раз.')
+export const teamSettingsBody = z.object({ coverageEnabled: z.boolean(), discussionEnabled: z.boolean(), discussionHours: z.number().int().min(1).max(720) })
+export const draftCreateBody = z.object({ title: z.string().trim().min(2).max(160), description: z.string().trim().max(2000).nullable().default(null), fromDate: date, toDate: date, importCurrent: z.boolean().default(false) }).refine(v => v.toDate >= v.fromDate && (Date.parse(v.toDate)-Date.parse(v.fromDate))/86400000 < 62, 'Выберите период от 1 до 62 дней.')
+export const draftEditBody = z.object({ revision: z.number().int().positive(), title: z.string().trim().min(2).max(160), description: z.string().trim().max(2000).nullable() })
+export const draftProposalBody = z.object({ revision: z.number().int().positive(), proposalId: uuid.optional(), sourceShiftId: uuid.optional(), kind: z.enum(['CREATE','UPDATE','CANCEL','REMOVE','REFRESH']), shifts: z.array(shiftBody).max(62).default([]), reason: z.string().trim().max(500).default('Отмена в предварительном графике'), confirmResponseWindow: z.boolean().default(false), deadline: z.iso.datetime().optional() })
+export const draftActionBody = z.object({ revision: z.number().int().positive(), action: z.enum(['PUBLISH','EXTEND','CLOSE','CANCEL','REFRESH_RECIPIENTS','APPLY']), deadline: z.iso.datetime().optional(), explanation: z.string().trim().max(2000).default(''), confirm: z.boolean().default(false), acknowledgeWorkload: z.boolean().default(false) })
+export const draftResponseBody = z.object({ revision: z.number().int().positive(), response: z.enum(['NO_OBJECTIONS','OBJECTIONS']) })
+export const draftCommentBody = z.object({ revision: z.number().int().positive(), text: z.string().trim().min(3).max(2000), proposalId: uuid.optional(), date: date.optional() })
+export const draftDecisionBody = z.object({ action: z.enum(['ACCEPTED','REJECTED','RESOLVED','WITHDRAWN']), text: z.string().trim().max(2000).default('') })

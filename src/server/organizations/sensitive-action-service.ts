@@ -2,8 +2,8 @@ import { createHmac, randomInt, timingSafeEqual } from 'node:crypto'
 import { prisma } from '../db.ts'
 import type { Prisma } from '../../generated/prisma/client.ts'
 import { ApiError } from '../api-error.ts'
-import { getMembership, requireOrganizationRole } from './permissions.ts'
-import { enqueueEmail } from '../profile/email-outbox.ts'
+import { getMembership, requireOrganizationRole } from './access/permissions.ts'
+import { enqueueEmail } from '../mail/email-outbox.ts'
 
 const configuredSecret = process.env.JWT_SECRET
 if (!configuredSecret) throw new Error('JWT_SECRET is missing')

@@ -1,9 +1,9 @@
-import { canReadDraftNotification } from '../schedule/team-planning-service.ts'
-import { hasPermission } from './access.ts'
+import { canReadDraftNotification } from '../schedule/planning/team-planning-service.ts'
+import { hasPermission } from './access/access.ts'
 import { Prisma } from '../../generated/prisma/client.ts'
 import { prisma } from '../db.ts'
 import { formatNotificationPeriod } from '../../app/organizations/notification-format.ts'
-import { getMembership } from './permissions.ts'
+import { getMembership } from './access/permissions.ts'
 import { ApiError } from '../api-error.ts'
 import { mediaUrl } from '../storage/image-service.ts'
 

@@ -1,8 +1,8 @@
 import { definitionOf, visibleField, type RequestAnswers, type RequestDefinition } from '../../app/requests/workflow.ts'
 import type { Prisma } from '../../generated/prisma/client.ts'
 import { ApiError } from '../api-error.ts'
-import { hasPermission, permissionRecipients } from '../organizations/access.ts'
-import { getMembership } from '../organizations/permissions.ts'
+import { hasPermission, permissionRecipients } from '../organizations/access/access.ts'
+import { getMembership } from '../organizations/access/permissions.ts'
 import type { prisma } from '../db.ts'
 type DB=Prisma.TransactionClient | typeof prisma
 export async function lockRequest(db: DB,id:string){await db.$queryRaw`SELECT id FROM requests WHERE id=${id}::uuid FOR UPDATE`}

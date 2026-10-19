@@ -6,9 +6,9 @@ import type { WorkShift } from '../../../app/schedule/types.ts'
 import { useMyUpcomingShifts } from '../../../app/schedule/queries.ts'
 import { displayDate, shiftTimeRange, zonedDateAndTime } from '../../../app/schedule/date-utils.ts'
 import HelpTip from '../../../component/ui/help-tip/help-tip.tsx'
-import { ShiftOfferForm, ShiftOffersPanel } from '../schedule/shift-offers.tsx'
-import DocumentDialog from '../documents/document-dialog.tsx'
-import AnimatedOverlay from '../schedule/animated-overlay.tsx'
+import { ShiftOfferForm, ShiftOffersPanel } from '../schedule/offers/shift-offers.tsx'
+import DocumentDialog from '../../../component/ui/modal/document-dialog.tsx'
+import AnimatedOverlay from '../../../component/ui/modal/animated-overlay.tsx'
 
 export default function RequestOffers({ organization }: { organization: OrganizationSummary }) {
   const [params, setParams] = useSearchParams(), [choosing, setChoosing] = useState(false), [shift, setShift] = useState<WorkShift | null>(null)
