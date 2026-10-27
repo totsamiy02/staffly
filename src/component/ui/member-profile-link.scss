@@ -1,8 +1,8 @@
-.member-profile-link { display: inline-flex; gap: 8px; align-items: center; min-width: 0; color: inherit; font: inherit; text-align: inherit; cursor: pointer; border: 0; background: transparent; padding: 0; border-radius: 5px; &:hover { text-decoration: underline; text-underline-offset: 3px; } &:focus-visible { outline: 2px solid #777; outline-offset: 3px; } }
+.member-profile-link { display: inline-flex; gap: 8px; align-items: center; min-width: 0; color: inherit; font: inherit; text-align: inherit; cursor: pointer; border: 0; background: transparent; padding: 0; border-radius: 5px; &:hover { text-decoration: underline; text-underline-offset: 3px; } &:focus-visible { outline: 2px solid var(--theme-focus,#777); outline-offset: 3px; } }
 
 .member-profile-avatar { display:inline-grid; place-items:center; padding:0; text-decoration:none; flex-shrink:0; }
 .member-profile-avatar__image { display:grid; place-items:center; width:100%; height:100%; border-radius:inherit; font:inherit; }
 
 .member-profile-avatar:hover {text-decoration:none;}
 .member-profile-avatar.member-profile-link { border-radius:50%; }
-.member-profile-avatar:is(.app-avatar,.access-member-avatar) { background:#f0f1f4; color:#505663; border:1px solid #dedfe5; }
+.member-profile-avatar:is(.app-avatar,.access-member-avatar) { background:var(--theme-surface-muted,#f0f1f4); color:var(--theme-text,#505663); border:1px solid var(--theme-border,#dedfe5); }

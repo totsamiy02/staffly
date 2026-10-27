@@ -446,7 +446,7 @@ describe('profiles and public organization details', { concurrency: false }, () 
     assert.equal(formatRussianPhone('+1 555 123 4567'), '')
     assert.equal(normalizeRussianPhone('+7 (999) 123-45-67'), '+79991234567')
     assert.ok(passwordValidationError('password'))
-    assert.equal(passwordValidationError('StrongPass1!'), '')
+    assert.equal(passwordValidationError('StrongPassword1!'), '')
   })
 
   it('lets only OWNER edit public organization data and exposes member profiles safely', async () => {

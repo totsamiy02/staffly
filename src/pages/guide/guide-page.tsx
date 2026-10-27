@@ -7,6 +7,7 @@ import GuideExample from './guide-examples.tsx'
 import { guideExampleLabels } from './guide-example-labels.ts'
 import GuideIcon from './guide-icon.tsx'
 import GuideArtwork from './guide-artwork.tsx'
+import ThemeToggle from '../../component/ui/theme-toggle/theme-toggle.tsx'
 import AnimatedOverlay from '../../component/ui/modal/animated-overlay.tsx'
 import DocumentDialog from '../../component/ui/modal/document-dialog.tsx'
 import { useToast } from '../../component/ui/toast/toast-context.ts'
@@ -138,7 +139,7 @@ export default function GuidePage() {
     return () => cancelAnimationFrame(frame)
   }, [location.pathname, location.hash])
   return <div className="guide-page"><a className="guide-skip" href="#guide-content">К содержимому</a>
-    <HeaderFrame><Link className="app-secondary" to="/app">К работе<GuideIcon name="arrow" /></Link></HeaderFrame>
+    <HeaderFrame><div className="site-header__actions"><ThemeToggle /><Link className="app-secondary" to="/app">К работе<GuideIcon name="arrow" /></Link></div></HeaderFrame>
     {!home && <nav className="guide-topic-nav" aria-label="Темы справочника">{guideCollections.map(item => <NavLink key={item.id} className={activeCollection?.id === item.id ? 'is-current' : ''} to={`/guide/category/${item.id}`}>{item.title}</NavLink>)}</nav>}
     <main ref={main} tabIndex={-1} id="guide-content" className={`guide-main${article ? ' guide-main--article' : ''}`} key={location.pathname}>{home || categoryId ? <GuideCatalog categoryId={categoryId} /> : article ? <GuideArticleView key={article.slug} article={article} /> : <GuideNotFound />}</main>
     <footer className="guide-footer"><span>Staffly · Справочник для всех команд</span><span>Примеры вымышлены</span></footer>

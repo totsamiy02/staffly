@@ -21,6 +21,7 @@ import CreateOrganizationPage from './pages/app/organizations/create-organizatio
 import OrganizationLayout from './pages/app/shell/organization-layout.tsx'
 import UserSettingsPage from './pages/app/settings/account/user-settings-page.tsx'
 import StatusPage from './pages/error/status-page.tsx'
+import ThemeToggle from './component/ui/theme-toggle/theme-toggle.tsx'
 
 const GuidePage = lazy(() => import('./pages/guide/guide-page.tsx'))
 
@@ -44,6 +45,7 @@ function App() {
   return (
     <>
       {!hidePublicFrame && <Header />}
+      {isAuthPage && <div className="auth-theme-control"><ThemeToggle /></div>}
 
       <Routes>
         <Route path="/" element={<HomePage />} />

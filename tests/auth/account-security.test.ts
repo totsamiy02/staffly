@@ -34,8 +34,8 @@ class Browser {
     if (response.ok) this.token = (await response.json()).accessToken
     return response
   }
-  async proof(user: User, purpose: 'password' | 'email', subject = user.id) {
-    const response = await this.request(`/api/auth/yandex/${purpose}/start`, {})
+  async proof(user: User, purpose: 'password' | 'email', subject = user.id, returnTo?: string) {
+    const response = await this.request(`/api/auth/yandex/${purpose}/start`, returnTo ? { returnTo } : {})
     assert.equal(response.status, 200)
     const url = new URL((await response.json()).authorizationUrl), code = randomUUID(), id = this.cookies.get('staffly_yandex')!.split('.')[0]
     attempts.add(id); profiles.set(code, { subject, email: user.email, firstName: 'Provider', lastName: 'Name', avatarId: null })
@@ -109,6 +109,13 @@ describe('Account login methods and security changes', () => {
     assert.equal((await copy.setup()).status, 400)
     await prisma.oAuthAttempt.update({ where: { id: proof.id }, data: { expiresAt: new Date(0) } }); assert.equal((await browser.setup()).status, 400)
     await browser.proof(account, 'password'); await prisma.user.update({ where: { id: account.id }, data: { securityVersion: { increment: 1 } } }); assert.equal((await browser.setup()).status, 400)
+  })
+  it('preserves a safe invitation return path through optional password setup', async () => {
+    const account = await user('setup-return', false), browser = new Browser(); await browser.session(account)
+    const proof = await browser.proof(account, 'password', account.id, '/app?invite=example')
+    const redirect = new URL(proof.callback.headers.get('location')!, config.origin)
+    assert.equal(redirect.pathname, '/app/settings'); assert.equal(redirect.searchParams.get('yandex'), 'password-ready'); assert.equal(redirect.searchParams.get('returnTo'), '/app?invite=example')
+    assert.equal((await browser.setup()).status, 200)
   })
   it('does not permit a revoked original session to finish password creation', async () => {
     const account = await user('revoked-proof', false), browser = new Browser(); await browser.session(account); await browser.proof(account, 'password')

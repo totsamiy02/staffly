@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, it } from 'node:test'
-import { createHash, createHmac, randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import type { Server } from 'node:http'
 import express from 'express'
 import cookieParser from 'cookie-parser'
@@ -16,7 +16,7 @@ import { ApiError } from '../../src/server/api-error.ts'
 import { safeReturnTo } from '../../src/app/auth/return-to.ts'
 
 const config: YandexConfig = { clientId: 'test-yandex-client', clientSecret: 'test-yandex-secret', origin: 'http://localhost:5173', redirectUri: 'http://localhost:5173/api/auth/yandex/callback' }
-const suffix = randomUUID(), password = 'StafflyTest-42!'
+const suffix = randomUUID(), password = 'StafflyTesting-42!'
 const email = (label: string) => `${label}-${suffix}@example.test`
 const hashValue = (input: string) => createHash('sha256').update(input).digest('hex')
 const profiles = new Map<string, YandexProfile>()
@@ -74,6 +74,8 @@ describe('Yandex ID provider boundary', () => {
     assert.equal(url.searchParams.get('code_challenge_method'), 'S256')
     assert.equal(url.searchParams.get('code_challenge'), createHash('sha256').update('verifier').digest('base64url'))
     assert.equal(url.searchParams.get('optional_scope'), 'login:avatar')
+    assert.equal(url.searchParams.has('force_confirm'), false)
+    assert.equal(new URL(yandexAuthorizationUrl(config, 'state', 'verifier', true)).searchParams.get('force_confirm'), 'yes')
     assert.ok(!url.href.includes(config.clientSecret)); assert.equal(url.searchParams.get('redirect_uri'), config.redirectUri)
   })
   it('normalizes profile fields and validates the provider application', () => {
@@ -206,14 +208,11 @@ describe('Yandex ID authentication and account ownership', () => {
     assert.match((await a.callback(await a.start(profile('replacement'), '/app', true))).headers.get('location')!, /yandex=already-linked/)
     assert.equal(await prisma.authIdentity.count({ where: { userId: one.id } }), 1); assert.equal(await prisma.authIdentity.count({ where: { userId: two.id } }), 0)
   })
-  it('keeps Yandex-only accounts out of public password recovery and requires a fresh Yandex proof', async () => {
+  it('allows email recovery for Yandex-only accounts while direct setup still requires a fresh Yandex proof', async () => {
     const identity = profile('password-create'), browser = new Browser(); await browser.callback(await browser.start(identity)); const registered = await browser.complete(), userId = registered.data.user.id
     assert.equal((await browser.request('/api/auth/yandex/unlink', { currentPassword: password })).status, 409)
     assert.equal((await browser.request('/api/auth/forgot-password', { email: identity.email })).status, 202)
-    assert.equal(await prisma.passwordResetToken.count({ where: { userId } }), 0)
-    const code = '392715', tokenHash = createHmac('sha256', process.env.JWT_SECRET!).update(`reset:${userId}:${code}`).digest('hex')
-    await prisma.passwordResetToken.create({ data: { userId, tokenHash, expiresAt: new Date(Date.now() + 60_000) } })
-    assert.equal((await browser.request('/api/auth/reset-password', { email: identity.email, code, password, confirmPassword: password })).status, 400)
+    assert.equal(await prisma.passwordResetToken.count({ where: { userId } }), 1)
     assert.equal((await browser.request('/api/auth/yandex/password/complete', { password, confirmPassword: password })).status, 400)
     const response = await browser.request('/api/auth/yandex/password/start', {}), url = new URL((await response.json()).authorizationUrl), oauthCode = randomUUID()
     profiles.set(oauthCode, identity); attemptIds.add(browser.cookies.get('staffly_yandex')!.split('.')[0])

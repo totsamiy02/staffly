@@ -16,7 +16,7 @@
   p {
     max-width: 680px;
     margin-top: 32px;
-    color: #777;
+    color: var(--theme-muted,#777);
     font-size: 21px;
   }
 }
@@ -27,8 +27,8 @@
   margin-top: 44px;
 
   .button--white {
-    border: 1px solid #d7d7d7;
-    background-color: #fff;
+    border: 1px solid var(--theme-border,#d7d7d7);
+    background-color: var(--theme-surface,#fff);
   }
 }
 

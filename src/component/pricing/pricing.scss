@@ -23,7 +23,7 @@
   flex-direction: column;
   justify-content: space-between;
   padding: 30px;
-  border: 1px solid #e1e1e1;
+  border: 1px solid var(--theme-border,#e1e1e1);
   border-radius: 16px;
   box-shadow: 0 12px 28px rgb(0 0 0 / 6%);
 
@@ -33,7 +33,7 @@
 }
 
 .pricing-card__description {
-  color: #777;
+  color: var(--theme-muted,#777);
 }
 
 .pricing-card__price {
@@ -47,7 +47,7 @@
   line-height: 1;
 
   span {
-    color: #777;
+    color: var(--theme-muted,#777);
     font-size: 16px;
     font-weight: 400;
   }
@@ -57,7 +57,7 @@
   display: grid;
   gap: 14px;
   margin-top: 36px;
-  color: #555;
+  color: var(--theme-text,#555);
 
   li {
     display: flex;
@@ -74,8 +74,8 @@
   }
 
   .button--white {
-    border: 1px solid #d7d7d7;
-    background-color: #fff;
+    border: 1px solid var(--theme-border,#d7d7d7);
+    background-color: var(--theme-surface,#fff);
   }
 }
 

@@ -12,6 +12,7 @@ import { replaceUserAvatar } from '../storage/image-service.ts'
 import { queueAccountSecurityEvent } from '../mail/email-outbox.ts'
 import { lockAccount, invalidateSecurityChallenges, revokeOtherSessions, securityChanged } from './account-security.ts'
 import { passwordSchema, passwordHash } from './passwords.ts'
+import { clearPasswordAttempts } from './attempt-limits.ts'
 import { safeReturnTo } from '../../app/auth/return-to.ts'
 import { exchangeYandexCode, yandexAuthorizationUrl, yandexAvatar, yandexConfig, type YandexConfig, type YandexProfile } from './yandex-provider.ts'
 
@@ -21,10 +22,10 @@ const lifetime = 10 * 60_000
 const fingerprint = (value: string) => createHash('sha256').update(value).digest('hex')
 const random = () => randomBytes(32).toString('base64url')
 const startBody = z.object({ returnTo: z.string().max(2048).optional() }).strict()
-const linkBody = startBody.extend({ currentPassword: z.string().min(1).max(128) }).strict()
+const linkBody = startBody.extend({ currentPassword: z.string().min(1).max(256) }).strict()
 const passwordBody = z.object({ password: passwordSchema, confirmPassword: z.string() }).strict().refine(value => value.password === value.confirmPassword, { path: ['confirmPassword'], message: 'Пароли не совпадают.' })
 type Purpose = 'LOGIN' | 'LINK' | 'PASSWORD_SETUP' | 'EMAIL_CHANGE'
-const completeBody = z.object({ currentPassword: z.string().max(128).optional(), consentData: z.boolean().optional(), consentTerms: z.boolean().optional() }).strict()
+const completeBody = z.object({ currentPassword: z.string().max(256).optional(), consentData: z.boolean().optional(), consentTerms: z.boolean().optional() }).strict()
 const profileBody = z.object({ subject: z.string().min(1).max(128), email: z.string().email().max(254).nullable(), firstName: z.string().max(80).nullable(), lastName: z.string().max(80).nullable(), avatarId: z.string().max(200).nullable() })
 const expired = () => new ApiError(400, 'YANDEX_EXPIRED', 'Вход через Яндекс истёк. Начните ещё раз.')
 const conflict = () => new ApiError(409, 'YANDEX_ALREADY_LINKED', 'Этот аккаунт Яндекса уже подключён или у вас подключён другой аккаунт Яндекса.')
@@ -91,7 +92,7 @@ async function attachIdentity(userId: string, profile: YandexProfile, record: OA
 type Dependencies = {
   createSession: (user: User, request: Request, response: Response) => Promise<unknown>
   requireAuth: RequestHandler
-  verifyPassword: (hash: string | null, password: string) => Promise<boolean>
+  verifyPassword: (hash: string | null, password: string, account?: string) => Promise<boolean>
   config?: () => YandexConfig | null
   exchange?: typeof exchangeYandexCode
   avatar?: (avatarId: string) => Promise<Buffer>
@@ -113,7 +114,7 @@ export function createYandexRouter(dependencies: Dependencies) {
     const account = purpose !== 'LOGIN' ? await prisma.user.findUniqueOrThrow({ where: { id: request.auth!.userId } }) : null
     if (account) {
       if (purpose === 'LINK') {
-        if (!await dependencies.verifyPassword(account.passwordHash, 'currentPassword' in input && typeof input.currentPassword === 'string' ? input.currentPassword : '')) throw new ApiError(401, 'INVALID_PASSWORD', 'Текущий пароль Staffly указан неверно.')
+        if (!await dependencies.verifyPassword(account.passwordHash, 'currentPassword' in input && typeof input.currentPassword === 'string' ? input.currentPassword : '', account.email)) throw new ApiError(401, 'INVALID_PASSWORD', 'Текущий пароль Staffly указан неверно.')
       } else {
         if (account.passwordHash) throw new ApiError(409, 'PASSWORD_ALREADY_SET', 'Для этого действия подтвердите текущий пароль Staffly.')
         if (!await prisma.authIdentity.findUnique({ where: { userId_provider: { userId: account.id, provider: 'yandex' } } })) throw expired()
@@ -122,7 +123,7 @@ export function createYandexRouter(dependencies: Dependencies) {
     const old = browserAttempt(request)
     if (old) await prisma.oAuthAttempt.deleteMany({ where: old })
     const state = random(), verifier = random(), browserToken = random()
-    const data = { stateHash: fingerprint(state), browserHash: fingerprint(browserToken), codeVerifier: verifier, purpose, returnTo: account ? '/app/settings?section=security' : safeReturnTo(input.returnTo), ...(account ? { userId: account.id, sessionId: request.auth!.sessionId, securityVersion: account.securityVersion } : {}), expiresAt: new Date(Date.now() + lifetime) }
+    const data = { stateHash: fingerprint(state), browserHash: fingerprint(browserToken), codeVerifier: verifier, purpose, returnTo: account && purpose !== 'PASSWORD_SETUP' ? '/app/settings?section=security' : safeReturnTo(input.returnTo, account ? '/app/settings?section=security' : '/app'), ...(account ? { userId: account.id, sessionId: request.auth!.sessionId, securityVersion: account.securityVersion } : {}), expiresAt: new Date(Date.now() + lifetime) }
     const record = account ? await prisma.$transaction(async tx => {
       const current = await lockAccount(tx, request.auth!)
       if (current.securityVersion !== account.securityVersion || current.passwordHash !== account.passwordHash) throw securityChanged()
@@ -130,7 +131,7 @@ export function createYandexRouter(dependencies: Dependencies) {
     }) : await prisma.oAuthAttempt.create({ data })
     clearCookie(response)
     response.cookie(cookieName, `${record.id}.${browserToken}`, { ...cookieOptions(), maxAge: lifetime })
-    response.json({ authorizationUrl: yandexAuthorizationUrl(settings, state, verifier) })
+    response.json({ authorizationUrl: yandexAuthorizationUrl(settings, state, verifier, purpose !== 'LOGIN') })
   }
   router.post('/start', limiter, (request, response) => start(request, response, 'LOGIN'))
   router.post('/link', dependencies.requireAuth, credentialLimiter, limiter, (request, response) => start(request, response, 'LINK'))
@@ -168,7 +169,7 @@ export function createYandexRouter(dependencies: Dependencies) {
             await tx.oAuthAttempt.update({ where: { id: record!.id }, data: { stage: 'REAUTH_READY', profile, expiresAt: new Date(Date.now() + 5 * 60_000) } })
           })
           response.cookie(cookieName, request.cookies[cookieName], { ...cookieOptions(), maxAge: 5 * 60_000 })
-          response.redirect(303, `/app/settings?section=security&yandex=${record.purpose === 'PASSWORD_SETUP' ? 'password-ready' : 'email-ready'}`)
+          response.redirect(303, `/app/settings?section=security&yandex=${record.purpose === 'PASSWORD_SETUP' ? 'password-ready' : 'email-ready'}${record.purpose === 'PASSWORD_SETUP' && record.returnTo !== '/app/settings?section=security' ? `&returnTo=${encodeURIComponent(safeReturnTo(record.returnTo))}` : ''}`)
         } else throw expired()
         return
       }
@@ -215,7 +216,7 @@ export function createYandexRouter(dependencies: Dependencies) {
     if (!profile.email) throw expired()
     const existing = await prisma.user.findUnique({ where: { email: profile.email } })
     if (existing) {
-      const valid = await dependencies.verifyPassword(existing.passwordHash, input.currentPassword ?? '')
+      const valid = await dependencies.verifyPassword(existing.passwordHash, input.currentPassword ?? '', existing.email)
       if (!valid || !existing.passwordHash || !existing.emailVerifiedAt || existing.deletedAt) {
         await prisma.oAuthAttempt.updateMany({ where: { id: record.id }, data: { attempts: { increment: 1 } } })
         throw new ApiError(401, 'YANDEX_CONFIRM_ACCOUNT', 'Не удалось подтвердить аккаунт. Проверьте пароль Staffly или войдите обычным способом и подключите Яндекс в настройках.')
@@ -271,6 +272,7 @@ export function createYandexRouter(dependencies: Dependencies) {
       const user = await lockAccount(tx, request.auth!)
       if (user.passwordHash) throw new ApiError(409, 'PASSWORD_ALREADY_SET', 'Пароль уже создан. Используйте изменение пароля.')
       await requireYandexProof(tx, request, 'PASSWORD_SETUP', user)
+      await clearPasswordAttempts(tx, user.email)
       await tx.user.update({ where: { id: user.id }, data: { passwordHash: nextHash, securityVersion: { increment: 1 } } })
       await invalidateSecurityChallenges(tx, user.id)
       await revokeOtherSessions(tx, user.id, request.auth!.sessionId)
@@ -280,10 +282,10 @@ export function createYandexRouter(dependencies: Dependencies) {
     response.json({ message: 'Пароль создан. Теперь можно входить по почте и паролю или через Яндекс.' })
   })
   router.post('/unlink', dependencies.requireAuth, credentialLimiter, async (request: AuthenticatedRequest, response) => {
-    const password = z.object({ currentPassword: z.string().min(1).max(128) }).strict().parse(request.body)
+    const password = z.object({ currentPassword: z.string().min(1).max(256) }).strict().parse(request.body)
     const user = await prisma.user.findUniqueOrThrow({ where: { id: request.auth!.userId } })
     if (!user.passwordHash) throw new ApiError(409, 'LAST_LOGIN_METHOD', 'Сначала создайте пароль, чтобы сохранить доступ к аккаунту.')
-    if (!await dependencies.verifyPassword(user.passwordHash, password.currentPassword)) throw new ApiError(401, 'INVALID_PASSWORD', 'Текущий пароль указан неверно.')
+    if (!await dependencies.verifyPassword(user.passwordHash, password.currentPassword, user.email)) throw new ApiError(401, 'INVALID_PASSWORD', 'Текущий пароль указан неверно.')
     await prisma.$transaction(async tx => {
       await tx.$queryRaw`SELECT id FROM users WHERE id = ${user.id}::uuid FOR UPDATE`
       const current = await tx.user.findUniqueOrThrow({ where: { id: user.id } })
@@ -304,6 +306,7 @@ export function createYandexRouter(dependencies: Dependencies) {
 
 export function startOAuthCleanup() {
   return startBackgroundTask({ name: 'OAuth cleanup', intervalMs: 10 * 60_000, run: async () => {
+    await prisma.authAttemptLimit.deleteMany({ where: { expiresAt: { lt: new Date(Date.now() - 24 * 60 * 60_000) } } })
     await prisma.oAuthAttempt.deleteMany({ where: { expiresAt: { lt: new Date() } } })
     await prisma.emailChangeToken.deleteMany({ where: { expiresAt: { lt: new Date() } } })
   } })

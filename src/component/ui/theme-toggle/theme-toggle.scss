@@ -1,0 +1,4 @@
+.theme-toggle {display:grid;place-items:center;flex:0 0 48px;width:48px;height:48px;padding:0;border:1px solid var(--theme-border,#dedede);border-radius:14px;background:var(--theme-surface,#fff);color:var(--theme-text,#444);cursor:pointer;transition:background .15s,border-color .15s;svg{width:22px;height:22px;} &:hover{background:var(--theme-raised,#f4f4f4);border-color:var(--theme-border-strong,#bcbcbc);} &:focus-visible{outline:2px solid var(--theme-focus,#747780);outline-offset:3px;}}
+.auth-theme-control {position:fixed;top:20px;right:20px;z-index:10;}
+@media(max-width:800px){.theme-toggle{flex-basis:42px;width:42px;height:42px;}}
+@media(prefers-reduced-motion:reduce){.theme-toggle{transition:none;}}

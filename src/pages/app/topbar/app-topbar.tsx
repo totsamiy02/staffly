@@ -5,6 +5,8 @@ import { useAuth } from '../../../app/auth/auth-context.tsx'
 import InvitationCenter from './invitation-center.tsx'
 import NotificationAlerts from './notification-alerts.tsx'
 import ProfileMenu from './profile-menu.tsx'
+import ThemeToggle from '../../../component/ui/theme-toggle/theme-toggle.tsx'
+import PasswordSetupReminder from './password-setup-reminder.tsx'
 import type { OrganizationSummary } from '../../../app/organizations/types.ts'
 
 export default function AppTopbar({ organization, notificationOrganizationId }: { organization?: OrganizationSummary; notificationOrganizationId?: string }) {
@@ -36,8 +38,9 @@ export default function AppTopbar({ organization, notificationOrganizationId }: 
     try { await logout(); navigate('/', { replace: true }) } finally { setLogoutBusy(false) }
   }
 
-  return <HeaderFrame variant={organization ? 'workspace' : 'app'} afterContent={<NotificationAlerts key={organizationId ?? 'global'} organizationId={organizationId} suppressed={openPanel === 'notifications' || historyOpen} />}>
+  return <HeaderFrame variant={organization ? 'workspace' : 'app'} afterContent={<><NotificationAlerts key={organizationId ?? 'global'} organizationId={organizationId} suppressed={openPanel === 'notifications' || historyOpen} /><PasswordSetupReminder key={user?.id} /></>}>
     {user && <div className="app-topbar__controls" ref={controlsRef}>
+      <ThemeToggle />
       <InvitationCenter key={organizationId ?? 'global'} organizationId={organizationId} onHistoryChange={setHistoryOpen} open={openPanel === 'notifications'} onToggle={() => setOpenPanel((current) => current === 'notifications' ? null : 'notifications')} onClose={() => setOpenPanel(null)} />
       <ProfileMenu user={user} organization={organization} open={openPanel === 'profile'} busy={logoutBusy} onToggle={() => setOpenPanel((current) => current === 'profile' ? null : 'profile')} onClose={() => setOpenPanel(null)} onLogout={() => void signOut()} />
     </div>}

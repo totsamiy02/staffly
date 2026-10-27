@@ -2,15 +2,13 @@ import { useState, type FormEvent } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import { authGet, authPost, useAuth } from '../../app/auth/auth-context.tsx'
-import { passwordRequirements, passwordValidationError } from '../../app/auth/password-policy.ts'
 import { safeReturnTo } from '../../app/auth/return-to.ts'
 import { yandexMessage } from '../../app/auth/yandex.ts'
 import YandexButton from '../../component/ui/yandex-button.tsx'
-import AuthConsents from './auth-consents.tsx'
 import './auth.scss'
 
 type Mode = 'login' | 'register'
-type Field = 'email' | 'password' | 'confirm'
+type Field = 'email' | 'password'
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -49,19 +47,15 @@ function AuthPage() {
   const [yandexBusy, setYandexBusy] = useState(false)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [confirm, setConfirm] = useState('')
-  const [consentData, setConsentData] = useState(false)
-  const [consentTerms, setConsentTerms] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [serverError, setServerError] = useState(() => yandexMessage(searchParams.get('yandex')))
   const [notice, setNotice] = useState('')
-  const [visible, setVisible] = useState<Record<'password' | 'confirm', boolean>>({ password: false, confirm: false })
+  const [visible, setVisible] = useState<Record<'password', boolean>>({ password: false })
   const [touched, setTouched] = useState<Partial<Record<Field, boolean>>>({})
   const [attempted, setAttempted] = useState(false)
 
   const emailError = !email.trim() ? 'Укажите электронную почту.' : !emailPattern.test(email.trim()) ? 'Введите корректный адрес почты.' : ''
-  const passwordError = !password ? 'Укажите пароль.' : mode === 'register' ? passwordValidationError(password) : ''
-  const confirmError = !confirm ? 'Повторите пароль.' : confirm !== password ? 'Пароли не совпадают.' : ''
+  const passwordError = mode === 'login' && !password ? 'Укажите пароль.' : ''
 
   if (!loading && user) return <Navigate to={returnTo} replace />
 
@@ -76,13 +70,13 @@ function AuthPage() {
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setAttempted(true)
-    if (emailError || passwordError || (mode === 'register' && (confirmError || !consentData || !consentTerms))) return
+    if (emailError || passwordError) return
     setSubmitting(true)
     setServerError('')
     setNotice('')
     try {
       if (mode === 'register') {
-        await authPost('register', { email, password, confirmPassword: confirm, consentData, consentTerms })
+        await authPost('register', { email })
         navigate('/verify-email', { state: { email: email.trim().toLowerCase(), cooldownUntil: Date.now() + 60_000, returnTo } })
       } else {
         await login(email, password)
@@ -127,9 +121,8 @@ function AuthPage() {
             aria-label={placeholder}
             aria-invalid={Boolean(showError)}
             aria-describedby={showError ? `${name}-error` : undefined}
-            autoComplete={isPassword ? 'off' : 'email'}
-            data-lpignore={isPassword ? 'true' : undefined}
-            data-1p-ignore={isPassword ? 'true' : undefined}
+            name={name}
+            autoComplete={isPassword ? 'current-password' : mode === 'login' ? 'username' : 'email'}
             spellCheck={false}
             type={isPassword ? visible[name] ? 'text' : 'password' : 'email'}
             placeholder={placeholder}
@@ -162,30 +155,26 @@ function AuthPage() {
 
         <div className="auth__content">
           <h1>{mode === 'login' ? 'С возвращением!' : 'Создайте аккаунт'}</h1>
-          <p className="auth__intro">{mode === 'login' ? 'Войдите в свой аккаунт, чтобы продолжить' : 'Начните использовать Staffly уже сегодня'}</p>
+          <p className="auth__intro">{mode === 'login' ? 'Войдите в свой аккаунт, чтобы продолжить' : 'Сначала подтвердим почту, затем вы создадите пароль'}</p>
 
           {yandex.data?.enabled && <div className="auth__social"><YandexButton disabled={submitting || loading} busy={yandexBusy} onClick={() => { void startYandex() }} /><div className="auth__divider"><span>или по электронной почте</span></div></div>}
 
-          <form noValidate autoComplete="off" onSubmit={submit}>
+          <form noValidate onSubmit={submit}>
             <div className="auth__fields">
               {input('email', 'Электронная почта', email, setEmail, emailError)}
-              {input('password', 'Пароль', password, setPassword, passwordError)}
-              {mode === 'register' && <div className="auth__password-requirements">{passwordRequirements.map((requirement) => <span className={password && requirement.test(password) ? 'auth__password-rule auth__password-rule--valid' : 'auth__password-rule'} key={requirement.label}>{requirement.label}</span>)}</div>}
-              {mode === 'register' && input('confirm', 'Повторите пароль', confirm, setConfirm, confirmError)}
+              {mode === 'login' && input('password', 'Пароль', password, setPassword, passwordError)}
             </div>
 
-            {mode === 'login' ? (
+            {mode === 'login' && (
               <div className="auth__options">
-                <button type="button" className="auth__forgot" onClick={() => navigate('/forgot-password')}>Забыли пароль?</button>
+                <button type="button" className="auth__forgot" onClick={() => navigate('/forgot-password', { state: { email, returnTo } })}>Забыли пароль?</button>
               </div>
-            ) : (
-              <AuthConsents consentData={consentData} consentTerms={consentTerms} onData={setConsentData} onTerms={setConsentTerms} attempted={attempted} />
             )}
 
             {serverError && <p className="auth__error" role="alert">{serverError}</p>}
-            {serverError.includes('Подтвердите email') && <><button className="auth__text-button" type="button" onClick={() => { void resendVerification() }} disabled={submitting}>Отправить код повторно</button><br /><Link className="auth__text-button" to="/verify-email" state={{ email: email.trim().toLowerCase() }}>Ввести код</Link></>}
+            {serverError.includes('Подтвердите email') && <><button className="auth__text-button" type="button" onClick={() => { void resendVerification() }} disabled={submitting}>Отправить код повторно</button><br /><Link className="auth__text-button" to="/verify-email" state={{ email: email.trim().toLowerCase(), returnTo }}>Ввести код</Link></>}
             {notice && <p className="auth__notice" role="status">{notice}</p>}
-            <button className="auth__submit" type="submit" disabled={submitting || yandexBusy}>{submitting ? 'Подождите…' : mode === 'login' ? 'Войти' : 'Зарегистрироваться'}</button>
+            <button className="auth__submit" type="submit" disabled={submitting || yandexBusy}>{submitting ? 'Подождите…' : mode === 'login' ? 'Войти' : 'Получить код'}</button>
           </form>
         </div>
 

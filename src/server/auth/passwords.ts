@@ -1,17 +1,23 @@
 import { hash, verify, argon2id } from 'argon2'
 import { z } from 'zod'
+import { createHash } from 'node:crypto'
+import { commonPasswordHashes } from './common-passwords.ts'
+import { passwordRuleError } from '../../app/auth/password-rules.ts'
+import { clearAuthAttempts, reserveAuthAttempt } from './attempt-limits.ts'
 
-export const passwordSchema = z.string().min(10).max(128)
-  .refine(value => /[a-zа-яё]/u.test(value), 'Добавьте строчную букву.')
-  .refine(value => /[A-ZА-ЯЁ]/u.test(value), 'Добавьте заглавную букву.')
-  .refine(value => /\d/.test(value), 'Добавьте цифру.')
-  .refine(value => /[^\p{L}\p{N}\s]/u.test(value), 'Добавьте специальный символ.')
-  .refine(value => !/\s/u.test(value), 'Пароль не должен содержать пробелов.')
+export const passwordSchema = z.string().max(256).superRefine((value, context) => {
+  const message = passwordRuleError(value)
+  if (message) context.addIssue({ code: 'custom', message })
+  const digest = createHash('sha256').update(value.toLowerCase()).digest('hex')
+  if (commonPasswordHashes.has(digest)) context.addIssue({ code: 'custom', message: 'Этот пароль слишком распространён. Придумайте другой или используйте генератор паролей.' })
+})
 export function passwordHash(value: string) {
   return hash(value, { type: argon2id, memoryCost: 19456, timeCost: 2, parallelism: 1 })
 }
 const dummyHashPromise = passwordHash('staffly-dummy-password-for-timing')
-export async function verifyLoginPassword(storedHash: string | null, value: string) {
+export async function verifyLoginPassword(storedHash: string | null, value: string, account?: string) {
+  const bucket = account ? await reserveAuthAttempt('password', account, 10) : null
   const valid = await verify(storedHash ?? await dummyHashPromise, value)
+  if (bucket && storedHash && valid) await clearAuthAttempts(bucket)
   return Boolean(storedHash) && valid
 }

@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { safeReturnTo } from '../../../../app/auth/return-to.ts'
 import { useAuth } from '../../../../app/auth/auth-context.tsx'
 import { passwordRequirements, passwordValidationError } from '../../../../app/auth/password-policy.ts'
 import { yandexMessage, type LoginMethods } from '../../../../app/auth/yandex.ts'
@@ -49,7 +50,7 @@ export default function LoginMethodsSettings({ methods, pending, failed, onReloa
   }
   async function reauthorize(purpose: 'password' | 'email') {
     setBusy(true)
-    try { const result = await apiRequest<{ authorizationUrl: string }>(`/auth/yandex/${purpose}/start`, { method: 'POST', body: {} }); window.location.assign(result.authorizationUrl) }
+    try { const result = await apiRequest<{ authorizationUrl: string }>(`/auth/yandex/${purpose}/start`, { method: 'POST', body: purpose === 'password' ? { returnTo: new URLSearchParams(location.search).get('returnTo') ?? '/app/settings?section=security' } : {} }); window.location.assign(result.authorizationUrl) }
     catch (failure) { toast(failure instanceof Error ? failure.message : 'Не удалось подтвердить Яндекс.', 'error'); setBusy(false) }
   }
   function startPassword() { if (methods?.passwordSetupReady) open('password'); else void reauthorize('password') }
@@ -73,19 +74,21 @@ export default function LoginMethodsSettings({ methods, pending, failed, onReloa
       }
       const result = await apiRequest<{ message: string }>(`/auth/yandex/${dialog === 'password' ? 'password/complete' : 'unlink'}`, { method: 'POST', body: dialog === 'password' ? { password, confirmPassword } : { currentPassword } })
       setDialog(null); setCurrentPassword(''); setPassword(''); setConfirmPassword(''); toast(result.message, 'success'); onReload()
+      if (dialog === 'password' && new URLSearchParams(location.search).has('returnTo')) navigate(safeReturnTo(new URLSearchParams(location.search).get('returnTo')), { replace: true })
     } catch (failure) { setCurrentPassword(''); setError(failure instanceof Error ? failure.message : 'Не удалось сохранить изменения.') }
     finally { setBusy(false) }
   }
-  return <section className="sessions-editor login-methods"><header><div><p className="app-eyebrow">Доступ к аккаунту</p><h2>Способы входа</h2><p>Яндекс и пароль открывают один аккаунт. Данные профиля можно менять независимо от Яндекса.</p></div></header>
+  return <section id="login-methods" className="sessions-editor login-methods"><header><div><p className="app-eyebrow">Доступ к аккаунту</p><h2>Способы входа</h2><p>Яндекс и пароль открывают один аккаунт. Данные профиля можно менять независимо от Яндекса.</p></div></header>
     {pending ? <p role="status">Загружаем способы входа…</p> : failed ? <div className="app-state"><p>Не удалось загрузить способы входа.</p><button className="app-secondary" onClick={onReload}>Повторить</button></div> : methods && <>
-      {!methods.hasPassword && <p className="login-methods__notice">Сейчас вы можете войти только через Яндекс. При желании создайте пароль — он поможет войти, если Яндекс временно недоступен.</p>}
+      {!methods.hasPassword && <p className="login-methods__notice">Вход через Яндекс работает без пароля Staffly. Создайте запасной пароль для входа по почте. При потере Яндекса доступ также можно восстановить кодом на текущую почту аккаунта. <Link to="/forgot-password" state={{ email: user?.email, returnTo: '/app/settings?section=security' }}>Создать пароль кодом на почту</Link></p>}
       <div className="login-methods__list">
-        <article><MailIcon /><div><strong>Почта аккаунта</strong><span>{user?.email}</span><small>Для писем Staffly и входа по паролю</small></div><button className="app-secondary" disabled={busy || !methods.hasPassword && !methods.yandex.enabled} onClick={startEmail}>Изменить почту</button></article>
+        <article><MailIcon /><div><strong>Почта аккаунта</strong><span>{user?.email}</span><small>Для входа, восстановления доступа и писем Staffly</small></div><button className="app-secondary" disabled={busy || !methods.hasPassword && !methods.yandex.enabled} onClick={startEmail}>Изменить почту</button></article>
         <article><span className="login-methods__email-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><rect x="5" y="10" width="14" height="11" rx="3" /><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3" /></svg></span><div><strong>Пароль</strong><span className={`login-methods__state${methods.hasPassword ? ' is-connected' : ''}`}>{methods.hasPassword ? 'Установлен' : 'Ещё не создан'}</span>{!methods.hasPassword && <small>Перед созданием подтвердите подключённый Яндекс ID.</small>}</div>{!methods.hasPassword && <button className="app-secondary" disabled={busy || !methods.yandex.enabled} onClick={startPassword}>Создать пароль</button>}</article>
         <article className="login-methods__provider"><YandexMark /><div><strong className="login-methods__provider-title"><YandexLogo /></strong><span className={`login-methods__state${methods.yandex.connected ? ' is-connected' : ''}`}>{methods.yandex.connected ? 'Подключён' : 'Не подключён'}</span>{methods.yandex.email && <small>{methods.yandex.email}</small>}{methods.yandex.connected && !methods.hasPassword && <small>Для отключения сначала создайте пароль.</small>}</div>{methods.yandex.connected ? methods.hasPassword && <button className="app-secondary" disabled={busy} onClick={() => open('unlink')}>Отключить</button> : methods.yandex.enabled ? <button className="app-secondary" disabled={busy} onClick={() => open('link')}>Подключить</button> : <span className="login-methods__unavailable">Пока недоступен</span>}</article>
       </div>
     </>}
     {dialog && <AnimatedOverlay variant="modal" dismissible={!busy} onClose={close}>{requestClose => <DocumentDialog eyebrow="Безопасность" title={titles[dialog]} description={descriptions[dialog]} busy={busy} onClose={requestClose} className="login-methods__dialog"><form onSubmit={submit}>
+      <input type="email" name="username" autoComplete="username" value={user?.email ?? ''} readOnly hidden />
       {dialog === 'link' && <div className="login-methods__provider-banner"><YandexLogo /><span>Подключение к аккаунту Staffly</span></div>}
       {dialog === 'email' && <label><span>Новая почта</span><input type="email" value={email} onChange={event => setEmail(event.target.value)} autoComplete="email" maxLength={254} required /></label>}
       {(dialog === 'link' || dialog === 'unlink' || dialog === 'email' && methods?.hasPassword) && <PasswordField label="Текущий пароль Staffly" value={currentPassword} onChange={setCurrentPassword} autoComplete="current-password" />}

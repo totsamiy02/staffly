@@ -7,11 +7,13 @@ import App from './App.tsx'
 import { AuthProvider } from './app/auth/auth-context.tsx'
 import RootErrorBoundary from './pages/error/root-error-boundary.tsx'
 import './index.scss'
+import ThemeController from './app/theme/theme-controller.tsx'
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 15_000, retry: 1, refetchOnWindowFocus: false } } })
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
+    <ThemeController />
     <BrowserRouter>
       <QueryClientProvider client={queryClient}>
         <RootErrorBoundary><AuthProvider><ToastProvider><App /></ToastProvider></AuthProvider></RootErrorBoundary>

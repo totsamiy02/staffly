@@ -63,6 +63,7 @@ function ResetPasswordPage() {
     {done ? <p className="auth__notice">Пароль обновлён. Все прежние сеансы завершены.</p> : <>
       <p>Введите код из письма{initialEmail && <> на <strong>{initialEmail}</strong></>} и новый безопасный пароль.</p>
       <form onSubmit={submit}>
+        {initialEmail && <input type="email" name="username" autoComplete="username" value={email} readOnly hidden />}
         <div className="auth__fields">
           {!initialEmail && <div className="auth__field"><input type="email" aria-label="Электронная почта" placeholder="Электронная почта" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></div>}
           <CodeInput label="Код из письма" value={code} onChange={setCode} />

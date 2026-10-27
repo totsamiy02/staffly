@@ -13,6 +13,7 @@ import { createYandexRouter } from './auth/yandex-routes.ts'
 import { passwordSchema as password, passwordHash, verifyLoginPassword } from './auth/passwords.ts'
 import { lockAccount, invalidateSecurityChallenges, revokeOtherSessions, securityChanged } from './auth/account-security.ts'
 import { createEmailChangeRouter } from './auth/email-change-routes.ts'
+import { clearPasswordAttempts, reserveAuthAttempt } from './auth/attempt-limits.ts'
 export { verifyLoginPassword } from './auth/passwords.ts'
 
 const jwtSecret = process.env.JWT_SECRET
@@ -31,16 +32,14 @@ const COOKIE_PATH = '/api/auth'
 const invalidCredentials = 'Неверная почта или пароль.'
 
 const email = z.string().trim().toLowerCase().email().max(254)
-const registerBody = z.object({ email, password, confirmPassword: z.string(), consentData: z.literal(true), consentTerms: z.literal(true) })
-  .refine((body) => body.password === body.confirmPassword, { path: ['confirmPassword'], message: 'Пароли не совпадают' })
-const loginBody = z.object({ email, password: z.string().min(1).max(128) })
+const registerBody = z.object({ email })
+const loginBody = z.object({ email, password: z.string().min(1).max(256) })
 const codeBody = z.object({ email, code: z.string().regex(/^\d{6}$/) })
 const resetBody = codeBody.extend({ password, confirmPassword: z.string() })
   .refine((body) => body.password === body.confirmPassword, { path: ['confirmPassword'], message: 'Пароли не совпадают' })
-const changeBody = z.object({ currentPassword: z.string().min(1).max(128), newPassword: password })
+const verifyBody = resetBody.and(z.object({ consentData: z.literal(true), consentTerms: z.literal(true) }))
+const changeBody = z.object({ currentPassword: z.string().min(1).max(256), newPassword: password })
 
-const router = Router()
-router.use((_request, response, next) => { response.set('Cache-Control', 'no-store'); next() })
 const tooManyRequests = (_request: Request, response: Response) => response.status(429).json({ message: 'Слишком много запросов. Попробуйте позже.' })
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 100, standardHeaders: 'draft-8', legacyHeaders: false, handler: tooManyRequests, skip: request => request.method === 'GET' || request.path === '/refresh' })
 const refreshLimiter = rateLimit({ windowMs: 60_000, limit: 120, standardHeaders: 'draft-8', legacyHeaders: false, handler: tooManyRequests })
@@ -53,7 +52,6 @@ const accountLimiter = rateLimit({
   handler: tooManyRequests,
   keyGenerator: (request) => `${ipKeyGenerator(request.ip || '127.0.0.1')}:${createHash('sha256').update(String(request.body?.email || '').trim().toLowerCase()).digest('hex')}`,
 })
-router.use(authLimiter)
 
 function digest(value: string) {
   return createHash('sha256').update(value).digest('hex')
@@ -152,210 +150,231 @@ const sentMessage = process.env.NODE_ENV === 'development' && (!process.env.SMTP
   ? 'Если адрес подходит для этого действия, код появится в терминале сервера. Настройте SMTP для отправки на почту.'
   : 'Если адрес подходит для этого действия, код отправлен. Проверьте почту.'
 
-router.post('/register', accountLimiter, async (request, response) => {
-  const parsed = registerBody.safeParse(request.body)
-  if (!parsed.success) { response.status(400).json({ message: 'Проверьте данные регистрации.', errors: z.flattenError(parsed.error).fieldErrors }); return }
-  const { email: userEmail, password: userPassword } = parsed.data
-  const code = newCode()
-  const now = new Date()
-  try {
-    const user = await prisma.user.create({ data: {
-      email: userEmail,
-      passwordHash: await passwordHash(userPassword),
-      termsAcceptedAt: now,
-      dataConsentAt: now,
-      lastSecurityEmailAt: now,
-    } })
-    await prisma.emailVerificationToken.create({ data: { userId: user.id, tokenHash: codeDigest(user.id, 'verification', code), expiresAt: new Date(now.getTime() + CODE_MS) } })
-    try { await deliverSecurityCode('verification', userEmail, code) }
-    catch (error) {
-      await prisma.user.delete({ where: { id: user.id } })
-      throw error
-    }
-  } catch (error) {
-    if (!(error && typeof error === 'object' && 'code' in error && error.code === 'P2002')) throw error
-  }
-  response.status(202).json({ message: sentMessage })
-})
+export function createAuthRouter({ sendCode = deliverSecurityCode }: { sendCode?: typeof deliverSecurityCode } = {}) {
+  const router = Router()
+  router.use(authLimiter, (_request, response, next) => { response.set('Cache-Control', 'no-store'); next() })
 
-router.post('/resend-verification', accountLimiter, async (request, response) => {
-  const parsed = z.object({ email }).safeParse(request.body)
-  if (!parsed.success) { response.status(400).json({ message: 'Укажите корректный email.' }); return }
-  const user = await prisma.user.findUnique({ where: { email: parsed.data.email } })
-  if (user && !user.deletedAt && !user.emailVerifiedAt) {
-    const now = new Date()
-    const claimed = await prisma.user.updateMany({ where: { id: user.id, OR: [{ lastSecurityEmailAt: null }, { lastSecurityEmailAt: { lte: new Date(now.getTime() - EMAIL_COOLDOWN_MS) } }] }, data: { lastSecurityEmailAt: now } })
-    if (claimed.count) {
-      const code = newCode()
-      await prisma.$transaction([
-        prisma.emailVerificationToken.deleteMany({ where: { userId: user.id } }),
-        prisma.emailVerificationToken.create({ data: { userId: user.id, tokenHash: codeDigest(user.id, 'verification', code), expiresAt: new Date(now.getTime() + CODE_MS) } }),
-      ])
-      try { await deliverSecurityCode('verification', user.email, code) }
+  router.post('/register', accountLimiter, async (request, response) => {
+    const parsed = registerBody.safeParse(request.body)
+    if (!parsed.success) { response.status(400).json({ message: 'Проверьте данные регистрации.', errors: z.flattenError(parsed.error).fieldErrors }); return }
+    await reserveAuthAttempt('send-code', parsed.data.email, 5)
+    const now = new Date(), code = newCode()
+    // A pending account never owns a password. The mailbox owner chooses it with the code.
+    const user = await prisma.$transaction(async tx => {
+      const pending = await tx.user.upsert({ where: { email: parsed.data.email }, create: { email: parsed.data.email }, update: {} })
+      await tx.$queryRaw`SELECT id FROM users WHERE id = ${pending.id}::uuid FOR UPDATE`
+      const current = await tx.user.findUniqueOrThrow({ where: { id: pending.id } })
+      if (current.deletedAt || current.emailVerifiedAt || current.lastSecurityEmailAt && current.lastSecurityEmailAt.getTime() > now.getTime() - EMAIL_COOLDOWN_MS) return null
+      await tx.user.update({ where: { id: current.id }, data: { passwordHash: null, lastSecurityEmailAt: now } })
+      await tx.emailVerificationToken.deleteMany({ where: { userId: current.id } })
+      await tx.emailVerificationToken.create({ data: { userId: current.id, tokenHash: codeDigest(current.id, 'verification', code), expiresAt: new Date(now.getTime() + CODE_MS) } })
+      return current
+    })
+    if (user) {
+      try { await sendCode('verification', user.email, code) }
       catch (error) { await prisma.user.updateMany({ where: { id: user.id, lastSecurityEmailAt: now }, data: { lastSecurityEmailAt: user.lastSecurityEmailAt } }); throw error }
     }
-  }
-  response.status(202).json({ message: sentMessage })
-})
-
-router.post('/verify-email', accountLimiter, async (request, response) => {
-  const parsed = codeBody.safeParse(request.body)
-  if (!parsed.success) { response.status(400).json({ message: 'Укажите почту и шестизначный код.' }); return }
-  const user = await prisma.user.findUnique({ where: { email: parsed.data.email } })
-  if (!user || user.deletedAt || user.emailVerifiedAt) { response.status(400).json({ message: 'Неверный или истёкший код.' }); return }
-  const record = await prisma.emailVerificationToken.findFirst({ where: { userId: user.id, usedAt: null }, orderBy: { createdAt: 'desc' } })
-  if (!record || record.expiresAt <= new Date() || record.attempts >= MAX_CODE_ATTEMPTS) { response.status(400).json({ message: 'Неверный или истёкший код.' }); return }
-  const expected = codeDigest(user.id, 'verification', parsed.data.code)
-  const updated = await prisma.emailVerificationToken.updateMany({ where: { id: record.id, usedAt: null, attempts: { lt: MAX_CODE_ATTEMPTS }, expiresAt: { gt: new Date() } }, data: { attempts: { increment: 1 }, ...(record.tokenHash === expected ? { usedAt: new Date() } : {}) } })
-  if (!updated.count || record.tokenHash !== expected) { response.status(400).json({ message: 'Неверный или истёкший код.' }); return }
-  const verified = await prisma.user.update({ where: { id: user.id }, data: { emailVerifiedAt: new Date() } })
-  response.json(await createSession(verified, request, response))
-})
-
-router.use('/yandex', createYandexRouter({ createSession, requireAuth, verifyPassword: verifyLoginPassword }))
-router.use('/email-change', createEmailChangeRouter({ requireAuth, verifyPassword: verifyLoginPassword, clearRefreshCookie }))
-
-router.post('/login', loginLimiter, accountLimiter, async (request, response) => {
-  const parsed = loginBody.safeParse(request.body)
-  if (!parsed.success) { response.status(400).json({ message: invalidCredentials }); return }
-  const user = await prisma.user.findUnique({ where: { email: parsed.data.email } })
-  const valid = await verifyLoginPassword(user?.passwordHash ?? null, parsed.data.password)
-  if (!user || !valid || user.deletedAt) { response.status(401).json({ message: invalidCredentials }); return }
-  if (!user.emailVerifiedAt) { response.status(403).json({ code: 'EMAIL_NOT_VERIFIED', message: 'Подтвердите email перед входом.' }); return }
-  response.json(await createSession(user, request, response))
-})
-
-router.post('/refresh', refreshLimiter, async (request, response) => {
-  const rawToken = request.cookies?.[COOKIE_NAME]
-  if (typeof rawToken !== 'string' || rawToken.length > 256) { response.status(401).json({ message: 'Сессия завершена.' }); return }
-  const session = await prisma.authSession.findUnique({ where: { refreshTokenHash: digest(rawToken) }, include: { user: true } })
-  const now = new Date()
-  if (!session || session.revokedAt || session.idleExpiresAt <= now || session.absoluteExpiresAt <= now || session.user.deletedAt || !session.user.emailVerifiedAt) {
-    response.status(401).json({ message: 'Сессия завершена.' }); return
-  }
-  const nextToken = newToken()
-  const updated = await prisma.authSession.updateMany({
-    where: { id: session.id, refreshTokenHash: digest(rawToken), revokedAt: null, idleExpiresAt: { gt: now }, absoluteExpiresAt: { gt: now } },
-    data: { refreshTokenHash: digest(nextToken), lastUsedAt: now, idleExpiresAt: new Date(Math.min(now.getTime() + IDLE_MS, session.absoluteExpiresAt.getTime())) },
+    response.status(202).json({ message: sentMessage })
   })
-  if (!updated.count) { response.status(401).json({ message: 'Сессия завершена.' }); return }
-  setRefreshCookie(response, nextToken)
-  response.json({ user: publicUser(session.user), accessToken: await accessToken(session.userId, session.id) })
-})
 
-router.post('/logout', async (request, response) => {
-  const rawToken = request.cookies?.[COOKIE_NAME]
-  if (typeof rawToken === 'string') await prisma.authSession.updateMany({ where: { refreshTokenHash: digest(rawToken) }, data: { revokedAt: new Date(), lastActiveAt: null } })
-  clearRefreshCookie(response)
-  response.status(204).end()
-})
+  router.post('/resend-verification', accountLimiter, async (request, response) => {
+    const parsed = z.object({ email }).safeParse(request.body)
+    if (!parsed.success) { response.status(400).json({ message: 'Укажите корректный email.' }); return }
+    await reserveAuthAttempt('send-code', parsed.data.email, 5)
+    const user = await prisma.user.findUnique({ where: { email: parsed.data.email } })
+    if (user && !user.deletedAt && !user.emailVerifiedAt) {
+      const now = new Date()
+      const claimed = await prisma.user.updateMany({ where: { id: user.id, OR: [{ lastSecurityEmailAt: null }, { lastSecurityEmailAt: { lte: new Date(now.getTime() - EMAIL_COOLDOWN_MS) } }] }, data: { lastSecurityEmailAt: now } })
+      if (claimed.count) {
+        const code = newCode()
+        await prisma.$transaction([
+          prisma.emailVerificationToken.deleteMany({ where: { userId: user.id } }),
+          prisma.emailVerificationToken.create({ data: { userId: user.id, tokenHash: codeDigest(user.id, 'verification', code), expiresAt: new Date(now.getTime() + CODE_MS) } }),
+        ])
+        try { await sendCode('verification', user.email, code) }
+        catch (error) { await prisma.user.updateMany({ where: { id: user.id, lastSecurityEmailAt: now }, data: { lastSecurityEmailAt: user.lastSecurityEmailAt } }); throw error }
+      }
+    }
+    response.status(202).json({ message: sentMessage })
+  })
 
-router.post('/logout-all', requireAuth, async (request: AuthenticatedRequest, response) => {
-  await prisma.authSession.updateMany({ where: { userId: request.auth!.userId, revokedAt: null }, data: { revokedAt: new Date(), lastActiveAt: null } })
-  clearRefreshCookie(response)
-  response.status(204).end()
-})
+  router.post('/verify-email', accountLimiter, async (request, response) => {
+    const parsed = verifyBody.safeParse(request.body)
+    if (!parsed.success) { response.status(400).json({ message: parsed.error.issues.find(issue => issue.path.includes('password'))?.message ?? 'Укажите код, новый пароль и согласия.' }); return }
+    await reserveAuthAttempt('verification-code', parsed.data.email, 10)
+    const user = await prisma.user.findUnique({ where: { email: parsed.data.email } })
+    if (!user || user.deletedAt || user.emailVerifiedAt) { response.status(400).json({ message: 'Неверный или истёкший код.' }); return }
+    const record = await prisma.emailVerificationToken.findFirst({ where: { userId: user.id, usedAt: null }, orderBy: { createdAt: 'desc' } })
+    if (!record || record.expiresAt <= new Date() || record.attempts >= MAX_CODE_ATTEMPTS) { response.status(400).json({ message: 'Неверный или истёкший код.' }); return }
+    const expected = codeDigest(user.id, 'verification', parsed.data.code)
+    const nextHash = record.tokenHash === expected ? await passwordHash(parsed.data.password) : null
+    const verified = await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM users WHERE id = ${user.id}::uuid FOR UPDATE`
+      const current = await tx.user.findUniqueOrThrow({ where: { id: user.id } })
+      if (current.deletedAt || current.emailVerifiedAt || current.email !== user.email || current.securityVersion !== user.securityVersion) return null
+      const now = new Date()
+      const consumed = await tx.emailVerificationToken.updateMany({ where: { id: record.id, usedAt: null, attempts: { lt: MAX_CODE_ATTEMPTS }, expiresAt: { gt: now } }, data: { attempts: { increment: 1 }, ...(nextHash ? { usedAt: now } : {}) } })
+      if (!consumed.count || !nextHash) return null
+      await clearPasswordAttempts(tx, user.email)
+      await invalidateSecurityChallenges(tx, user.id)
+      await revokeOtherSessions(tx, user.id)
+      await tx.emailVerificationToken.deleteMany({ where: { userId: user.id } })
+      return tx.user.update({ where: { id: user.id }, data: { emailVerifiedAt: now, passwordHash: nextHash, termsAcceptedAt: now, dataConsentAt: now, securityVersion: { increment: 1 } } })
+    })
+    if (!verified) { response.status(400).json({ message: 'Неверный или истёкший код.' }); return }
+    response.json(await createSession(verified, request, response))
+  })
 
-function deviceDetails(userAgent: string | null) {
-  const value = userAgent ?? ''
-  const device = /iPhone/i.test(value) ? 'iPhone' : /iPad/i.test(value) ? 'iPad' : /Android/i.test(value) ? 'Android' : /Macintosh|Mac OS X/i.test(value) ? 'Mac' : /Windows/i.test(value) ? 'Windows' : /Linux/i.test(value) ? 'Linux' : 'Неизвестное устройство'
-  const browser = /Edg\/|EdgiOS\/|EdgA\//i.test(value) ? 'Microsoft Edge' : /OPR\//i.test(value) ? 'Opera' : /Chrome\/|CriOS\//i.test(value) ? 'Google Chrome' : /Firefox\/|FxiOS\//i.test(value) ? 'Firefox' : /Safari\//i.test(value) ? 'Safari' : 'Браузер'
-  const kind = /iPhone|iPad|Android|Mobile/i.test(value) ? 'mobile' : 'desktop'
-  return { device, browser, kind }
-}
+  router.use('/yandex', createYandexRouter({ createSession, requireAuth, verifyPassword: verifyLoginPassword }))
+  router.use('/email-change', createEmailChangeRouter({ requireAuth, verifyPassword: verifyLoginPassword, clearRefreshCookie }))
 
-router.get('/sessions', requireAuth, async (request: AuthenticatedRequest, response) => {
-  const now = new Date()
-  const sessions = await prisma.authSession.findMany({ where: { userId: request.auth!.userId, revokedAt: null, idleExpiresAt: { gt: now }, absoluteExpiresAt: { gt: now } }, orderBy: { lastUsedAt: 'desc' } })
-  response.json({ sessions: sessions.map((session) => ({ id: session.id, ...deviceDetails(session.userAgent), ipAddress: session.ipAddress, createdAt: session.createdAt, lastUsedAt: session.lastUsedAt, current: session.id === request.auth!.sessionId })) })
-})
+  router.post('/login', loginLimiter, accountLimiter, async (request, response) => {
+    const parsed = loginBody.safeParse(request.body)
+    if (!parsed.success) { response.status(400).json({ message: invalidCredentials }); return }
+    const user = await prisma.user.findUnique({ where: { email: parsed.data.email } })
+    const valid = await verifyLoginPassword(user?.passwordHash ?? null, parsed.data.password, parsed.data.email)
+    if (!user || !valid || user.deletedAt) { response.status(401).json({ message: invalidCredentials }); return }
+    if (!user.emailVerifiedAt) { response.status(403).json({ code: 'EMAIL_NOT_VERIFIED', message: 'Подтвердите email перед входом.' }); return }
+    response.json(await createSession(user, request, response))
+  })
 
-router.delete('/sessions/:sessionId', requireAuth, async (request: AuthenticatedRequest, response) => {
-  const parsed = z.string().uuid().safeParse(request.params.sessionId)
-  if (!parsed.success) { response.status(400).json({ message: 'Некорректный идентификатор сеанса.' }); return }
-  const revoked = await prisma.authSession.updateMany({ where: { id: parsed.data, userId: request.auth!.userId, revokedAt: null }, data: { revokedAt: new Date(), lastActiveAt: null } })
-  if (!revoked.count) { response.status(404).json({ message: 'Активный сеанс не найден.' }); return }
-  if (parsed.data === request.auth!.sessionId) clearRefreshCookie(response)
-  response.status(204).end()
-})
-
-router.post('/sessions/revoke-others', requireAuth, async (request: AuthenticatedRequest, response) => {
-  await prisma.authSession.updateMany({ where: { userId: request.auth!.userId, id: { not: request.auth!.sessionId }, revokedAt: null }, data: { revokedAt: new Date(), lastActiveAt: null } })
-  response.status(204).end()
-})
-
-router.get('/me', requireAuth, async (request: AuthenticatedRequest, response) => {
-  const user = await prisma.user.findUniqueOrThrow({ where: { id: request.auth!.userId } })
-  response.json({ user: publicUser(user) })
-})
-
-router.post('/forgot-password', accountLimiter, async (request, response) => {
-  const parsed = z.object({ email }).safeParse(request.body)
-  if (!parsed.success) { response.status(400).json({ message: 'Укажите корректный email.' }); return }
-  const user = await prisma.user.findUnique({ where: { email: parsed.data.email } })
-  if (user && !user.deletedAt && user.emailVerifiedAt && user.passwordHash) {
+  router.post('/refresh', refreshLimiter, async (request, response) => {
+    const rawToken = request.cookies?.[COOKIE_NAME]
+    if (typeof rawToken !== 'string' || rawToken.length > 256) { response.status(401).json({ message: 'Сессия завершена.' }); return }
+    const session = await prisma.authSession.findUnique({ where: { refreshTokenHash: digest(rawToken) }, include: { user: true } })
     const now = new Date()
-    const code = newCode()
-    const claimed = await prisma.$transaction(async tx => {
+    if (!session || session.revokedAt || session.idleExpiresAt <= now || session.absoluteExpiresAt <= now || session.user.deletedAt || !session.user.emailVerifiedAt) {
+      response.status(401).json({ message: 'Сессия завершена.' }); return
+    }
+    const nextToken = newToken()
+    const updated = await prisma.authSession.updateMany({
+      where: { id: session.id, refreshTokenHash: digest(rawToken), revokedAt: null, idleExpiresAt: { gt: now }, absoluteExpiresAt: { gt: now } },
+      data: { refreshTokenHash: digest(nextToken), lastUsedAt: now, idleExpiresAt: new Date(Math.min(now.getTime() + IDLE_MS, session.absoluteExpiresAt.getTime())) },
+    })
+    if (!updated.count) { response.status(401).json({ message: 'Сессия завершена.' }); return }
+    setRefreshCookie(response, nextToken)
+    response.json({ user: publicUser(session.user), accessToken: await accessToken(session.userId, session.id) })
+  })
+
+  router.post('/logout', async (request, response) => {
+    const rawToken = request.cookies?.[COOKIE_NAME]
+    if (typeof rawToken === 'string') await prisma.authSession.updateMany({ where: { refreshTokenHash: digest(rawToken) }, data: { revokedAt: new Date(), lastActiveAt: null } })
+    clearRefreshCookie(response)
+    response.status(204).end()
+  })
+
+  router.post('/logout-all', requireAuth, async (request: AuthenticatedRequest, response) => {
+    await prisma.authSession.updateMany({ where: { userId: request.auth!.userId, revokedAt: null }, data: { revokedAt: new Date(), lastActiveAt: null } })
+    clearRefreshCookie(response)
+    response.status(204).end()
+  })
+
+  function deviceDetails(userAgent: string | null) {
+    const value = userAgent ?? ''
+    const device = /iPhone/i.test(value) ? 'iPhone' : /iPad/i.test(value) ? 'iPad' : /Android/i.test(value) ? 'Android' : /Macintosh|Mac OS X/i.test(value) ? 'Mac' : /Windows/i.test(value) ? 'Windows' : /Linux/i.test(value) ? 'Linux' : 'Неизвестное устройство'
+    const browser = /Edg\/|EdgiOS\/|EdgA\//i.test(value) ? 'Microsoft Edge' : /OPR\//i.test(value) ? 'Opera' : /Chrome\/|CriOS\//i.test(value) ? 'Google Chrome' : /Firefox\/|FxiOS\//i.test(value) ? 'Firefox' : /Safari\//i.test(value) ? 'Safari' : 'Браузер'
+    const kind = /iPhone|iPad|Android|Mobile/i.test(value) ? 'mobile' : 'desktop'
+    return { device, browser, kind }
+  }
+
+  router.get('/sessions', requireAuth, async (request: AuthenticatedRequest, response) => {
+    const now = new Date()
+    const sessions = await prisma.authSession.findMany({ where: { userId: request.auth!.userId, revokedAt: null, idleExpiresAt: { gt: now }, absoluteExpiresAt: { gt: now } }, orderBy: { lastUsedAt: 'desc' } })
+    response.json({ sessions: sessions.map((session) => ({ id: session.id, ...deviceDetails(session.userAgent), ipAddress: session.ipAddress, createdAt: session.createdAt, lastUsedAt: session.lastUsedAt, current: session.id === request.auth!.sessionId })) })
+  })
+
+  router.delete('/sessions/:sessionId', requireAuth, async (request: AuthenticatedRequest, response) => {
+    const parsed = z.string().uuid().safeParse(request.params.sessionId)
+    if (!parsed.success) { response.status(400).json({ message: 'Некорректный идентификатор сеанса.' }); return }
+    const revoked = await prisma.authSession.updateMany({ where: { id: parsed.data, userId: request.auth!.userId, revokedAt: null }, data: { revokedAt: new Date(), lastActiveAt: null } })
+    if (!revoked.count) { response.status(404).json({ message: 'Активный сеанс не найден.' }); return }
+    if (parsed.data === request.auth!.sessionId) clearRefreshCookie(response)
+    response.status(204).end()
+  })
+
+  router.post('/sessions/revoke-others', requireAuth, async (request: AuthenticatedRequest, response) => {
+    await prisma.authSession.updateMany({ where: { userId: request.auth!.userId, id: { not: request.auth!.sessionId }, revokedAt: null }, data: { revokedAt: new Date(), lastActiveAt: null } })
+    response.status(204).end()
+  })
+
+  router.get('/me', requireAuth, async (request: AuthenticatedRequest, response) => {
+    const user = await prisma.user.findUniqueOrThrow({ where: { id: request.auth!.userId } })
+    response.json({ user: publicUser(user) })
+  })
+
+  router.post('/forgot-password', accountLimiter, async (request, response) => {
+    const parsed = z.object({ email }).safeParse(request.body)
+    if (!parsed.success) { response.status(400).json({ message: 'Укажите корректный email.' }); return }
+    await reserveAuthAttempt('send-code', parsed.data.email, 5)
+    const user = await prisma.user.findUnique({ where: { email: parsed.data.email } })
+    if (user && !user.deletedAt && user.emailVerifiedAt) {
+      const now = new Date()
+      const code = newCode()
+      const claimed = await prisma.$transaction(async tx => {
+        await tx.$queryRaw`SELECT id FROM users WHERE id = ${user.id}::uuid FOR UPDATE`
+        const current = await tx.user.findUnique({ where: { id: user.id } })
+        if (!current || current.deletedAt || !current.emailVerifiedAt || current.email !== user.email || current.securityVersion !== user.securityVersion || current.lastSecurityEmailAt && current.lastSecurityEmailAt.getTime() > now.getTime() - EMAIL_COOLDOWN_MS) return false
+        await tx.user.update({ where: { id: user.id }, data: { lastSecurityEmailAt: now } })
+        await tx.passwordResetToken.deleteMany({ where: { userId: user.id } })
+        await tx.passwordResetToken.create({ data: { userId: user.id, tokenHash: codeDigest(user.id, 'reset', code), expiresAt: new Date(now.getTime() + CODE_MS) } })
+        return true
+      })
+      if (claimed) {
+        try { await sendCode('reset', user.email, code) }
+        catch (error) { await prisma.user.updateMany({ where: { id: user.id, lastSecurityEmailAt: now }, data: { lastSecurityEmailAt: user.lastSecurityEmailAt } }); throw error }
+      }
+    }
+    response.status(202).json({ message: sentMessage })
+  })
+
+  router.post('/reset-password', accountLimiter, async (request, response) => {
+    const parsed = resetBody.safeParse(request.body)
+    if (!parsed.success) { response.status(400).json({ message: parsed.error.issues.find(issue => issue.path.includes('password'))?.message ?? 'Проверьте новый пароль и код.' }); return }
+    await reserveAuthAttempt('reset-code', parsed.data.email, 10)
+    const user = await prisma.user.findUnique({ where: { email: parsed.data.email } })
+    if (!user || user.deletedAt || !user.emailVerifiedAt) { response.status(400).json({ message: 'Неверный или истёкший код.' }); return }
+    const record = await prisma.passwordResetToken.findFirst({ where: { userId: user.id, usedAt: null }, orderBy: { createdAt: 'desc' } })
+    if (!record || record.expiresAt <= new Date() || record.attempts >= MAX_CODE_ATTEMPTS) { response.status(400).json({ message: 'Неверный или истёкший код.' }); return }
+    const expected = codeDigest(user.id, 'reset', parsed.data.code)
+    const nextHash = record.tokenHash === expected ? await passwordHash(parsed.data.password) : null
+    const changed = await prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM users WHERE id = ${user.id}::uuid FOR UPDATE`
       const current = await tx.user.findUnique({ where: { id: user.id } })
-      if (!current || current.deletedAt || !current.emailVerifiedAt || !current.passwordHash || current.email !== user.email || current.securityVersion !== user.securityVersion || current.lastSecurityEmailAt && current.lastSecurityEmailAt.getTime() > now.getTime() - EMAIL_COOLDOWN_MS) return false
-      await tx.user.update({ where: { id: user.id }, data: { lastSecurityEmailAt: now } })
-      await tx.passwordResetToken.deleteMany({ where: { userId: user.id } })
-      await tx.passwordResetToken.create({ data: { userId: user.id, tokenHash: codeDigest(user.id, 'reset', code), expiresAt: new Date(now.getTime() + CODE_MS) } })
+      if (!current || current.deletedAt || !current.emailVerifiedAt || current.email !== user.email || current.securityVersion !== user.securityVersion) return false
+      const updated = await tx.passwordResetToken.updateMany({ where: { id: record.id, usedAt: null, attempts: { lt: MAX_CODE_ATTEMPTS }, expiresAt: { gt: new Date() } }, data: { attempts: { increment: 1 }, ...(nextHash ? { usedAt: new Date() } : {}) } })
+      if (!updated.count || !nextHash) return false
+      await clearPasswordAttempts(tx, user.email)
+      await tx.user.update({ where: { id: user.id }, data: { passwordHash: nextHash, securityVersion: { increment: 1 } } })
+      await invalidateSecurityChallenges(tx, user.id)
+      await revokeOtherSessions(tx, user.id)
+      await queuePasswordChanged(tx, user.id)
       return true
     })
-    if (claimed) {
-      try { await deliverSecurityCode('reset', user.email, code) }
-      catch (error) { await prisma.user.updateMany({ where: { id: user.id, lastSecurityEmailAt: now }, data: { lastSecurityEmailAt: user.lastSecurityEmailAt } }); throw error }
-    }
-  }
-  response.status(202).json({ message: sentMessage })
-})
-
-router.post('/reset-password', accountLimiter, async (request, response) => {
-  const parsed = resetBody.safeParse(request.body)
-  if (!parsed.success) { response.status(400).json({ message: 'Проверьте новый пароль и код.' }); return }
-  const user = await prisma.user.findUnique({ where: { email: parsed.data.email } })
-  if (!user || user.deletedAt || !user.emailVerifiedAt || !user.passwordHash) { response.status(400).json({ message: 'Неверный или истёкший код.' }); return }
-  const record = await prisma.passwordResetToken.findFirst({ where: { userId: user.id, usedAt: null }, orderBy: { createdAt: 'desc' } })
-  if (!record || record.expiresAt <= new Date() || record.attempts >= MAX_CODE_ATTEMPTS) { response.status(400).json({ message: 'Неверный или истёкший код.' }); return }
-  const expected = codeDigest(user.id, 'reset', parsed.data.code)
-  const nextHash = record.tokenHash === expected ? await passwordHash(parsed.data.password) : null
-  const changed = await prisma.$transaction(async (tx) => {
-    await tx.$queryRaw`SELECT id FROM users WHERE id = ${user.id}::uuid FOR UPDATE`
-    const current = await tx.user.findUnique({ where: { id: user.id } })
-    if (!current || !current.passwordHash || current.deletedAt || !current.emailVerifiedAt || current.email !== user.email || current.securityVersion !== user.securityVersion) return false
-    const updated = await tx.passwordResetToken.updateMany({ where: { id: record.id, usedAt: null, attempts: { lt: MAX_CODE_ATTEMPTS }, expiresAt: { gt: new Date() } }, data: { attempts: { increment: 1 }, ...(nextHash ? { usedAt: new Date() } : {}) } })
-    if (!updated.count || !nextHash) return false
-    await tx.user.update({ where: { id: user.id }, data: { passwordHash: nextHash, securityVersion: { increment: 1 } } })
-    await invalidateSecurityChallenges(tx, user.id)
-    await revokeOtherSessions(tx, user.id)
-    await queuePasswordChanged(tx, user.id)
-    return true
+    if (!changed) { response.status(400).json({ message: 'Неверный или истёкший код.' }); return }
+    clearRefreshCookie(response)
+    response.json({ message: 'Пароль обновлён. Войдите снова.' })
   })
-  if (!changed) { response.status(400).json({ message: 'Неверный или истёкший код.' }); return }
-  clearRefreshCookie(response)
-  response.json({ message: 'Пароль обновлён. Войдите снова.' })
-})
 
-router.post('/change-password', loginLimiter, requireAuth, async (request: AuthenticatedRequest, response) => {
-  const parsed = changeBody.safeParse(request.body)
-  if (!parsed.success) { response.status(400).json({ message: 'Новый пароль не соответствует требованиям безопасности.' }); return }
-  const user = await prisma.user.findUniqueOrThrow({ where: { id: request.auth!.userId } })
-  if (!user.passwordHash) { response.status(409).json({ code: 'PASSWORD_NOT_SET', message: 'Сначала создайте пароль в настройках способов входа, подтвердив Яндекс ID.' }); return }
-  if (!await verifyLoginPassword(user.passwordHash, parsed.data.currentPassword)) { response.status(401).json({ message: 'Текущий пароль указан неверно.' }); return }
-  if (parsed.data.currentPassword === parsed.data.newPassword) { response.status(400).json({ message: 'Новый пароль должен отличаться от текущего.' }); return }
-  const nextHash = await passwordHash(parsed.data.newPassword)
-  await prisma.$transaction(async tx => {
-    const current = await lockAccount(tx, request.auth!)
-    if (current.securityVersion !== user.securityVersion || current.passwordHash !== user.passwordHash) throw securityChanged()
-    await tx.user.update({ where: { id: user.id }, data: { passwordHash: nextHash, securityVersion: { increment: 1 } } })
-    await invalidateSecurityChallenges(tx, user.id)
-    await revokeOtherSessions(tx, user.id, request.auth!.sessionId)
-    await queuePasswordChanged(tx, user.id)
+  router.post('/change-password', loginLimiter, requireAuth, async (request: AuthenticatedRequest, response) => {
+    const parsed = changeBody.safeParse(request.body)
+    if (!parsed.success) { response.status(400).json({ message: parsed.error.issues.find(issue => issue.path.includes('newPassword'))?.message ?? 'Проверьте новый пароль.' }); return }
+    const user = await prisma.user.findUniqueOrThrow({ where: { id: request.auth!.userId } })
+    if (!user.passwordHash) { response.status(409).json({ code: 'PASSWORD_NOT_SET', message: 'Сначала создайте пароль в настройках способов входа, подтвердив Яндекс ID.' }); return }
+    if (!await verifyLoginPassword(user.passwordHash, parsed.data.currentPassword, user.email)) { response.status(401).json({ message: 'Текущий пароль указан неверно.' }); return }
+    if (parsed.data.currentPassword === parsed.data.newPassword) { response.status(400).json({ message: 'Новый пароль должен отличаться от текущего.' }); return }
+    const nextHash = await passwordHash(parsed.data.newPassword)
+    await prisma.$transaction(async tx => {
+      const current = await lockAccount(tx, request.auth!)
+      if (current.securityVersion !== user.securityVersion || current.passwordHash !== user.passwordHash) throw securityChanged()
+      await tx.user.update({ where: { id: user.id }, data: { passwordHash: nextHash, securityVersion: { increment: 1 } } })
+      await invalidateSecurityChallenges(tx, user.id)
+      await revokeOtherSessions(tx, user.id, request.auth!.sessionId)
+      await queuePasswordChanged(tx, user.id)
+    })
+    response.json({ message: 'Пароль обновлён. Другие сеансы завершены.' })
   })
-  response.json({ message: 'Пароль обновлён. Другие сеансы завершены.' })
-})
 
-export default router
+  return router
+}
+
+export default createAuthRouter()

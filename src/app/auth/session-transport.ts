@@ -6,7 +6,7 @@ export async function postAuthJson(path: string, body: unknown): Promise<Respons
     body: JSON.stringify(body),
   })
   // Refresh cookies are shared by tabs. Serialize rotation and account changes by origin.
-  if (['refresh', 'login', 'verify-email', 'logout', 'reset-password'].includes(path) && navigator.locks) return navigator.locks.request('staffly-auth-cookie', execute)
+  if (['refresh', 'login', 'verify-email', 'yandex/complete', 'logout', 'reset-password'].includes(path) && navigator.locks) return navigator.locks.request('staffly-auth-cookie', execute)
   return execute()
 }
 

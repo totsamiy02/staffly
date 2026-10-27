@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom'
 import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../../app/auth/auth-context.tsx'
 import Avatar from '../ui/avatar/avatar.tsx'
+import ThemeToggle from '../ui/theme-toggle/theme-toggle.tsx'
 
 function Header() {
   const { user, loading, logout } = useAuth()
@@ -24,6 +25,7 @@ function Header() {
 
   return (
     <HeaderFrame variant="public" id="top">
+      <div className="site-header__actions"><ThemeToggle />
         {loading ? null : user ? (
           <div className="header__profile" ref={profileRef}>
             <button className="header__profile-trigger" type="button" aria-expanded={profileOpen} aria-label="Открыть меню профиля" onClick={() => setProfileOpen((value) => !value)}>
@@ -42,7 +44,7 @@ function Header() {
             <Link className="button button--white" to="/auth?mode=login">Вход</Link>
             <Link className="button button--black" to="/auth?mode=register">Регистрация</Link>
           </div>
-        )}
+        )}</div>
     </HeaderFrame>
   )
 }

@@ -16,19 +16,19 @@
 
   &--white {
     background-color: transparent;
-    color: #111;
+    color: var(--theme-text-strong,#111);
 
     &:hover {
-      background-color: #ebebeb;
+      background-color: var(--theme-raised,#ebebeb);
     }
   }
 
   &--black {
-    background-color: #111;
-    color: #fff;
+    background-color: var(--theme-solid,#111);
+    color: var(--theme-on-solid,#fff);
 
     &:hover {
-      background-color: #333;
+      background-color: var(--theme-solid,#333);
     }
   }
 }

@@ -1,17 +1,18 @@
 @use './styles/reset';
 @use './styles/controls';
+@use './styles/theme';
 
-html { scrollbar-gutter:stable; scroll-behavior: smooth; scrollbar-color: #aaa transparent; scrollbar-width: thin; }
-* { scrollbar-color: #aaa transparent; scrollbar-width: thin; }
+html { scrollbar-gutter:stable; scroll-behavior: smooth; scrollbar-color: var(--theme-scrollbar,#aaa) transparent; scrollbar-width: thin; }
+* { scrollbar-color: var(--theme-scrollbar,#aaa) transparent; scrollbar-width: thin; }
 *::-webkit-scrollbar { width: 8px; height: 8px; }
-*::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 999px; background: #aaa; background-clip: padding-box; }
+*::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 999px; background: var(--theme-neutral-fill,#aaa); background-clip: padding-box; }
 *::-webkit-scrollbar-track { background: transparent; }
 
 body {
   min-width: 0;
   min-height: 100vh;
-  color: #111;
-  background-color: #fff;
+  color: var(--theme-text-strong,#111);
+  background-color: var(--theme-surface,#fff);
   font-family: Arial, Helvetica, sans-serif;
   line-height: 1.5;
 }

@@ -10,7 +10,7 @@ import { queueAccountSecurityEvent } from '../mail/email-outbox.ts'
 import { invalidateSecurityChallenges, lockAccount, revokeOtherSessions, securityChanged } from './account-security.ts'
 import { requireYandexProof } from './yandex-routes.ts'
 
-const startBody = z.object({ email: z.string().trim().toLowerCase().email().max(254), currentPassword: z.string().min(1).max(128).optional() }).strict()
+const startBody = z.object({ email: z.string().trim().toLowerCase().email().max(254), currentPassword: z.string().min(1).max(256).optional() }).strict()
 const confirmBody = z.object({ challengeId: z.string().uuid(), code: z.string().regex(/^\d{6}$/) }).strict()
 const invalidCode = () => new ApiError(400, 'INVALID_CODE', 'Неверный или истёкший код. Начните изменение почты заново.')
 const unavailable = () => new ApiError(409, 'EMAIL_UNAVAILABLE', 'Этот адрес нельзя использовать. Укажите другой.')
@@ -19,7 +19,7 @@ function codeHash(id: string, email: string, code: string) {
 }
 type Dependencies = {
   requireAuth: RequestHandler
-  verifyPassword: (hash: string | null, password: string) => Promise<boolean>
+  verifyPassword: (hash: string | null, password: string, account?: string) => Promise<boolean>
   clearRefreshCookie: (response: Response) => void
   sendCode?: typeof deliverSecurityCode
 }
@@ -31,7 +31,7 @@ export function createEmailChangeRouter(dependencies: Dependencies) {
   router.post('/start', sendLimiter, async (request: AuthenticatedRequest, response) => {
     const input = startBody.parse(request.body)
     const snapshot = await prisma.user.findUniqueOrThrow({ where: { id: request.auth!.userId } })
-    if (snapshot.passwordHash && !await dependencies.verifyPassword(snapshot.passwordHash, input.currentPassword ?? '')) throw new ApiError(401, 'INVALID_PASSWORD', 'Текущий пароль Staffly указан неверно.')
+    if (snapshot.passwordHash && !await dependencies.verifyPassword(snapshot.passwordHash, input.currentPassword ?? '', snapshot.email)) throw new ApiError(401, 'INVALID_PASSWORD', 'Текущий пароль Staffly указан неверно.')
     const id = randomUUID(), code = randomInt(0, 1_000_000).toString().padStart(6, '0'), expiresAt = new Date(Date.now() + 10 * 60_000)
     await prisma.$transaction(async tx => {
       const user = await lockAccount(tx, request.auth!)

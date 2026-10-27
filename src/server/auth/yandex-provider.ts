@@ -20,9 +20,10 @@ export function yandexConfig(): YandexConfig | null {
   } catch { return null }
 }
 
-export function yandexAuthorizationUrl(config: YandexConfig, state: string, verifier: string) {
+export function yandexAuthorizationUrl(config: YandexConfig, state: string, verifier: string, confirm = false) {
   const url = new URL('https://oauth.yandex.ru/authorize')
-  url.search = new URLSearchParams({ response_type: 'code', client_id: config.clientId, redirect_uri: config.redirectUri, state, code_challenge: createHash('sha256').update(verifier).digest('base64url'), code_challenge_method: 'S256', scope: 'login:email login:info', optional_scope: 'login:avatar', force_confirm: 'yes' }).toString()
+  url.search = new URLSearchParams({ response_type: 'code', client_id: config.clientId, redirect_uri: config.redirectUri, state, code_challenge: createHash('sha256').update(verifier).digest('base64url'), code_challenge_method: 'S256', scope: 'login:email login:info', optional_scope: 'login:avatar' }).toString()
+  if (confirm) url.searchParams.set('force_confirm', 'yes')
   return url.href
 }
 

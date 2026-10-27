@@ -1,3 +1,4 @@
 .site-header__inner { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 16px; }
 .site-header__brand { display: flex; flex-shrink: 0; img { display: block; height: auto; } }
+.site-header__actions {display:flex;align-items:center;gap:10px;min-width:0;}
 @media (max-width: 600px) { .site-header__inner { gap: 10px; } }

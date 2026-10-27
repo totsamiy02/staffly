@@ -6,13 +6,14 @@ import { useQueryClient } from '@tanstack/react-query'
 import { createContext, useCallback, useContext, useEffect, useRef, useState, useMemo, type ReactNode } from 'react'
 
 export type AuthUser = { id: string; email: string; displayName: string; firstName: string | null; lastName: string | null; middleName: string | null; phone: string | null; bio: string | null; avatarUrl: string | null }
+type VerifyEmailBody = { email: string; code: string; password: string; confirmPassword: string; consentData: boolean; consentTerms: boolean }
 type AuthResult = { user: AuthUser; accessToken: string }
 type ApiOptions = { method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'; body?: unknown }
 type AuthContextValue = {
   user: AuthUser | null
   loading: boolean
   login: (email: string, password: string) => Promise<void>
-  verifyEmail: (email: string, code: string) => Promise<void>
+  verifyEmail: (body: VerifyEmailBody) => Promise<void>
   completeYandex: (body: { currentPassword?: string; consentData?: boolean; consentTerms?: boolean }) => Promise<{ returnTo: string }>
   logout: () => Promise<void>
   updateUser: (user: AuthUser) => void
@@ -107,8 +108,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function login(email: string, password: string) { accept(await authPost<AuthResult>('login', { email, password })) }
 
-  const verifyEmail = useCallback(async (email: string, code: string) => {
-    accept(await authPost<AuthResult>('verify-email', { email, code }))
+  const verifyEmail = useCallback(async (body: VerifyEmailBody) => {
+    accept(await authPost<AuthResult>('verify-email', body))
   }, [accept])
 
   const completeYandex = useCallback(async (body: { currentPassword?: string; consentData?: boolean; consentTerms?: boolean }) => {

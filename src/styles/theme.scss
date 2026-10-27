@@ -1,0 +1,101 @@
+// Light styles keep their original fallbacks. Every UI module consumes these
+// shared roles, including lazy routes and popups portaled to document.body.
+:root {color-scheme:light;}
+:where(html[data-theme=dark]) :where(button,select) {color:inherit;}
+:root[data-theme=dark] {
+  color-scheme:dark;
+  --theme-canvas:#151518;
+  --theme-header:#1b1b20;
+  --theme-surface:#222228;
+  --theme-surface-muted:#292830;
+  --theme-raised:#303039;
+  --theme-neutral-fill:#44424d;
+  --theme-solid:#393641;
+  --theme-translucent:rgb(27 27 32 / 94%);
+  --theme-text-strong:#f0eff3;
+  --theme-text:#d6d3dd;
+  --theme-muted:#b0abb9;
+  --theme-quiet:#9a95a3;
+  --theme-on-solid:#f5f3f8;
+  --theme-border:#3c3944;
+  --theme-border-strong:#625d6c;
+  --theme-focus:#c2aad8;
+  --theme-scrollbar:#66616f;
+  --theme-primary:#eeebf3;
+  --theme-primary-ink:#25212c;
+  --theme-primary-hover:#dcd4e6;
+  --theme-accent:#c4addc;
+  --theme-accent-bg:#332c40;
+  --theme-accent-border:#655474;
+  --theme-rose:#dfa0b9;
+  --theme-rose-bg:#382a34;
+  --theme-rose-border:#725060;
+  --theme-danger:#eaa8ac;
+  --theme-danger-bg:#3d292e;
+  --theme-danger-border:#795058;
+  --theme-warning:#dfc18b;
+  --theme-warning-bg:#3c3326;
+  --theme-warning-border:#796345;
+  --theme-success:#9bceb1;
+  --theme-success-bg:#27392f;
+  --theme-success-border:#4b6e59;
+  --theme-teal:#99ccc1;
+  --theme-teal-bg:#263a36;
+  --theme-teal-border:#4b7067;
+}
+
+html[data-theme=dark] {
+  body {background:var(--theme-canvas);color:var(--theme-text-strong);}
+  :is(.app-page,.workspace-main,.app-loading,.guide-page,.status-page) {background-color:var(--theme-canvas);}
+  :is(.site-header,.workspace-sidebar) {background:var(--theme-header);}
+  :is(.site-header__brand,.footer__brand > a) img {filter:brightness(0) invert(1);}
+  // This official monochrome wordmark has a transparent background. The red
+  // Yandex mark and the official black sign-in artwork are never recolored.
+  .yandex-id-logo {filter:grayscale(1) invert(1);}
+
+  :is(.app-primary,.button--black,.auth__submit) {
+    --theme-solid:var(--theme-primary);
+    --theme-on-solid:var(--theme-primary-ink);
+    background:var(--theme-primary);color:var(--theme-primary-ink);
+    &:hover:not(:disabled) {--theme-solid:var(--theme-primary-hover);background:var(--theme-primary-hover);}
+  }
+  .app-danger {background:#743e49;color:#fff;border-color:#995867;}
+  :is(.staffly-segmented,.requests-tabs,.account-settings-tabs,.settings-sections) {
+    --theme-solid:var(--theme-accent);
+    --theme-on-solid:var(--theme-primary-ink);
+  }
+  .staffly-segmented:not(.staffly-segmented--underline) .staffly-segmented__indicator {background:var(--theme-accent);box-shadow:none;}
+  .staffly-segmented:not(.staffly-segmented--underline) > :is(button,a):is(.active,[aria-pressed=true],[aria-selected=true]) {color:var(--theme-primary-ink);}
+  .staffly-segmented--underline .staffly-segmented__indicator {background:var(--theme-accent);}
+  .staffly-segmented--underline > :is(button,a):is(.active,[aria-pressed=true],[aria-selected=true]) {color:var(--theme-accent);}
+  .schedule-day--today .schedule-day__number {background:var(--theme-accent);color:var(--theme-primary-ink);}
+  :is(.planning-toggle,.email-settings__switch)[aria-checked=true] {background:var(--theme-accent);}
+  input[type=checkbox]:checked {border-color:var(--theme-accent);background-color:#79638b;}
+  :is(.schedule-modal,.modal) {background-color:rgb(0 0 0 / 62%);}
+  :is(.request-modal,.modal__content,.staffly-select__options,.staffly-calendar,.staffly-month-popup,.topbar-popover) {box-shadow:0 16px 64px rgb(0 0 0 / 42%);}
+  :is(input,textarea,select) {caret-color:var(--theme-text-strong);}
+  // Render uploaded document pages and spreadsheet cell formatting as authored.
+  // Only their surrounding toolbars / viewer chrome follow the UI theme.
+  .file-preview-pdf-page {background:#fff;color:#111;color-scheme:light;}
+  .file-preview .file-preview-table {
+    --theme-surface:#fff;--theme-surface-muted:#fafafa;--theme-raised:#f1f1f3;
+    --theme-text-strong:#222;--theme-text:#444;--theme-muted:#666;--theme-border:#ddd;
+    background:#fff;color:#222;color-scheme:light;
+  }
+  .auth {background:var(--theme-canvas);}
+  .auth__panel {background:var(--theme-header);}
+  ::selection {background:#665178;color:#fff;}
+}
+
+// Auth used to have a permanently dark palette. It now follows the same choice
+// without recoloring provider artwork or changing any authentication flow.
+html[data-theme=light] .auth {
+  --theme-solid:#eae7ef;--theme-surface:#fff;--theme-translucent:rgb(255 255 255 / 65%);
+  --theme-on-solid:#29252e;--theme-text-strong:#29252e;--theme-text:#4d4856;
+  --theme-muted:#716a7b;--theme-quiet:#716a7b;--theme-border:#ddd8e4;--theme-border-strong:#b0a8ba;
+  --field-value:#29252e;--field-example:#79717f;
+  background:#f5f4f7;color:#29252e;
+  .auth__panel {background:#fff;box-shadow:0 12px 50px rgb(37 30 47 / 8%);}
+  .auth__submit {background:#29252e;color:#fff; &:hover:not(:disabled){background:#41374b;}}
+  input[type=checkbox]:checked {background-color:#79638b;}
+}

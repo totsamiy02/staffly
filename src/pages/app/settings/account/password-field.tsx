@@ -8,6 +8,6 @@ type PasswordFieldProps = { label: string; value: string; autoComplete: string; 
 
 export default function PasswordField({ label, value, autoComplete, onChange }: PasswordFieldProps) {
   const [visible, setVisible] = useState(false)
-  return <label className="account-password-field"><span>{label}</span><div><input type={visible ? 'text' : 'password'} value={value} onChange={(event) => onChange(event.target.value)} autoComplete={autoComplete} maxLength={128} data-lpignore="true" data-1p-ignore="true" required /><button type="button" aria-label={visible ? 'Скрыть пароль' : 'Показать пароль'} onClick={() => setVisible((current) => !current)}><EyeIcon visible={visible} /></button></div></label>
+  return <label className="account-password-field"><span>{label}</span><div><input type={visible ? 'text' : 'password'} value={value} onChange={(event) => onChange(event.target.value)} autoComplete={autoComplete} maxLength={256} required /><button type="button" aria-label={visible ? 'Скрыть пароль' : 'Показать пароль'} onClick={() => setVisible((current) => !current)}><EyeIcon visible={visible} /></button></div></label>
 }
 
