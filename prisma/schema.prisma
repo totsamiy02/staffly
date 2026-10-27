@@ -10,7 +10,10 @@ datasource db {
 model User {
   id                  String    @id @default(uuid()) @db.Uuid
   email               String    @unique @db.VarChar(254)
-  passwordHash        String    @map("password_hash") @db.Text
+  passwordHash        String?   @map("password_hash") @db.Text
+  termsAcceptedAt     DateTime? @map("terms_accepted_at") @db.Timestamptz(3)
+  dataConsentAt       DateTime? @map("data_consent_at") @db.Timestamptz(3)
+  securityVersion     Int       @default(0) @map("security_version")
   emailVerifiedAt     DateTime? @map("email_verified_at") @db.Timestamptz(3)
   createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt           DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
@@ -29,6 +32,9 @@ model User {
   emailDeliveries EmailDelivery[]
 
   sessions                 AuthSession[]
+  identities               AuthIdentity[]
+  oauthAttempts            OAuthAttempt[]
+  emailChangeTokens        EmailChangeToken[]
   emailVerificationTokens  EmailVerificationToken[]
   passwordResetTokens      PasswordResetToken[]
   createdOrganizations     Organization[]           @relation("OrganizationCreator")
@@ -46,6 +52,61 @@ model User {
   @@map("users")
 }
 
+model AuthIdentity {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  provider    String   @db.VarChar(24)
+  subject     String   @db.VarChar(128)
+  email       String   @db.VarChar(254)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  lastLoginAt DateTime @default(now()) @map("last_login_at") @db.Timestamptz(3)
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, subject])
+  @@unique([userId, provider])
+  @@map("auth_identities")
+}
+
+// Short-lived, browser-bound OAuth handshakes. Provider tokens are never stored.
+model OAuthAttempt {
+  id           String   @id @default(uuid()) @db.Uuid
+  stateHash    String   @unique @map("state_hash") @db.VarChar(64)
+  browserHash  String   @map("browser_hash") @db.VarChar(64)
+  codeVerifier String?  @map("code_verifier") @db.VarChar(128)
+  stage        String   @default("STARTED") @db.VarChar(20)
+  purpose      String   @default("LOGIN") @db.VarChar(24)
+  securityVersion Int?   @map("security_version")
+  returnTo     String   @map("return_to") @db.VarChar(2048)
+  userId       String?  @map("user_id") @db.Uuid
+  sessionId    String?  @map("session_id") @db.Uuid
+  profile      Json?
+  attempts     Int      @default(0)
+  expiresAt    DateTime @map("expires_at") @db.Timestamptz(3)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  user         User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@map("oauth_attempts")
+}
+
+model EmailChangeToken {
+  id              String    @id @default(uuid()) @db.Uuid
+  userId          String    @map("user_id") @db.Uuid
+  sessionId       String    @map("session_id") @db.Uuid
+  email           String    @db.VarChar(254)
+  codeHash        String    @map("code_hash") @db.VarChar(64)
+  securityVersion Int       @map("security_version")
+  attempts        Int       @default(0)
+  expiresAt       DateTime  @map("expires_at") @db.Timestamptz(3)
+  usedAt          DateTime? @map("used_at") @db.Timestamptz(3)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, usedAt])
+  @@index([expiresAt])
+  @@map("email_change_tokens")
+}
+
 model EmailDelivery {
   eventOrder BigInt @default(autoincrement()) @map("event_order")
   id String @id @default(uuid()) @db.Uuid
@@ -56,6 +117,7 @@ model EmailDelivery {
   sourceKind String @map("source_kind") @db.VarChar(32)
   sourceId String? @map("source_id") @db.Uuid
   category String? @db.VarChar(40)
+  recipientEmail String? @map("recipient_email") @db.VarChar(254)
   payload Json @default("{}")
   status String @default("PENDING") @db.VarChar(16)
   attempts Int @default(0)

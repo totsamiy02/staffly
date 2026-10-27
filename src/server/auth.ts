@@ -2,13 +2,18 @@ import { createHash, createHmac, randomBytes, randomInt } from 'node:crypto'
 import type { NextFunction, Request, Response } from 'express'
 import { Router } from 'express'
 import { rateLimit, ipKeyGenerator } from 'express-rate-limit'
-import { hash, verify, argon2id } from 'argon2'
+import type { User } from '../generated/prisma/client.ts'
 import { SignJWT, jwtVerify } from 'jose'
 import { z } from 'zod'
 import { prisma } from './db.ts'
 import { deliverSecurityCode } from './mail/transport.ts'
 import { queuePasswordChanged } from './mail/email-outbox.ts'
 import { mediaUrl } from './storage/image-service.ts'
+import { createYandexRouter } from './auth/yandex-routes.ts'
+import { passwordSchema as password, passwordHash, verifyLoginPassword } from './auth/passwords.ts'
+import { lockAccount, invalidateSecurityChallenges, revokeOtherSessions, securityChanged } from './auth/account-security.ts'
+import { createEmailChangeRouter } from './auth/email-change-routes.ts'
+export { verifyLoginPassword } from './auth/passwords.ts'
 
 const jwtSecret = process.env.JWT_SECRET
 if (!jwtSecret || jwtSecret.length < 32) throw new Error('JWT_SECRET must contain at least 32 characters')
@@ -26,21 +31,16 @@ const COOKIE_PATH = '/api/auth'
 const invalidCredentials = 'Неверная почта или пароль.'
 
 const email = z.string().trim().toLowerCase().email().max(254)
-const password = z.string().min(10).max(128)
-  .refine((value) => /[a-zа-яё]/u.test(value), 'Добавьте строчную букву.')
-  .refine((value) => /[A-ZА-ЯЁ]/u.test(value), 'Добавьте заглавную букву.')
-  .refine((value) => /\d/.test(value), 'Добавьте цифру.')
-  .refine((value) => /[^\p{L}\p{N}\s]/u.test(value), 'Добавьте специальный символ.')
-  .refine((value) => !/\s/u.test(value), 'Пароль не должен содержать пробелы.')
 const registerBody = z.object({ email, password, confirmPassword: z.string(), consentData: z.literal(true), consentTerms: z.literal(true) })
   .refine((body) => body.password === body.confirmPassword, { path: ['confirmPassword'], message: 'Пароли не совпадают' })
-const loginBody = z.object({ email, password: z.string() })
+const loginBody = z.object({ email, password: z.string().min(1).max(128) })
 const codeBody = z.object({ email, code: z.string().regex(/^\d{6}$/) })
 const resetBody = codeBody.extend({ password, confirmPassword: z.string() })
   .refine((body) => body.password === body.confirmPassword, { path: ['confirmPassword'], message: 'Пароли не совпадают' })
-const changeBody = z.object({ currentPassword: z.string(), newPassword: password })
+const changeBody = z.object({ currentPassword: z.string().min(1).max(128), newPassword: password })
 
 const router = Router()
+router.use((_request, response, next) => { response.set('Cache-Control', 'no-store'); next() })
 const tooManyRequests = (_request: Request, response: Response) => response.status(429).json({ message: 'Слишком много запросов. Попробуйте позже.' })
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 100, standardHeaders: 'draft-8', legacyHeaders: false, handler: tooManyRequests, skip: request => request.method === 'GET' || request.path === '/refresh' })
 const refreshLimiter = rateLimit({ windowMs: 60_000, limit: 120, standardHeaders: 'draft-8', legacyHeaders: false, handler: tooManyRequests })
@@ -71,10 +71,6 @@ function newToken() {
   return randomBytes(48).toString('base64url')
 }
 
-function passwordHash(value: string) {
-  return hash(value, { type: argon2id, memoryCost: 19456, timeCost: 2, parallelism: 1 })
-}
-
 function setRefreshCookie(response: Response, token: string) {
   response.cookie(COOKIE_NAME, token, {
     httpOnly: true,
@@ -85,7 +81,7 @@ function setRefreshCookie(response: Response, token: string) {
   })
 }
 
-function clearRefreshCookie(response: Response) {
+export function clearRefreshCookie(response: Response) {
   response.clearCookie(COOKIE_NAME, { path: COOKIE_PATH, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' })
 }
 
@@ -103,29 +99,32 @@ async function accessToken(userId: string, sessionId: string) {
     .sign(jwtKey)
 }
 
-async function createSession(user: { id: string; email: string }, request: Request, response: Response) {
+export async function createSession(user: User, request: Request, response: Response) {
   const now = Date.now()
   const rawToken = newToken()
   const previousToken = request.cookies?.[COOKIE_NAME]
   const browserCookie = request.cookies?.[BROWSER_COOKIE_NAME]
   const browserToken = typeof browserCookie === 'string' && /^[A-Za-z0-9_-]{64}$/.test(browserCookie) ? browserCookie : newToken()
   const browserTokenHash = digest(browserToken)
-  const session = await prisma.$transaction(async tx => {
+  const { session, account } = await prisma.$transaction(async tx => {
+    await tx.$queryRaw`SELECT id FROM users WHERE id = ${user.id}::uuid FOR UPDATE`
+    const account = await tx.user.findUnique({ where: { id: user.id } })
+    if (!account || account.deletedAt || !account.emailVerifiedAt || account.securityVersion !== user.securityVersion) throw securityChanged()
     const previous = typeof previousToken === 'string' && previousToken.length <= 256
       ? await tx.authSession.findUnique({ where: { refreshTokenHash: digest(previousToken) } }) : null
     const browserSession = await tx.authSession.findFirst({ where: { userId: user.id, browserTokenHash, revokedAt: null, idleExpiresAt: { gt: new Date(now) }, absoluteExpiresAt: { gt: new Date(now) } }, orderBy: { createdAt: 'desc' } })
     const current = previous?.userId === user.id && !previous.revokedAt && previous.idleExpiresAt.getTime() > now && previous.absoluteExpiresAt.getTime() > now ? previous : browserSession
     const data = { browserTokenHash, refreshTokenHash: digest(rawToken), lastUsedAt: new Date(now), idleExpiresAt: new Date(now + IDLE_MS), userAgent: request.get('user-agent')?.slice(0, 512), ipAddress: request.ip?.slice(0, 45) }
-    // Password validation has already succeeded. The opaque browser cookie identifies
+    // Authentication has already succeeded. The opaque browser cookie identifies
     // continuity even if a refresh response was lost; it is never accepted as authentication.
     await tx.authSession.updateMany({ where: { browserTokenHash, revokedAt: null, ...(current ? { id: { not: current.id } } : {}) }, data: { revokedAt: new Date(now), lastActiveAt: null } })
     if (previous && previous.id !== current?.id && !previous.revokedAt) await tx.authSession.update({ where: { id: previous.id }, data: { revokedAt: new Date(now), lastActiveAt: null } })
-    if (current) return tx.authSession.update({ where: { id: current.id }, data: { ...data, idleExpiresAt: new Date(Math.min(now + IDLE_MS, current.absoluteExpiresAt.getTime())) } })
-    return tx.authSession.create({ data: { ...data, userId: user.id, absoluteExpiresAt: new Date(now + ABSOLUTE_MS) } })
+    const session = current ? await tx.authSession.update({ where: { id: current.id }, data: { ...data, idleExpiresAt: new Date(Math.min(now + IDLE_MS, current.absoluteExpiresAt.getTime())) } }) : await tx.authSession.create({ data: { ...data, userId: user.id, absoluteExpiresAt: new Date(now + ABSOLUTE_MS) } })
+    return { session, account }
   }, { isolationLevel: 'Serializable' })
   setRefreshCookie(response, rawToken)
   response.cookie(BROWSER_COOKIE_NAME, browserToken, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', path: COOKIE_PATH, maxAge: 365 * 24 * 60 * 60 * 1000 })
-  return { user: publicUser(user), accessToken: await accessToken(user.id, session.id) }
+  return { user: publicUser(account), accessToken: await accessToken(account.id, session.id) }
 }
 
 export type AuthenticatedRequest = Request & { auth?: { userId: string; sessionId: string; email: string } }
@@ -163,6 +162,8 @@ router.post('/register', accountLimiter, async (request, response) => {
     const user = await prisma.user.create({ data: {
       email: userEmail,
       passwordHash: await passwordHash(userPassword),
+      termsAcceptedAt: now,
+      dataConsentAt: now,
       lastSecurityEmailAt: now,
     } })
     await prisma.emailVerificationToken.create({ data: { userId: user.id, tokenHash: codeDigest(user.id, 'verification', code), expiresAt: new Date(now.getTime() + CODE_MS) } })
@@ -211,13 +212,14 @@ router.post('/verify-email', accountLimiter, async (request, response) => {
   response.json(await createSession(verified, request, response))
 })
 
-const dummyHashPromise = passwordHash('staffly-dummy-password-for-timing')
+router.use('/yandex', createYandexRouter({ createSession, requireAuth, verifyPassword: verifyLoginPassword }))
+router.use('/email-change', createEmailChangeRouter({ requireAuth, verifyPassword: verifyLoginPassword, clearRefreshCookie }))
 
 router.post('/login', loginLimiter, accountLimiter, async (request, response) => {
   const parsed = loginBody.safeParse(request.body)
   if (!parsed.success) { response.status(400).json({ message: invalidCredentials }); return }
   const user = await prisma.user.findUnique({ where: { email: parsed.data.email } })
-  const valid = await verify(user?.passwordHash ?? await dummyHashPromise, parsed.data.password)
+  const valid = await verifyLoginPassword(user?.passwordHash ?? null, parsed.data.password)
   if (!user || !valid || user.deletedAt) { response.status(401).json({ message: invalidCredentials }); return }
   if (!user.emailVerifiedAt) { response.status(403).json({ code: 'EMAIL_NOT_VERIFIED', message: 'Подтвердите email перед входом.' }); return }
   response.json(await createSession(user, request, response))
@@ -291,15 +293,19 @@ router.post('/forgot-password', accountLimiter, async (request, response) => {
   const parsed = z.object({ email }).safeParse(request.body)
   if (!parsed.success) { response.status(400).json({ message: 'Укажите корректный email.' }); return }
   const user = await prisma.user.findUnique({ where: { email: parsed.data.email } })
-  if (user && !user.deletedAt && user.emailVerifiedAt) {
+  if (user && !user.deletedAt && user.emailVerifiedAt && user.passwordHash) {
     const now = new Date()
-    const claimed = await prisma.user.updateMany({ where: { id: user.id, OR: [{ lastSecurityEmailAt: null }, { lastSecurityEmailAt: { lte: new Date(now.getTime() - EMAIL_COOLDOWN_MS) } }] }, data: { lastSecurityEmailAt: now } })
-    if (claimed.count) {
-      const code = newCode()
-      await prisma.$transaction([
-        prisma.passwordResetToken.deleteMany({ where: { userId: user.id } }),
-        prisma.passwordResetToken.create({ data: { userId: user.id, tokenHash: codeDigest(user.id, 'reset', code), expiresAt: new Date(now.getTime() + CODE_MS) } }),
-      ])
+    const code = newCode()
+    const claimed = await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM users WHERE id = ${user.id}::uuid FOR UPDATE`
+      const current = await tx.user.findUnique({ where: { id: user.id } })
+      if (!current || current.deletedAt || !current.emailVerifiedAt || !current.passwordHash || current.email !== user.email || current.securityVersion !== user.securityVersion || current.lastSecurityEmailAt && current.lastSecurityEmailAt.getTime() > now.getTime() - EMAIL_COOLDOWN_MS) return false
+      await tx.user.update({ where: { id: user.id }, data: { lastSecurityEmailAt: now } })
+      await tx.passwordResetToken.deleteMany({ where: { userId: user.id } })
+      await tx.passwordResetToken.create({ data: { userId: user.id, tokenHash: codeDigest(user.id, 'reset', code), expiresAt: new Date(now.getTime() + CODE_MS) } })
+      return true
+    })
+    if (claimed) {
       try { await deliverSecurityCode('reset', user.email, code) }
       catch (error) { await prisma.user.updateMany({ where: { id: user.id, lastSecurityEmailAt: now }, data: { lastSecurityEmailAt: user.lastSecurityEmailAt } }); throw error }
     }
@@ -311,16 +317,20 @@ router.post('/reset-password', accountLimiter, async (request, response) => {
   const parsed = resetBody.safeParse(request.body)
   if (!parsed.success) { response.status(400).json({ message: 'Проверьте новый пароль и код.' }); return }
   const user = await prisma.user.findUnique({ where: { email: parsed.data.email } })
-  if (!user || user.deletedAt || !user.emailVerifiedAt) { response.status(400).json({ message: 'Неверный или истёкший код.' }); return }
+  if (!user || user.deletedAt || !user.emailVerifiedAt || !user.passwordHash) { response.status(400).json({ message: 'Неверный или истёкший код.' }); return }
   const record = await prisma.passwordResetToken.findFirst({ where: { userId: user.id, usedAt: null }, orderBy: { createdAt: 'desc' } })
   if (!record || record.expiresAt <= new Date() || record.attempts >= MAX_CODE_ATTEMPTS) { response.status(400).json({ message: 'Неверный или истёкший код.' }); return }
   const expected = codeDigest(user.id, 'reset', parsed.data.code)
   const nextHash = record.tokenHash === expected ? await passwordHash(parsed.data.password) : null
   const changed = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM users WHERE id = ${user.id}::uuid FOR UPDATE`
+    const current = await tx.user.findUnique({ where: { id: user.id } })
+    if (!current || !current.passwordHash || current.deletedAt || !current.emailVerifiedAt || current.email !== user.email || current.securityVersion !== user.securityVersion) return false
     const updated = await tx.passwordResetToken.updateMany({ where: { id: record.id, usedAt: null, attempts: { lt: MAX_CODE_ATTEMPTS }, expiresAt: { gt: new Date() } }, data: { attempts: { increment: 1 }, ...(nextHash ? { usedAt: new Date() } : {}) } })
     if (!updated.count || !nextHash) return false
-    await tx.user.update({ where: { id: user.id }, data: { passwordHash: nextHash } })
-    await tx.authSession.updateMany({ where: { userId: user.id, revokedAt: null }, data: { revokedAt: new Date(), lastActiveAt: null } })
+    await tx.user.update({ where: { id: user.id }, data: { passwordHash: nextHash, securityVersion: { increment: 1 } } })
+    await invalidateSecurityChallenges(tx, user.id)
+    await revokeOtherSessions(tx, user.id)
     await queuePasswordChanged(tx, user.id)
     return true
   })
@@ -333,12 +343,16 @@ router.post('/change-password', loginLimiter, requireAuth, async (request: Authe
   const parsed = changeBody.safeParse(request.body)
   if (!parsed.success) { response.status(400).json({ message: 'Новый пароль не соответствует требованиям безопасности.' }); return }
   const user = await prisma.user.findUniqueOrThrow({ where: { id: request.auth!.userId } })
-  if (!await verify(user.passwordHash, parsed.data.currentPassword)) { response.status(401).json({ message: 'Текущий пароль указан неверно.' }); return }
+  if (!user.passwordHash) { response.status(409).json({ code: 'PASSWORD_NOT_SET', message: 'Сначала создайте пароль в настройках способов входа, подтвердив Яндекс ID.' }); return }
+  if (!await verifyLoginPassword(user.passwordHash, parsed.data.currentPassword)) { response.status(401).json({ message: 'Текущий пароль указан неверно.' }); return }
   if (parsed.data.currentPassword === parsed.data.newPassword) { response.status(400).json({ message: 'Новый пароль должен отличаться от текущего.' }); return }
   const nextHash = await passwordHash(parsed.data.newPassword)
   await prisma.$transaction(async tx => {
-    await tx.user.update({ where: { id: user.id }, data: { passwordHash: nextHash } })
-    await tx.authSession.updateMany({ where: { userId: user.id, id: { not: request.auth!.sessionId }, revokedAt: null }, data: { revokedAt: new Date(), lastActiveAt: null } })
+    const current = await lockAccount(tx, request.auth!)
+    if (current.securityVersion !== user.securityVersion || current.passwordHash !== user.passwordHash) throw securityChanged()
+    await tx.user.update({ where: { id: user.id }, data: { passwordHash: nextHash, securityVersion: { increment: 1 } } })
+    await invalidateSecurityChallenges(tx, user.id)
+    await revokeOtherSessions(tx, user.id, request.auth!.sessionId)
     await queuePasswordChanged(tx, user.id)
   })
   response.json({ message: 'Пароль обновлён. Другие сеансы завершены.' })

@@ -1,12 +1,15 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { authPost } from '../../app/auth/auth-context.tsx'
+import { authPost, useAuth } from '../../app/auth/auth-context.tsx'
+import { safeReturnTo } from '../../app/auth/return-to.ts'
 import CodeInput from './code-input.tsx'
 import { passwordRequirements, passwordValidationError } from '../../app/auth/password-policy.ts'
 import './auth.scss'
 
 function ResetPasswordPage() {
   const location = useLocation()
+  const { logout } = useAuth()
+  const returnTo = safeReturnTo((location.state as { returnTo?: unknown } | null)?.returnTo)
   const [email, setEmail] = useState(() => (location.state as { email?: string } | null)?.email ?? '')
   const initialEmail = (location.state as { email?: string } | null)?.email
   const [code, setCode] = useState('')
@@ -34,6 +37,7 @@ function ResetPasswordPage() {
     setError('')
     try {
       await authPost('reset-password', { email, code, password, confirmPassword })
+      await logout().catch(() => undefined)
       setDone(true)
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'Не удалось обновить пароль.')
@@ -72,7 +76,7 @@ function ResetPasswordPage() {
       </form>
       <button className="auth__text-button" type="button" onClick={() => { void resend() }} disabled={busy || !email || secondsLeft > 0}>{secondsLeft > 0 ? `Отправить повторно через ${secondsLeft} с` : 'Отправить код повторно'}</button>
     </>}
-    <br /><Link className="auth__text-button" to="/auth?mode=login">Перейти ко входу</Link>
+    <br /><Link className="auth__text-button" to={`/auth?mode=login&returnTo=${encodeURIComponent(returnTo)}`}>Перейти ко входу</Link>
   </div></main>
 }
 

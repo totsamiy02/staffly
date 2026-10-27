@@ -4,19 +4,34 @@ import { prisma } from '../db.ts'
 import { normalizeEmailCategories, type EmailCategory } from '../../app/notifications/email-preferences.ts'
 import { renderEmail, sendPreparedMail, type EmailContent } from './transport.ts'
 
-export async function enqueueEmail(tx: Prisma.TransactionClient | typeof prisma, data: { userId: string; organizationId?: string; sourceKey: string; sourceKind: string; sourceId?: string; category?: EmailCategory; content?: EmailContent; availableAt?: Date }) {
+export async function enqueueEmail(tx: Prisma.TransactionClient | typeof prisma, data: { userId: string; organizationId?: string; sourceKey: string; sourceKind: string; sourceId?: string; category?: EmailCategory; content?: EmailContent; availableAt?: Date; recipientEmail?: string }) {
+  if (data.recipientEmail && (data.sourceKind !== 'MANDATORY' || data.category)) throw new Error('A fixed recipient is only allowed for mandatory security mail')
   if (data.category) {
     const user = await tx.user.findUnique({ where: { id: data.userId }, select: { deletedAt: true, emailNotificationsEnabled: true, emailNotificationCategories: true } })
     if (!user || user.deletedAt || !user.emailNotificationsEnabled || !normalizeEmailCategories(user.emailNotificationCategories)[data.category]) return
   }
-  const created = await tx.emailDelivery.createMany({ data: [{ userId: data.userId, organizationId: data.organizationId, sourceKey: data.sourceKey, sourceKind: data.sourceKind, sourceId: data.sourceId, category: data.category, ...(data.content ? { payload: data.content as unknown as Prisma.InputJsonValue } : {}) }], skipDuplicates: true })
+  const created = await tx.emailDelivery.createMany({ data: [{ userId: data.userId, organizationId: data.organizationId, sourceKey: data.sourceKey, sourceKind: data.sourceKind, sourceId: data.sourceId, category: data.category, recipientEmail: data.recipientEmail, ...(data.content ? { payload: data.content as unknown as Prisma.InputJsonValue } : {}) }], skipDuplicates: true })
   if (created.count && data.availableAt) await tx.$executeRaw`UPDATE email_deliveries SET available_at=${data.availableAt.toISOString()}::timestamptz WHERE source_key=${data.sourceKey}`
 }
 export function passwordChangedEmail(): EmailContent {
   return { title: 'Пароль изменён', eyebrow: 'Безопасность', intro: 'Пароль вашего аккаунта Staffly обновлён. Остальные активные сеансы завершены.', action: { label: 'Проверить безопасность', path: '/app/settings?section=security' }, footer: 'Если это сделали не вы, немедленно восстановите доступ через страницу входа.' }
 }
 export async function queuePasswordChanged(tx: Prisma.TransactionClient, userId: string) {
-  await enqueueEmail(tx, { userId, sourceKind: 'MANDATORY', sourceKey: `password:${randomUUID()}`, content: passwordChangedEmail() })
+  const user = await tx.user.findUniqueOrThrow({ where: { id: userId }, select: { email: true } })
+  await enqueueEmail(tx, { userId, sourceKind: 'MANDATORY', sourceKey: `password:${randomUUID()}`, recipientEmail: user.email, content: passwordChangedEmail() })
+}
+
+type SecurityEvent = 'YANDEX_LINKED' | 'YANDEX_UNLINKED' | 'PASSWORD_CREATED' | 'EMAIL_CHANGED'
+export async function queueAccountSecurityEvent(tx: Prisma.TransactionClient, userId: string, event: SecurityEvent, details?: { oldEmail: string; newEmail: string }) {
+  const user = await tx.user.findUniqueOrThrow({ where: { id: userId }, select: { email: true } })
+  const messages: Record<SecurityEvent, { title: string; intro: string }> = {
+    YANDEX_LINKED: { title: 'Яндекс ID подключён', intro: 'К вашему аккаунту Staffly подключён вход через Яндекс. Данные профиля и организации сохранены.' },
+    YANDEX_UNLINKED: { title: 'Яндекс ID отключён', intro: 'Вход через Яндекс отключён. Вход по почте и паролю остаётся доступен. Остальные активные сеансы завершены.' },
+    PASSWORD_CREATED: { title: 'Пароль для входа создан', intro: 'Теперь вы можете входить в Staffly по почте и заданному паролю, а также через Яндекс. Остальные активные сеансы завершены.' },
+    EMAIL_CHANGED: { title: 'Почта аккаунта изменена', intro: 'Адрес для входа, восстановления доступа и писем Staffly изменён. Все прежние сеансы завершены.' },
+  }
+  const recipients = event === 'EMAIL_CHANGED' && details ? [...new Set([details.oldEmail, details.newEmail])] : [user.email]
+  for (const recipientEmail of recipients) await enqueueEmail(tx, { userId, sourceKind: 'MANDATORY', sourceKey: `security:${event}:${randomUUID()}`, recipientEmail, content: { ...messages[event], eyebrow: 'Безопасность', ...(details ? { fields: [['Прежняя почта', details.oldEmail], ['Новая почта', details.newEmail]] } : {}), action: { label: 'Проверить способы входа', path: '/app/settings?section=security' }, footer: 'Если это сделали не вы, проверьте способы входа и завершите чужие сеансы в настройках безопасности.' } })
 }
 
 export async function processEmailDeliveries(options: { now?: Date; send?: typeof sendPreparedMail; limit?: number; shouldContinue?: () => boolean } = {}) {
@@ -47,7 +62,8 @@ export async function processEmailDeliveries(options: { now?: Date; send?: typeo
         // An opt-out in another tab also cancels already claimed work before SMTP starts.
         const current = await prisma.emailDelivery.findUnique({ where: { id: job.id }, select: { status: true } })
         if (current?.status !== 'PENDING') continue
-        await send(user.email, renderEmail(content), job.id)
+        const recipient = job.sourceKind === 'MANDATORY' && !job.category && job.recipientEmail ? job.recipientEmail : user.email
+        await send(recipient, renderEmail(content), job.id)
         await finish(job, 'SENT', now)
       } catch (error) {
         // Do not store mail content, addresses, credentials or provider responses in the queue log.

@@ -1,0 +1,8 @@
+.employee-picker-profile { min-width:0; }
+.employee-picker { position:relative; display:grid; min-width:0; gap:8px; margin-bottom:18px; }
+.employee-picker > span { color:#555; font-size:11px; font-weight:700; }
+.employee-picker strong { overflow:hidden; font-size:12px; text-overflow:ellipsis; white-space:nowrap; }
+.employee-picker small { overflow:hidden; color:#888; font-size:11px; text-overflow:ellipsis; white-space:nowrap; }
+.employee-picker__avatar { display:grid; width:34px; height:34px; flex:0 0 34px; place-items:center; border-radius:50%; background:#f0f1f3; color:#555; font-size:11px; font-weight:750; }
+.employee-picker .staffly-select__person { min-width:0; flex:1; }
+.employee-picker .staffly-select__person > span:last-child { min-width:0; }

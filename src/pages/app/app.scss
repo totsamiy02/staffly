@@ -127,7 +127,6 @@
 .workspace-shell--collapsed { grid-template-columns: 88px minmax(0, 1fr); }
 .workspace-sidebar { position: sticky; top: 92px; display: flex; min-width: 0; height: calc(100dvh - 92px); align-self: start; overflow-y: auto; overscroll-behavior: contain; flex-direction: column; padding: 24px 14px; border-right: 1px solid #dedede; background: #fff; }
 .workspace-sidebar__organization { display: flex; align-items: center; gap: 12px; padding: 0 8px 28px; }
-.workspace-sidebar__organization > span { display: grid; width: 42px; height: 42px; flex: 0 0 42px; place-items: center; border-radius: 50%; background: #111; color: #fff; font-weight: 700; }
 .workspace-sidebar__organization div { display: grid; min-width: 0; }
 .workspace-sidebar__organization strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .workspace-sidebar__organization small { color: #888; font-size: 10px; }
@@ -274,18 +273,17 @@
 .account-settings-tabs button { padding: 9px 14px; border-radius: 9px; color: #777; cursor: pointer; font-size: 12px; font-weight: 700; }
 .account-settings-tabs button.active { background: #111; color: #fff; }
 .account-profile-card__avatar { display: grid; width: 82px; height: 82px; place-items: center; border-radius: 50%; background: #111; color: #fff; font-size: 26px; font-weight: 700; }
-.image-upload { display: grid; justify-items: start; }
-.image-upload__preview { position: relative; }
-.image-upload__actions { display: flex; width: 100%; align-items: center; gap: 9px; margin-top: 18px; }
-.image-upload__actions input { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; pointer-events: none; }
-.image-upload__actions .app-secondary { margin-top: 0; }
-.image-upload__remove { padding: 8px 4px; color: #884747; cursor: pointer; font-size: 11px; font-weight: 700; }
-.image-upload__remove:hover { color: #5d2020; }
-.image-upload > small { display: block; max-width: 230px; margin-top: 9px; color: #999; font-size: 10px; line-height: 1.5; }
-.organization-logo-editor .image-upload { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; column-gap: 20px; }
-.organization-logo-editor .image-upload__actions, .organization-logo-editor .image-upload > small { grid-column: 2; }
-.organization-logo-editor .image-upload__actions { margin-top: 0; }
-.organization-logo-editor .image-upload > small { margin-top: 5px; }
+.image-upload { display:grid; justify-items:start; gap:16px; min-width:0; }
+.image-upload__preview { position:relative; }
+.image-upload__controls { min-width:0; max-width:100%; }
+.image-upload__actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; }
+.image-upload__actions input { position:absolute; width:1px; height:1px; overflow:hidden; opacity:0; pointer-events:none; }
+.image-upload__actions .app-secondary { margin-top:0; }
+.image-upload__remove { min-height:34px; padding:8px 4px; color:#884747; cursor:pointer; font-size:11px; font-weight:700; }
+.image-upload__remove:hover { color:#5d2020; }
+.image-upload__controls .image-upload__hint { margin:8px 0 0; color:#888; font-size:11px; line-height:1.6; }
+.organization-logo-editor .image-upload { grid-template-columns:auto minmax(0,1fr); align-items:center; column-gap:20px; }
+.organization-logo-editor .image-upload__controls { grid-column:2; }
 .profile-editor { display: grid; grid-template-columns: 230px minmax(0, 1fr); overflow: hidden; border: 1px solid #dedede; border-radius: 18px; background: #fff; }
 .profile-editor > aside { padding: 30px; border-right: 1px solid #ececec; background: #fafafa; }
 .profile-editor > aside h2 { margin-top: 17px; overflow: hidden; font-size: 19px; text-overflow: ellipsis; white-space: nowrap; }
@@ -423,7 +421,6 @@
 .organization-card > strong + span { font-size: 13px; }
 .organization-card > small { padding: 6px 11px; background: #e9e9e9; color: #333; font-size: 11px; }
 
-.workspace-sidebar__organization > .workspace-sidebar__organization-avatar { width: 54px; height: 54px; flex-basis: 54px; font-size: 18px; }
 .workspace-sidebar__footer { display: grid; gap: 7px; margin-top: auto; padding-top: 18px; }
 .workspace-sidebar__back { display: flex; min-height: 44px; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid #e0e0e0; border-radius: 9px; color: #646464; font-size: 13px; }
 .workspace-sidebar__back:hover { border-color: #bbb; color: #111; }
@@ -453,7 +450,8 @@
 .profile-editor > aside { display: flex; align-items: center; flex-direction: column; padding: 40px 34px; text-align: center; }
 .account-profile-card__avatar { width: 150px; height: 150px; font-size: 42px; }
 .profile-editor > aside .image-upload { width: 100%; justify-items: center; }
-.profile-editor > aside .image-upload__actions { justify-content: center; }
+.profile-editor > aside .image-upload__controls { display:grid; justify-items:center; }
+.profile-editor > aside .image-upload__actions { justify-content:center; }
 .profile-editor__identity { width: 100%; margin-top: 24px; padding-top: 22px; border-top: 1px solid #e5e5e5; }
 .profile-editor__identity > span { color: #8a8a8a; font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
 .profile-editor > aside .profile-editor__identity h2 { margin-top: 8px; font-size: 22px; }
@@ -496,7 +494,8 @@
   .profile-editor > aside, .profile-editor > form { padding: 24px 20px; }
   .account-profile-card__avatar { width: 126px; height: 126px; }
   .organization-logo-editor .image-upload { grid-template-columns: 1fr; justify-items: center; text-align: center; }
-  .organization-logo-editor .image-upload__actions, .organization-logo-editor .image-upload > small { grid-column: 1; justify-content: center; }
+  .organization-logo-editor .image-upload__controls { grid-column:1; }
+  .organization-logo-editor .image-upload__actions { justify-content:center; }
   .organization-logo-editor__preview { width: 126px; height: 126px; flex-basis: 126px; }
 }
 

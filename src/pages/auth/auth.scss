@@ -353,3 +353,16 @@
   .auth__closing { font-size: 10px; }
   .auth__check { font-size: 12px; }
 }
+
+.auth__social { margin-top: 22px; }
+.auth__social .yandex-button { width: 100%; }
+.auth__divider { display: flex; align-items: center; gap: 14px; margin-block: 20px; color: #aaa; font-size: 12px; text-align: center; }
+.auth__divider::before, .auth__divider::after { flex: 1; height: 1px; background: #494949; content: ''; }
+.auth__provider-label { display: flex; justify-content: center; align-items: center; gap: 10px; margin-top: 26px; color: #d3d3d3; font-size: 14px; }
+.auth__yandex-panel { overflow-wrap: anywhere; }
+.auth__yandex-panel h1 { font-size: 25px; line-height: 1.25; }
+.auth__yandex-identity { display: grid; gap: 6px; padding: 16px; margin-top: 20px; border: 1px solid #4b4b4b; border-radius: 14px; background: #252525; }
+.auth__yandex-identity span { color: #c7c7c7; font-size: 14px; }
+.auth__yandex-panel .auth__consents { margin-top: 22px; }
+.auth__yandex-panel .auth__error { color: #ff9d9d; }
+@media (max-width: 600px) { .auth__yandex-panel h1 { font-size: 23px; } }

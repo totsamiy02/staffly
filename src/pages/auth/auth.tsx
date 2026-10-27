@@ -1,7 +1,12 @@
 import { useState, type FormEvent } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
-import { authPost, useAuth } from '../../app/auth/auth-context.tsx'
+import { authGet, authPost, useAuth } from '../../app/auth/auth-context.tsx'
 import { passwordRequirements, passwordValidationError } from '../../app/auth/password-policy.ts'
+import { safeReturnTo } from '../../app/auth/return-to.ts'
+import { yandexMessage } from '../../app/auth/yandex.ts'
+import YandexButton from '../../component/ui/yandex-button.tsx'
+import AuthConsents from './auth-consents.tsx'
 import './auth.scss'
 
 type Mode = 'login' | 'register'
@@ -39,14 +44,16 @@ function AuthPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const mode: Mode = searchParams.get('mode') === 'register' ? 'register' : 'login'
   const requestedReturnTo = searchParams.get('returnTo')
-  const returnTo = requestedReturnTo?.startsWith('/app') ? requestedReturnTo : '/app'
+  const returnTo = safeReturnTo(requestedReturnTo)
+  const yandex = useQuery({ queryKey: ['yandex-status'], queryFn: () => authGet<{ enabled: boolean }>('yandex/status'), staleTime: 60_000, retry: false })
+  const [yandexBusy, setYandexBusy] = useState(false)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
   const [consentData, setConsentData] = useState(false)
   const [consentTerms, setConsentTerms] = useState(false)
   const [submitting, setSubmitting] = useState(false)
-  const [serverError, setServerError] = useState('')
+  const [serverError, setServerError] = useState(() => yandexMessage(searchParams.get('yandex')))
   const [notice, setNotice] = useState('')
   const [visible, setVisible] = useState<Record<'password' | 'confirm', boolean>>({ password: false, confirm: false })
   const [touched, setTouched] = useState<Partial<Record<Field, boolean>>>({})
@@ -86,6 +93,14 @@ function AuthPage() {
     } finally {
       setSubmitting(false)
     }
+  }
+
+  async function startYandex() {
+    setYandexBusy(true); setServerError(''); setNotice('')
+    try {
+      const result = await authPost<{ authorizationUrl: string }>('yandex/start', { returnTo })
+      window.location.assign(result.authorizationUrl)
+    } catch (error) { setServerError(error instanceof Error ? error.message : 'Не удалось начать вход через Яндекс.'); setYandexBusy(false) }
   }
 
   async function resendVerification() {
@@ -149,6 +164,8 @@ function AuthPage() {
           <h1>{mode === 'login' ? 'С возвращением!' : 'Создайте аккаунт'}</h1>
           <p className="auth__intro">{mode === 'login' ? 'Войдите в свой аккаунт, чтобы продолжить' : 'Начните использовать Staffly уже сегодня'}</p>
 
+          {yandex.data?.enabled && <div className="auth__social"><YandexButton disabled={submitting || loading} busy={yandexBusy} onClick={() => { void startYandex() }} /><div className="auth__divider"><span>или по электронной почте</span></div></div>}
+
           <form noValidate autoComplete="off" onSubmit={submit}>
             <div className="auth__fields">
               {input('email', 'Электронная почта', email, setEmail, emailError)}
@@ -162,24 +179,13 @@ function AuthPage() {
                 <button type="button" className="auth__forgot" onClick={() => navigate('/forgot-password')}>Забыли пароль?</button>
               </div>
             ) : (
-              <div className="auth__consents">
-                <label className="auth__check">
-                  <input type="checkbox" checked={consentData} onChange={(event) => setConsentData(event.target.checked)} />
-                  <span>Я согласен(на) с <a href="/personal-data-consent" target="_blank" rel="noopener noreferrer">обработкой персональных данных</a></span>
-                </label>
-                {attempted && !consentData && <p className="auth__error">Необходимо согласие на обработку данных.</p>}
-                <label className="auth__check">
-                  <input type="checkbox" checked={consentTerms} onChange={(event) => setConsentTerms(event.target.checked)} />
-                  <span>Я ознакомлен(на) с <a href="/terms" target="_blank" rel="noopener noreferrer">Пользовательским соглашением</a></span>
-                </label>
-                {attempted && !consentTerms && <p className="auth__error">Подтвердите ознакомление с соглашением.</p>}
-              </div>
+              <AuthConsents consentData={consentData} consentTerms={consentTerms} onData={setConsentData} onTerms={setConsentTerms} attempted={attempted} />
             )}
 
             {serverError && <p className="auth__error" role="alert">{serverError}</p>}
             {serverError.includes('Подтвердите email') && <><button className="auth__text-button" type="button" onClick={() => { void resendVerification() }} disabled={submitting}>Отправить код повторно</button><br /><Link className="auth__text-button" to="/verify-email" state={{ email: email.trim().toLowerCase() }}>Ввести код</Link></>}
             {notice && <p className="auth__notice" role="status">{notice}</p>}
-            <button className="auth__submit" type="submit" disabled={submitting}>{submitting ? 'Подождите…' : mode === 'login' ? 'Войти' : 'Зарегистрироваться'}</button>
+            <button className="auth__submit" type="submit" disabled={submitting || yandexBusy}>{submitting ? 'Подождите…' : mode === 'login' ? 'Войти' : 'Зарегистрироваться'}</button>
           </form>
         </div>
 

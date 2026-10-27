@@ -37,6 +37,8 @@ import '../schedule.scss'
 import '../schedule-redesign.scss'
 
 const weekDays = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
+const shiftPlural = new Intl.PluralRules('ru')
+const shiftWords = { one: 'смена', few: 'смены', many: 'смен', other: 'смен', zero: 'смен', two: 'смены' }
 
 
 export default function SchedulePage({ organization, historyMode = false }: { organization: OrganizationSummary; historyMode?: boolean }) {
@@ -215,7 +217,12 @@ export default function SchedulePage({ organization, historyMode = false }: { or
             return <ActionSurface type="button" className={`schedule-day${inMonth ? '' : ' schedule-day--outside'}${today ? ' schedule-day--today' : ''}${ownCount ? ' schedule-day--mine' : ''}${day === previewDate ? ' schedule-day--selected' : ''}`} key={day} aria-label={`${displayDate(day)}${today ? ', сегодня' : ''}, смен: ${shifts.length}, ваших: ${ownCount}, отсутствий: ${absences.length}${coverageEnabled&&showCoverage&&coverage.data?.days.find(d=>d.date===day)?.shortageIntervals?', не хватает сотрудников':''}`}  aria-pressed={day === previewDate} aria-current={today ? 'date' : undefined} disabled={schedule.isPlaceholderData} onClick={() => setPreviewDate(day)} onKeyDown={event => moveCalendarFocus(event, index)}>
               <span className="schedule-day__number">{Number(day.slice(-2))}</span>{coverageEnabled && showCoverage && <CoverageIndicator day={coverage.data?.days.find(d=>d.date===day)}/>}
               <span className="schedule-day__shifts" style={daySlots}>{previews.map(shift => { const state = shiftState(shift), mine = shift.memberId === ownMemberId; return <span key={shift.id} className={`schedule-shift-chip schedule-shift-chip--${state.key}${mine ? ' schedule-shift-chip--mine' : ''}`} title={`${shift.memberName} · ${state.label}${shift.activeOffer ? ' · есть предложение' : ''}`}><MemberAvatar memberId={shift.memberId} url={shift.memberAvatarUrl} name={shift.memberName} className="schedule-chip-avatar" /><span className="schedule-chip-copy"><span>{shift.memberName}</span><small>{shiftTimeRange(shift.scheduledStartAt, shift.scheduledEndAt, organization.timezone)}</small></span>{shift.activeOffer && <span className="offer-chip-indicator" title="Смена участвует в предложении" aria-label="Смена участвует в предложении">⇄</span>}</span> })}{absences.length > 0 && <small className="schedule-day__absence">{absences.some(item => item.memberId === ownMemberId) ? 'Вы отсутствуете' : `Отсутствуют: ${absences.length}`}</small>}{shifts.length > previews.length && <small className="schedule-day__more">+{shifts.length - previews.length}</small>}</span>
-              <span className="schedule-day__mobile"><span className="schedule-day__faces">{previews.slice(0,4).map(shift=><MemberAvatar memberId={shift.memberId} key={shift.id} url={shift.memberAvatarUrl} name={shift.memberName} className="schedule-chip-avatar"/>)}</span>{ownCount > 0 ? <strong>Вы{ownCount > 1 ? `: ${ownCount}` : ''}</strong> : shifts.length > 0 ? <span>{shifts.length} смен.</span> : absences.length > 0 ? <span>Отсут.</span> : null}{absences.some(item => item.memberId === ownMemberId) && shifts.length > 0 && <small title="Вы отсутствуете">Отс.</small>}{ownCount > 0 && shifts.length > ownCount && <small title={`Всего смен: ${shifts.length}`}>+{shifts.length - ownCount}</small>}</span>
+              <span className="schedule-day__mobile">
+                {shifts[0] && <span className="schedule-day__faces"><MemberAvatar memberId={shifts[0].memberId} url={shifts[0].memberAvatarUrl} name={shifts[0].memberName} className="schedule-chip-avatar" /></span>}
+                {shifts.length > 0 && <span className="schedule-day__count"><strong>{shifts.length}</strong><span>{shiftWords[shiftPlural.select(shifts.length)]}</span></span>}
+                {ownCount > 0 && <strong className="schedule-day__own" title={`Ваших смен: ${ownCount}`}>Вы{ownCount > 1 ? `: ${ownCount}` : ''}</strong>}
+                {absences.length > 0 && <small className="schedule-day__away" title={`Отсутствуют: ${absences.length}${absences.some(item => item.memberId === ownMemberId) ? ', в том числе вы' : ''}`}>{absences.some(item => item.memberId === ownMemberId) ? 'Нет вас' : 'Отс.'}</small>}
+              </span>
             </ActionSurface>
           })}
         </div><span className="schedule-calendar-loading">Обновляем месяц…</span>

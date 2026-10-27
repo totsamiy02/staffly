@@ -3,6 +3,7 @@ import type { Permission } from '../../../../app/access/catalog.ts'
 import { permissionHints } from './access-presentation.ts'
 
 const icons: Record<string, ReactNode> = {
+  mail: <><rect x="3" y="5" width="18" height="14" rx="3" /><path d="m4 7 8 6 8-6" /></>,
   briefcase: <><rect x="3" y="7" width="18" height="14" rx="2" /><path d="M8 7V3h8v4M3 12h18M10 12v3h4v-3" /></>,
   shield: <><path d="m12 3 8 3v5c0 5-4 8-8 10-4-2-8-5-8-10V6l8-3Z" /><path d="m9 12 2 2 4-4" /></>,
   crown: <><path d="m3 6 4 4 5-6 5 6 4-4-2 12H5L3 6Z" /><path d="M6 21h12" /></>,

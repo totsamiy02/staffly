@@ -22,6 +22,7 @@ import { MAX_DOCUMENT_BYTES, documentMimeTypes } from './documents/file-validati
 import { appUrl } from './mail/transport.ts'
 import { ApiError } from './api-error.ts'
 import { startStorageCleanup } from './storage/image-service.ts'
+import { startOAuthCleanup } from './auth/yandex-routes.ts'
 
 const app = express()
 app.disable('x-powered-by')
@@ -106,6 +107,7 @@ app.use((error: unknown, request: express.Request, response: express.Response, _
 
 const port = Number(process.env.PORT || 3001)
 const stopStorageCleanup = startStorageCleanup()
+const stopOAuthCleanup = startOAuthCleanup()
 const stopRequestMaintenance = startRequestMaintenance()
 const stopEventNotifications = startEventNotifications()
 const stopEmailNotifications = startEmailNotifications()
@@ -121,7 +123,7 @@ async function shutdown() {
   deadline.unref()
   try {
     const closed = new Promise<void>(resolve => { server.close(() => resolve()); server.closeIdleConnections() })
-    await Promise.all([closed, stopStorageCleanup(), stopEventNotifications(), stopRequestMaintenance(), stopEmailNotifications()])
+    await Promise.all([closed, stopStorageCleanup(), stopOAuthCleanup(), stopEventNotifications(), stopRequestMaintenance(), stopEmailNotifications()])
     await prisma.$disconnect()
     clearTimeout(deadline)
   } catch (error) {

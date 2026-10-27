@@ -11,6 +11,7 @@ import PersonalDataConsent from './pages/legal/personal-data-consent.tsx'
 import Terms from './pages/legal/terms.tsx'
 import Offer from './pages/legal/offer.tsx'
 import AuthPage from './pages/auth/auth.tsx'
+import YandexCompletePage from './pages/auth/yandex-complete.tsx'
 import VerifyEmailPage from './pages/auth/verify-email.tsx'
 import ResetPasswordPage from './pages/auth/reset-password.tsx'
 import ForgotPasswordPage from './pages/auth/forgot-password.tsx'
@@ -35,7 +36,7 @@ function HomePage() {
 
 function App() {
   const pathname = useLocation().pathname
-  const isAuthPage = ['/auth', '/verify-email', '/forgot-password', '/reset-password'].includes(pathname)
+  const isAuthPage = ['/auth', '/auth/yandex', '/verify-email', '/forgot-password', '/reset-password'].includes(pathname)
   const isAppPage = pathname === '/app' || pathname.startsWith('/app/')
   const isGuidePage = pathname === '/guide' || pathname.startsWith('/guide/')
   const hidePublicFrame = isAuthPage || isAppPage || isGuidePage
@@ -51,6 +52,7 @@ function App() {
         <Route path="/guide/:slug" element={<Suspense fallback={<main className="app-loading" aria-label="Загрузка справочника"><span /></main>}><GuidePage /></Suspense>} />
         <Route path="/guide/*" element={<Suspense fallback={<main className="app-loading" aria-label="Загрузка справочника"><span /></main>}><GuidePage /></Suspense>} />
         <Route path="/auth" element={<AuthPage />} />
+        <Route path="/auth/yandex" element={<YandexCompletePage />} />
         <Route path="/verify-email" element={<VerifyEmailPage />} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />

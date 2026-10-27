@@ -1,4 +1,7 @@
+import PasswordField from './password-field.tsx'
 import EmailNotificationSettings from './email-notification-settings.tsx'
+import LoginMethodsSettings from './login-methods-settings.tsx'
+import type { LoginMethods } from '../../../../app/auth/yandex.ts'
 import SegmentedNav from '../../../../component/ui/segmented-nav/segmented-nav.tsx'
 import PersonalDocuments from '../../documents/personal-documents.tsx'
 import { useToastFeedback } from '../../../../component/ui/toast/toast-context.ts'
@@ -12,19 +15,10 @@ import { passwordRequirements, passwordValidationError } from '../../../../app/a
 import { formatRussianPhone, isCompleteRussianPhone } from '../../../../app/profile/phone.ts'
 import AppTopbar from '../../topbar/app-topbar.tsx'
 import ImageUpload from '../../../../component/ui/image-upload/image-upload.tsx'
+import { ProfileDetails, ProfileEditActions } from '../shared/profile-settings.tsx'
 import '../../app.scss'
 
-function EyeIcon({ visible }: { visible: boolean }) {
-  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z" /><circle cx="12" cy="12" r="2.5" />{!visible && <path d="m3 21 18-18" />}</svg>
-}
-
-type PasswordFieldProps = { label: string; value: string; autoComplete: string; onChange: (value: string) => void }
 type ActiveSession = { id: string; device: string; browser: string; kind: 'mobile' | 'desktop'; ipAddress: string | null; createdAt: string; lastUsedAt: string; current: boolean }
-
-function PasswordField({ label, value, autoComplete, onChange }: PasswordFieldProps) {
-  const [visible, setVisible] = useState(false)
-  return <label className="account-password-field"><span>{label}</span><div><input type={visible ? 'text' : 'password'} value={value} onChange={(event) => onChange(event.target.value)} autoComplete={autoComplete} data-lpignore="true" data-1p-ignore="true" required /><button type="button" aria-label={visible ? 'Скрыть пароль' : 'Показать пароль'} onClick={() => setVisible((current) => !current)}><EyeIcon visible={visible} /></button></div></label>
-}
 
 const namePattern = /^[\p{L}][\p{L}\p{M}' -]*$/u
 
@@ -49,6 +43,8 @@ export default function UserSettingsPage() {
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [profileBusy, setProfileBusy] = useState(false)
+  const [profileEditing, setProfileEditing] = useState(false)
+  const [imageBusy, setImageBusy] = useState(false)
   const [passwordBusy, setPasswordBusy] = useState(false)
   const [profileError, setProfileError] = useState('')
   const [passwordError, setPasswordError] = useState('')
@@ -58,7 +54,9 @@ export default function UserSettingsPage() {
   const selectedSection: Section = requestedSection === 'security' || requestedSection === 'documents' || requestedSection === 'notifications' ? requestedSection : 'profile'
   const [section, setSection] = useState<Section>(selectedSection)
   useEffect(() => { setSection(selectedSection) }, [selectedSection])
+  useEffect(() => { setProfileEditing(false); setProfileError('') }, [selectedSection])
   function selectSection(value: Section) { const params = new URLSearchParams(location.search); params.set('section', value); navigate({ pathname: location.pathname, search: params.toString() }, { replace: true, state: location.state }); setSection(value) }
+  const loginMethods = useQuery({ queryKey: ['auth-login-methods', user?.id], queryFn: () => apiRequest<LoginMethods>('/auth/yandex/methods'), enabled: section === 'security', staleTime: 30_000 })
   const sessions = useQuery({ ...liveQueryOptions, queryKey: ['auth-sessions'], queryFn: () => apiRequest<{ sessions: ActiveSession[] }>('/auth/sessions'), enabled: section === 'security' })
   const revokeSession = useMutation({ mutationFn: (session: ActiveSession) => apiRequest(`/auth/sessions/${session.id}`, { method: 'DELETE' }), onSuccess: async (_, session) => { if (session.current) { await logout(); navigate('/', { replace: true }) } else await queryClient.invalidateQueries({ queryKey: ['auth-sessions'] }) } })
   const revokeOthers = useMutation({ mutationFn: () => apiRequest('/auth/sessions/revoke-others', { method: 'POST', body: {} }), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['auth-sessions'] }) })
@@ -72,7 +70,9 @@ export default function UserSettingsPage() {
   }, [message])
 
   async function saveProfile(event: FormEvent) {
-    event.preventDefault(); setProfileError(''); setMessage('')
+    event.preventDefault()
+    if (!profileEditing || profileBusy || imageBusy) return
+    setProfileError(''); setMessage('')
     const trimmed = { firstName: firstName.trim(), lastName: lastName.trim(), middleName: middleName.trim(), bio: bio.trim() }
     const invalidName = nameError(trimmed.firstName, 'Имя') || nameError(trimmed.lastName, 'Фамилия') || nameError(trimmed.middleName, 'Отчество')
     if (invalidName) { setProfileError(invalidName); return }
@@ -84,8 +84,15 @@ export default function UserSettingsPage() {
       updateUser(result.user)
       setFirstName(result.user.firstName ?? ''); setLastName(result.user.lastName ?? ''); setMiddleName(result.user.middleName ?? ''); setPhone(formatRussianPhone(result.user.phone ?? '')); setBio(result.user.bio ?? '')
       setMessage('Профиль сохранён.')
+      setProfileEditing(false)
     } catch (failure) { setProfileError(failure instanceof Error ? failure.message : 'Не удалось сохранить профиль.') }
     finally { setProfileBusy(false) }
+  }
+
+  function editProfile(editing: boolean) {
+    setFirstName(user?.firstName ?? ''); setLastName(user?.lastName ?? ''); setMiddleName(user?.middleName ?? '')
+    setPhone(formatRussianPhone(user?.phone ?? '')); setBio(user?.bio ?? '')
+    setProfileError(''); setMessage(''); setProfileEditing(editing)
   }
 
   async function changePassword(event: FormEvent) {
@@ -115,24 +122,38 @@ export default function UserSettingsPage() {
     <div className="account-settings-content">
     {section === 'notifications' && <EmailNotificationSettings />}
     {section === 'documents' && <PersonalDocuments organizationId={organizationId} />}
-    {section === 'profile' && <section className="profile-editor">
-      <aside><ImageUpload endpoint="/profile/avatar" imageUrl={user?.avatarUrl ?? null} name={user?.displayName ?? initial} avatarClassName="account-profile-card__avatar" onChange={(avatarUrl) => { if (user) updateUser({ ...user, avatarUrl }); void queryClient.invalidateQueries({ queryKey: ['organization-members'] }) }} onMessage={setMessage} onError={setProfileError} /><div className="profile-editor__identity"><span>Ваша учетная запись</span><h2>{user?.displayName}</h2><p>{user?.email}</p></div></aside>
+    {section === 'profile' && <section className={`profile-editor${profileEditing ? '' : ' profile-editor--view'}`}>
+      <aside><ImageUpload endpoint="/profile/avatar" imageUrl={user?.avatarUrl ?? null} name={user?.displayName ?? initial} avatarClassName="account-profile-card__avatar" disabled={!profileEditing || profileBusy} onBusyChange={setImageBusy} onChange={(avatarUrl) => { if (user) updateUser({ ...user, avatarUrl }); void queryClient.invalidateQueries({ queryKey: ['organization-members'] }) }} onMessage={setMessage} onError={setProfileError} /><div className="profile-editor__identity"><span>Ваша учетная запись</span><h2>{user?.displayName}</h2><p>{user?.email}</p></div></aside>
       <form onSubmit={saveProfile} noValidate>
-        <div className="account-settings-card__heading"><h2>Личные данные</h2><p>Имя и фамилия будут использоваться в шапке и списке сотрудников.</p></div>
+        <div className="profile-settings-heading"><div><h2>Личные данные</h2><p>Имя и фамилия будут использоваться в шапке и списке сотрудников.</p></div>{!profileEditing && <ProfileEditActions editing={false} onEdit={() => editProfile(true)} onCancel={() => editProfile(false)} />}</div>
+        {profileEditing ? <fieldset className="profile-edit-fields" disabled={profileBusy || imageBusy}>
         <div className="profile-fields-grid">
-          <label><span>Фамилия</span><input value={lastName} onChange={(event) => setLastName(event.target.value)} maxLength={80} autoComplete="family-name" placeholder="Иванов" /></label>
+          <label><span>Фамилия</span><input autoFocus value={lastName} onChange={(event) => setLastName(event.target.value)} maxLength={80} autoComplete="family-name" placeholder="Иванов" /></label>
           <label><span>Имя</span><input value={firstName} onChange={(event) => setFirstName(event.target.value)} maxLength={80} autoComplete="given-name" placeholder="Ярослав" /></label>
           <label><span>Отчество</span><input value={middleName} onChange={(event) => setMiddleName(event.target.value)} maxLength={80} autoComplete="additional-name" placeholder="Сергеевич" /></label>
           <label><span>Телефон</span><input type="tel" inputMode="tel" value={phone} onChange={(event) => setPhone(formatRussianPhone(event.target.value))} maxLength={18} autoComplete="tel" placeholder="+7 (999) 123-45-67" /></label>
-          <label className="profile-field--wide"><span>Электронная почта</span><input value={user?.email ?? ''} readOnly aria-readonly="true" /></label>
+          <label className="profile-field--wide"><span>Электронная почта</span><input value={user?.email ?? ''} readOnly aria-readonly="true" /><Link to="/app/settings?section=security">Изменить в настройках безопасности</Link></label>
           <label className="profile-field--wide"><span>О себе</span><textarea value={bio} onChange={(event) => setBio(event.target.value)} maxLength={500} rows={4} placeholder="Короткая информация, которую увидят коллеги" /><small>{bio.length}/500</small></label>
         </div>
+        </fieldset> : <div className="profile-details-groups">
+          <ProfileDetails title="Основная информация" icon="people" columns={3} items={[
+            { label: 'Фамилия', value: user?.lastName }, { label: 'Имя', value: user?.firstName }, { label: 'Отчество', value: user?.middleName },
+          ]} />
+          <ProfileDetails title="Контакты" icon="mail" items={[
+            { label: 'Электронная почта', value: <>{user?.email}<Link className="profile-details__action" to="/app/settings?section=security">Изменить почту<span aria-hidden="true">→</span></Link></> },
+            { label: 'Телефон', value: formatRussianPhone(user?.phone ?? '') },
+          ]} />
+          <ProfileDetails title="О себе" icon="info" columns={1} prose items={[
+            { label: 'Информация для коллег', value: user?.bio },
+          ]} />
+        </div>}
+
         {profileError && <p className="form-inline-error" role="alert">{profileError}</p>}
-        <button className="app-primary" disabled={profileBusy}>{profileBusy ? 'Сохраняем…' : 'Сохранить профиль'}</button>
+        {profileEditing && <ProfileEditActions editing busy={profileBusy || imageBusy} onEdit={() => editProfile(true)} onCancel={() => editProfile(false)} />}
       </form>
     </section>}
 
-    {section === 'security' && <><section className="password-editor"><div><p className="app-eyebrow">Безопасность</p><h2>Изменить пароль</h2><p>Введите текущий пароль и придумайте новый. После сохранения остальные сеансы будут завершены, а на почту придёт уведомление.</p></div><form onSubmit={changePassword} autoComplete="off"><PasswordField label="Текущий пароль" value={currentPassword} onChange={setCurrentPassword} autoComplete="current-password" /><PasswordField label="Новый пароль" value={newPassword} onChange={setNewPassword} autoComplete="new-password" /><PasswordField label="Повторите новый пароль" value={confirmPassword} onChange={setConfirmPassword} autoComplete="new-password" />{newPassword && <div className="password-requirements" aria-label="Требования к паролю">{passwordRequirements.map((requirement) => <span className={requirement.test(newPassword) ? 'password-requirement password-requirement--valid' : 'password-requirement'} key={requirement.label}>{requirement.label}</span>)}</div>}{passwordError && <p className="form-inline-error" role="alert">{passwordError}</p>}<button className="app-primary" disabled={passwordBusy || !currentPassword || !newPassword || !confirmPassword}>{passwordBusy ? 'Обновляем…' : 'Изменить пароль'}</button></form></section>
+    {section === 'security' && <><LoginMethodsSettings methods={loginMethods.data} pending={loginMethods.isPending} failed={loginMethods.isError} onReload={() => { void queryClient.invalidateQueries({ queryKey: ['auth-login-methods'] }); void queryClient.invalidateQueries({ queryKey: ['auth-sessions'] }) }} />{loginMethods.data?.hasPassword && <section className="password-editor"><div><p className="app-eyebrow">Безопасность</p><h2>Изменить пароль</h2><p>Введите текущий пароль и придумайте новый. После сохранения остальные сеансы будут завершены, а на почту придёт уведомление.</p></div><form onSubmit={changePassword} autoComplete="off"><PasswordField label="Текущий пароль" value={currentPassword} onChange={setCurrentPassword} autoComplete="current-password" /><PasswordField label="Новый пароль" value={newPassword} onChange={setNewPassword} autoComplete="new-password" /><PasswordField label="Повторите новый пароль" value={confirmPassword} onChange={setConfirmPassword} autoComplete="new-password" />{newPassword && <div className="password-requirements" aria-label="Требования к паролю">{passwordRequirements.map((requirement) => <span className={requirement.test(newPassword) ? 'password-requirement password-requirement--valid' : 'password-requirement'} key={requirement.label}>{requirement.label}</span>)}</div>}{passwordError && <p className="form-inline-error" role="alert">{passwordError}</p>}<button className="app-primary" disabled={passwordBusy || !currentPassword || !newPassword || !confirmPassword}>{passwordBusy ? 'Обновляем…' : 'Изменить пароль'}</button></form></section>}
       <section className="sessions-editor"><header><div><p className="app-eyebrow">Устройства</p><h2>Активные сеансы</h2><p>Устройства, на которых выполнен вход в ваш аккаунт.</p></div><div><button className="app-secondary" disabled={revokeOthers.isPending} onClick={() => revokeOthers.mutate()}>Выйти везде, кроме этого устройства</button><button className="sessions-editor__danger" disabled={revokeAll.isPending} onClick={() => revokeAll.mutate()}>Завершить все сеансы</button></div></header>{sessions.isLoading ? <div className="app-state"><span className="app-spinner" />Загружаем устройства…</div> : sessions.isError ? <div className="app-state">Не удалось загрузить активные сеансы.</div> : <div className="sessions-list">{sessions.data?.sessions.map((session) => <article key={session.id}><span className={`session-device-icon session-device-icon--${session.kind}`}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><rect x={session.kind === 'mobile' ? '7' : '3'} y={session.kind === 'mobile' ? '2' : '4'} width={session.kind === 'mobile' ? '10' : '18'} height={session.kind === 'mobile' ? '20' : '13'} rx="2" />{session.kind === 'desktop' && <path d="M8 21h8M12 17v4" />}</svg></span><div><strong>{session.device} · {session.browser}</strong><span className={session.current ? 'session-current' : ''}><i />{session.current ? 'Это устройство · активно сейчас' : `Последняя активность ${new Date(session.lastUsedAt).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' })}`}</span><small>{session.ipAddress ? `IP: ${session.ipAddress}` : 'IP не определён'} · вход {new Date(session.createdAt).toLocaleDateString('ru-RU')}</small></div><button disabled={revokeSession.isPending} onClick={() => revokeSession.mutate(session)}>{session.current ? 'Выйти' : 'Отключить'}</button></article>)}</div>}</section></>}
     </div>
   </main></div>

@@ -13,6 +13,7 @@ type AuthContextValue = {
   loading: boolean
   login: (email: string, password: string) => Promise<void>
   verifyEmail: (email: string, code: string) => Promise<void>
+  completeYandex: (body: { currentPassword?: string; consentData?: boolean; consentTerms?: boolean }) => Promise<{ returnTo: string }>
   logout: () => Promise<void>
   updateUser: (user: AuthUser) => void
   apiRequest: <T>(path: string, options?: ApiOptions) => Promise<T>
@@ -45,6 +46,10 @@ async function readJson<T>(response: Response): Promise<T> {
 
 export async function authPost<T>(path: string, body: unknown): Promise<T> {
   return readJson<T>(await postJson(path, body))
+}
+
+export async function authGet<T>(path: string): Promise<T> {
+  return readJson<T>(await fetch(`/api/auth/${path}`, { credentials: 'same-origin', cache: 'no-store' }))
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -104,6 +109,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const verifyEmail = useCallback(async (email: string, code: string) => {
     accept(await authPost<AuthResult>('verify-email', { email, code }))
+  }, [accept])
+
+  const completeYandex = useCallback(async (body: { currentPassword?: string; consentData?: boolean; consentTerms?: boolean }) => {
+    const result = await authPost<AuthResult & { returnTo: string }>('yandex/complete', body)
+    accept(result)
+    return { returnTo: result.returnTo }
   }, [accept])
 
   async function logout() {
@@ -166,7 +177,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const updateUser = useCallback((nextUser: AuthUser) => setUser(nextUser), [])
 
-  return <AuthContext.Provider value={{ user, loading, login, verifyEmail, logout, updateUser, apiRequest, uploadImage, uploadFile, downloadFile, previewFile }}>{children}</AuthContext.Provider>
+  return <AuthContext.Provider value={{ user, loading, login, verifyEmail, completeYandex, logout, updateUser, apiRequest, uploadImage, uploadFile, downloadFile, previewFile }}>{children}</AuthContext.Provider>
 }
 
 export function useAuth() {

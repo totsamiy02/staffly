@@ -23,6 +23,8 @@ import EventsPage from '../events/events-page.tsx'
 import ModuleErrorBoundary from './module-error-boundary.tsx'
 import GuideIcon from '../../guide/guide-icon.tsx'
 import Avatar from '../../../component/ui/avatar/avatar.tsx'
+import OrganizationInfoDialog, { OrganizationInfoIcon } from '../organizations/organization-info-dialog.tsx'
+import AnimatedOverlay from '../../../component/ui/modal/animated-overlay.tsx'
 import { useDocuments } from '../../../app/documents/queries.ts'
 import '../app.scss'
 
@@ -76,6 +78,8 @@ export default function OrganizationLayout() {
     if (selectedId) window.sessionStorage.setItem(`staffly:location:${user?.id}:${organizationId}`, selectedId)
   }, [selectedId, user?.id, organizationId])
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem('staffly:sidebar-collapsed') === 'true')
+  const [infoOrganizationId, setInfoOrganizationId] = useState<string | null>(null)
+  useEffect(() => { setInfoOrganizationId(null) }, [organizationId])
   if (query.isLoading) return <main className="app-loading"><span /></main>
   if (query.isError || !query.data) return <WorkspaceLoadError organizationId={organizationId} retry={() => void query.refetch()} notFound={Boolean(query.error && 'status' in query.error && query.error.status === 404)} />
   const organization = query.data.organization
@@ -94,7 +98,7 @@ export default function OrganizationLayout() {
   }
   return <TimeCorrectionProvider key={organization.id + organization.locationId} organization={organization}><MemberProfileProvider organization={organization}><div className="app-page"><AppTopbar key={organization.locationId} organization={organization} /><div className={`workspace-shell${sidebarCollapsed ? ' workspace-shell--collapsed' : ''}`}>
     <aside className="workspace-sidebar" aria-label="Навигация организации">
-      <div className="workspace-sidebar__organization"><Avatar url={organization.logoUrl} name={organization.name} className="workspace-sidebar__organization-avatar" eager /><div><strong>{organization.name}</strong><small><RoleBadge role={organization.organizationRole ?? organization.role} name={organization.roleName} /> · {currentSection}</small></div></div>
+      <div className="workspace-sidebar__organization"><button className="workspace-organization-avatar-button" type="button" onClick={() => setInfoOrganizationId(organization.id)} aria-label={`Об организации: ${organization.name}`} title="Об организации" aria-haspopup="dialog" aria-expanded={infoOrganizationId === organization.id}><Avatar url={organization.logoUrl} name={organization.name} className="workspace-sidebar__organization-avatar" eager /></button><div><strong>{organization.name}</strong><small><RoleBadge role={organization.organizationRole ?? organization.role} name={organization.roleName} /> · {currentSection}</small><button className="workspace-organization-info-trigger" type="button" aria-haspopup="dialog" aria-expanded={infoOrganizationId === organization.id} onClick={() => setInfoOrganizationId(organization.id)}><OrganizationInfoIcon /><span>Об организации</span></button></div></div>
       <div className="workspace-points" role="radiogroup" aria-label="Точки организации">
         {points.map((point, index) => <button type="button" role="radio" tabIndex={point.id === organization.locationId ? 0 : -1} onKeyDown={event => {
           if (!['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
@@ -129,5 +133,5 @@ export default function OrganizationLayout() {
         <Route path="*" element={<ModuleNotFound organizationPath={organizationPath} />} />
       </Routes>
     </main>
-  </div></div></MemberProfileProvider></TimeCorrectionProvider>
+  </div></div>{infoOrganizationId === organization.id && <AnimatedOverlay variant="modal" onClose={() => setInfoOrganizationId(null)}>{close => <OrganizationInfoDialog key={organization.id} organization={organization} onClose={close} />}</AnimatedOverlay>}</MemberProfileProvider></TimeCorrectionProvider>
 }

@@ -34,7 +34,8 @@ export async function sendPreparedMail(email: string, message: ReturnType<typeof
   await transport.sendMail({ from: { name: 'Staffly', address: smtpUser! }, to: email, ...message, ...(id ? { messageId: `<${id}@${new URL(appUrl).hostname}>` } : {}) })
 }
 export const deliverEmail = (email: string, content: EmailContent) => sendPreparedMail(email, renderEmail(content))
-export function deliverSecurityCode(kind: 'verification' | 'reset', email: string, code: string) {
+export function deliverSecurityCode(kind: 'verification' | 'reset' | 'email-change', email: string, code: string) {
+  if (kind === 'email-change') return deliverEmail(email, { title: 'Подтвердите новую почту', eyebrow: 'Безопасность', intro: 'Введите код в настройках безопасности Staffly, чтобы назначить этот адрес почтой вашего аккаунта.', code, footer: 'Если вы не меняете почту в Staffly, проигнорируйте письмо. Без подтверждения адрес аккаунта не изменится.' })
   return deliverEmail(email, { title: kind === 'verification' ? 'Подтвердите почту' : 'Восстановление пароля', eyebrow: 'Безопасность', intro: kind === 'verification' ? 'Введите код на странице регистрации Staffly, чтобы подтвердить адрес электронной почты.' : 'Введите код на странице восстановления доступа, чтобы задать новый пароль.', code, footer: kind === 'verification' ? 'Если вы не регистрировались в Staffly, проигнорируйте письмо.' : 'Не запрашивали восстановление? Не сообщайте код. Без него пароль не изменится.' })
 }
 export function deliverSensitiveActionCode(kind: 'ownership' | 'deletion' | 'location', email: string, organizationName: string, code: string, targetName?: string) {
