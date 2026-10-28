@@ -5,8 +5,12 @@ import { ApiError } from '../../api-error.ts'
 export type DB = Prisma.TransactionClient
 export type PermissionActor = { id: string; organizationId: string; organizationRole?: string; role: string; locationId?: string; permissions?: string[]; organizationPermissions?: string[]; permissionLocations?: Record<string, string[]>; accessRoleId?: string | null; accessAssignments?: Array<{ locationId: string; roleId: string }>; owner?: boolean; accessSystemCode?: string | null }
 export async function ensureAccessRoles(db: DB, organizationId: string) {
-  if (!await db.accessRole.count({ where: { organizationId } })) await db.accessRole.createMany({ data: (['OWNER','ADMIN','MEMBER'] as const).map(systemCode => ({ organizationId, systemCode, name: systemRoleNames[systemCode], permissions: recommendedPermissions[systemCode] })), skipDuplicates: true })
-  const roles = await db.accessRole.findMany({ where: { organizationId }, orderBy: [{ systemCode: 'asc' }, { createdAt: 'asc' }] })
+  const query = { where: { organizationId }, orderBy: [{ systemCode: 'asc' as const }, { createdAt: 'asc' as const }] }
+  let roles = await db.accessRole.findMany(query)
+  if (!roles.length) {
+    await db.accessRole.createMany({ data: (['OWNER','ADMIN','MEMBER'] as const).map(systemCode => ({ organizationId, systemCode, name: systemRoleNames[systemCode], permissions: recommendedPermissions[systemCode] })), skipDuplicates: true })
+    roles = await db.accessRole.findMany(query)
+  }
   return roles.map(role => ({ ...role, permissions: role.permissions.filter(key => (permissionKeys as readonly string[]).includes(key)) }))
 }
 export function hasPermission(actor: PermissionActor, key: Permission, locationId: string | null | undefined = actor.locationId) {

@@ -5,7 +5,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import sharp from 'sharp'
 import { prisma } from '../db.ts'
 import { ApiError } from '../api-error.ts'
-import { readObject } from '../storage/local-file-storage.ts'
+import { storage } from '../storage/provider.ts'
 import { assertRequestFileAccess } from './service.ts'
 import { deletePendingFile, stageStoredFile } from '../storage/image-service.ts'
 
@@ -79,7 +79,7 @@ export async function downloadRequestAttachment(userId: string, organizationId: 
   const attachment = await prisma.requestAttachment.findFirst({ where: { id: attachmentId, requestId, request: { organizationId } }, include: { storedFile: true } })
   if (!attachment || attachment.storedFile.purpose !== 'REQUEST_ATTACHMENT') throw new ApiError(404, 'ATTACHMENT_NOT_FOUND', 'Вложение не найдено.')
   let contents: Buffer
-  try { contents = await readObject(attachment.storedFile.objectKey) }
+  try { contents = await storage.read(attachment.storedFile.objectKey) }
   catch (error) { if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') throw new ApiError(404, 'ATTACHMENT_NOT_FOUND', 'Вложение не найдено.'); throw error }
   return { attachment, contents }
 }

@@ -97,7 +97,7 @@ test('shared dark text and semantic status colors maintain readable contrast', (
   function luminance(hex: string) {
     return [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255).map(c => c <= .04045 ? c / 12.92 : ((c + .055) / 1.055) ** 2.4).reduce((sum, c, i) => sum + c * [.2126, .7152, .0722][i], 0)
   }
-  for (const [text, background] of [['text-strong', 'canvas'], ['text', 'surface'], ['muted', 'surface'], ['quiet', 'surface'], ['primary-ink', 'primary'], ['primary-ink', 'accent'], ...['accent', 'rose', 'danger', 'warning', 'success', 'teal'].map(name => [name, `${name}-bg`])]) {
+  for (const [text, background] of [['text-strong', 'canvas'], ['text', 'surface'], ['muted', 'surface'], ['quiet', 'surface'], ['online', 'surface'], ['online', 'surface-muted'], ['primary-ink', 'primary'], ['primary-ink', 'accent'], ...['accent', 'rose', 'danger', 'warning', 'success', 'teal'].map(name => [name, `${name}-bg`])]) {
     const a = luminance(colors.get(text)!), b = luminance(colors.get(background)!)
     const ratio = (Math.max(a, b) + .05) / (Math.min(a, b) + .05)
     assert.ok(ratio >= 4.5, `${text}/${background}: ${ratio.toFixed(2)}`)

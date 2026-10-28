@@ -8,7 +8,7 @@ import { archiveLocation, requestLocationClosure, assignLocationMember, deleteTe
 import { locationBody } from './schemas.ts'
 import { listNotificationHistory, readHistoryNotification, updateAllNotifications } from './notification-service.ts'
 import { Router, type Request } from 'express'
-import { rateLimit } from 'express-rate-limit'
+import { accountRateLimit } from '../security/rate-limit.ts'
 import { z } from 'zod'
 import { requireAuth, type AuthenticatedRequest } from '../auth.ts'
 import { deliverOrganizationInvitation, deliverSensitiveActionCode } from '../mail/transport.ts'
@@ -19,8 +19,8 @@ import { confirmOrganizationDeletion, confirmOwnershipTransfer, requestOrganizat
 import { createOrganizationBody, emailInvitationBody, inviteCodeBody, inviteParams, memberListQuery, memberParams, organizationIdParams, ownershipRequestBody, roleBody, sensitiveCodeBody, updateOrganizationBody } from './schemas.ts'
 
 const router = Router()
-const sensitiveLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: 'draft-8', legacyHeaders: false, message: { code: 'TOO_MANY_REQUESTS', message: 'Слишком много запросов. Попробуйте позже.' } })
-const invitationLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 30, standardHeaders: 'draft-8', legacyHeaders: false, message: { code: 'TOO_MANY_REQUESTS', message: 'Слишком много приглашений. Попробуйте позже.' } })
+const sensitiveLimiter = accountRateLimit('organization-sensitive', 10, 900000)
+const invitationLimiter = accountRateLimit('invitations', 30, 3600000)
 
 router.use(requireAuth)
 

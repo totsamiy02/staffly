@@ -1,23 +1,43 @@
 import { ensureAccessRoles, resolveAccess } from './access.ts'
 import type { OrganizationRole, Prisma } from '../../../generated/prisma/client.ts'
-import { scopedLocationId } from '../location-context.ts'
+import { scopedLocationId, locationContext } from '../location-context.ts'
 import { prisma } from '../../db.ts'
 import { ApiError } from '../../api-error.ts'
+import { requestReads } from '../../request-read-context.ts'
+import { measure, recordTiming } from '../../performance.ts'
+import { readMembership } from './membership-read.ts'
+import { permissionKeys } from '../../../app/access/catalog.ts'
 
-export async function getMembership(userId: string, organizationId: string, db: Prisma.TransactionClient = prisma) {
-  const membership = await db.organizationMember.findUnique({
+export function getMembership(userId: string, organizationId: string, db: Prisma.TransactionClient = prisma): ReturnType<typeof loadMembership> {
+  const context = locationContext.getStore()
+  const local = context?.organizationId === organizationId ? context.memberships : undefined
+  const cache = db === prisma ? local ?? requestReads.getStore() : undefined
+  const key = `${organizationId}:${userId}:${local ? 'selected' : scopedLocationId(organizationId) ?? 'default'}`
+  const existing = cache?.get(key)
+  if (existing) return existing as ReturnType<typeof loadMembership>
+  const pending = measure('membership', () => loadMembership(userId, organizationId, db))
+  cache?.set(key, pending)
+  return pending
+}
+async function loadMembership(userId: string, organizationId: string, db: Prisma.TransactionClient) {
+  const compact = db === prisma ? await readMembership(db, userId, organizationId) : undefined
+  const membership = compact === undefined ? await db.organizationMember.findUnique({
     where: { organizationId_userId: { organizationId, userId } },
     include: { organization: true, _count: {select:{locationMemberships:true}}, accessAssignments: true, locationMemberships: { where: { leftAt: null, location: { archivedAt: null } } } },
-  })
+  }) : compact?.membership
   if (!membership || membership.leftAt || membership.organization.deletedAt) throw new ApiError(404, 'ORGANIZATION_NOT_FOUND', 'Организация не найдена.')
-  const roles = await ensureAccessRoles(db, organizationId)
-  const allLocations = await db.organizationLocation.findMany({ where: { organizationId, ...(membership.role === 'OWNER' ? {} : { archivedAt: null }) }, select: { id: true } })
+  const roles = compact?.roles.length ? compact.roles.map(role => ({ ...role, permissions: role.permissions.filter(key => (permissionKeys as readonly string[]).includes(key)) })) : await ensureAccessRoles(db, organizationId)
+  const allLocations = compact?.locations ?? await db.organizationLocation.findMany({ where: { organizationId, ...(membership.role === 'OWNER' ? {} : { archivedAt: null }) }, select: { id: true } })
   const selected = scopedLocationId(organizationId)
-  const location = await db.organizationLocation.findFirst({ where: { organizationId, ...(selected ? { id: selected } : { archivedAt: null }) }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] })
+  const location = compact ? compact.locations.find(item => selected ? item.id === selected : !item.archivedAt) : await db.organizationLocation.findFirst({ where: { organizationId, ...(selected ? { id: selected } : { archivedAt: null }) }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] })
   if (!location || (location.archivedAt && membership.role !== 'OWNER')) throw new ApiError(404, 'LOCATION_NOT_FOUND', 'Точка не найдена.')
-  const assignment = await db.locationMember.findUnique({ where: { locationId_memberId: { locationId: location.id, memberId: membership.id } } })
+  const assignment = location.archivedAt
+    ? compact ? compact.placements.find(item => item.locationId === location.id) : await db.locationMember.findUnique({ where: { locationId_memberId: { locationId: location.id, memberId: membership.id } } })
+    : membership.locationMemberships.find(item => item.locationId === location.id)
   const role: OrganizationRole = membership.role === 'OWNER' ? 'OWNER' : selected ? assignment && !assignment.leftAt ? assignment.role : 'MEMBER' : membership.role
+  const permissionsStarted = performance.now()
   const access = resolveAccess(membership, roles, allLocations.map(l => l.id), selected)
+  recordTiming('permissions', performance.now() - permissionsStarted)
   // Legacy memberships follow the current standard role, including after an invitation
   // or a point transfer. Seeded assignment rows must not freeze an old placement.
   const accessAssignments = membership.accessConfigured ? membership.accessAssignments : membership.locationMemberships.map(item => ({ organizationId, memberId: membership.id, locationId: item.locationId, roleId: roles.find(r => r.systemCode === item.role)!.id }))

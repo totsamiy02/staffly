@@ -11,7 +11,8 @@ input:not([type=checkbox]):not([type=radio]):not([type=file]), textarea {
   &::placeholder { color: var(--field-example) !important; opacity: 1; font-weight: 400; }
   &:disabled { color: var(--theme-muted,#737780) !important; background-color: var(--theme-surface-muted,#f1f2f4) !important; cursor: not-allowed; opacity: 1; }
   &[readonly] { color: var(--theme-text,#454b54) !important; }
-  &:focus-visible { outline: 2px solid var(--theme-focus,#686868) !important; outline-offset: 2px; }
+  // Composite fields draw their focus on the outer shell, including autofill.
+  &:focus-visible:not(:where(.auth__field input, .account-password-field input)) { outline: 2px solid var(--theme-focus,#686868) !important; outline-offset: 2px; }
   &[aria-invalid=true], &:user-invalid { border-color: var(--theme-danger-border,#a34b4b); outline-color: var(--theme-danger,#a34b4b); }
 }
 .auth { --field-value: var(--theme-on-solid,#f5f5f5); --field-example: var(--theme-quiet,#a4a4ab); }
@@ -63,7 +64,12 @@ input[type=time]::-webkit-calendar-picker-indicator { display: none; }
 .staffly-calendar--floating { z-index:2000; min-width:0; overscroll-behavior:contain; box-sizing:border-box; }
 .staffly-control[aria-readonly=true] { background: var(--theme-surface-muted,#f5f5f6); color: var(--theme-text,#454b54); cursor: default; }
 input[aria-invalid=true]:focus-visible, textarea[aria-invalid=true]:focus-visible, input:user-invalid:focus-visible, textarea:user-invalid:focus-visible { outline-color: var(--theme-danger,#a34b4b) !important; }
-.auth__field:has(input:focus-visible), .account-password-field > div:has(input:focus-visible) { outline: 2px solid var(--theme-focus,#686868); outline-offset: 2px; }
+.auth__field, .account-password-field > div {
+  --field-focus: var(--theme-focus,#686868);
+  &:has(input[aria-invalid=true]) { --field-focus: var(--theme-danger,#a34b4b); }
+  // Thicken the existing border without a second, detached outline.
+  &:has(input:focus-visible) { outline: none; border-color: var(--field-focus); box-shadow: 0 0 0 1px var(--field-focus); }
+}
 .auth__field input:focus-visible, .account-password-field input:focus-visible { outline: none !important; }
 
 /* Shared semantic accents for people, positions and locations. */

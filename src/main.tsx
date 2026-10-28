@@ -8,8 +8,9 @@ import { AuthProvider } from './app/auth/auth-context.tsx'
 import RootErrorBoundary from './pages/error/root-error-boundary.tsx'
 import './index.scss'
 import ThemeController from './app/theme/theme-controller.tsx'
+import { retryQuery, queryRetryDelay } from './app/query-retry.ts'
 
-const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 15_000, retry: 1, refetchOnWindowFocus: false } } })
+const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 15_000, retry: retryQuery, retryDelay: queryRetryDelay, refetchOnWindowFocus: false }, mutations: { retry: false } } })
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

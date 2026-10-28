@@ -1,3 +1,4 @@
+import { liveQueryOptions } from '../../../app/live-query.ts'
 import { useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery } from '@tanstack/react-query'
@@ -18,7 +19,7 @@ export default function PasswordSetupReminder() {
   const key = `staffly:password-offered:${user?.id}`
   const [dismissed, setDismissed] = useState(() => wasOffered(key))
   const [busy, setBusy] = useState(false), [error, setError] = useState('')
-  const methods = useQuery({ queryKey: ['auth-login-methods', user?.id], queryFn: () => apiRequest<LoginMethods>('/auth/yandex/methods'), enabled: Boolean(user), staleTime: 30_000, refetchInterval: 60_000 })
+  const methods = useQuery({ ...liveQueryOptions, queryKey: ['auth-login-methods', user?.id], queryFn: () => apiRequest<LoginMethods>('/auth/yandex/methods'), enabled: Boolean(user), staleTime: 30_000 })
   if (!user || !methods.data || methods.data.hasPassword) return null
   const returnTo = safeReturnTo(location.pathname + location.search + location.hash)
   const securityPage = location.pathname === '/app/settings' && new URLSearchParams(location.search).get('section') === 'security'

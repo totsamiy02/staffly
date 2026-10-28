@@ -3,7 +3,7 @@ import { amendVacation, completeRequestTask } from './service.ts'
 import { answerCampaign, createCampaign, listVacationPlanning, closeCampaign, vacationWarnings, campaignBody, vacationResponseBody } from './vacations.ts'
 import { submitRequest, returnRequest } from './service.ts'
 import express, { Router, type Request } from 'express'
-import { rateLimit } from 'express-rate-limit'
+import { accountRateLimit } from '../security/rate-limit.ts'
 import { z } from 'zod'
 import { requireAuth, type AuthenticatedRequest } from '../auth.ts'
 import { ApiError } from '../api-error.ts'
@@ -12,8 +12,8 @@ import { respondToStaffing, cancelRequest, createRequest, createRequestType, del
 import { attachmentParams, createRequestBody, createRequestTypeBody, listRequestsQuery, organizationRequestParams, rejectRequestBody, requestParams, requestTypeParams, resolveRequestBody, updateRequestTypeBody } from './schemas.ts'
 
 const router = Router()
-const mutationLimiter = rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: 'draft-8', legacyHeaders: false, message: { code: 'TOO_MANY_REQUESTS', message: 'Слишком много изменений. Попробуйте через минуту.' } })
-const uploadLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 20, standardHeaders: 'draft-8', legacyHeaders: false, message: { code: 'TOO_MANY_UPLOADS', message: 'Слишком много загрузок. Попробуйте позже.' } })
+const mutationLimiter = accountRateLimit('requests', 60, 60000)
+const uploadLimiter = accountRateLimit('request-uploads', 20, 900000)
 const fileBody = express.raw({ type: ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'], limit: MAX_REQUEST_FILE_BYTES })
 router.use(requireAuth)
 

@@ -1,11 +1,11 @@
 import { Router } from 'express'
-import { rateLimit } from 'express-rate-limit'
+import { accountRateLimit } from '../../security/rate-limit.ts'
 import { z } from 'zod'
 import { requireAuth, type AuthenticatedRequest } from '../../auth.ts'
 import { scheduleRangeQuery } from '../schemas.ts'
 import * as s from './team-planning-schemas.ts'
 import * as service from './team-planning-service.ts'
-const router=Router(),limit=rateLimit({windowMs:60000,limit:120,standardHeaders:'draft-8',legacyHeaders:false})
+const router=Router(),limit=accountRateLimit('team-planning',120)
 router.use(requireAuth)
 const base='/organizations/:organizationId/schedule'
 const actor=(r:AuthenticatedRequest)=>r.auth!.userId

@@ -41,9 +41,9 @@ export async function stageReviewers(db:DB,item:{organizationId:string;locationI
     filtered.push(m)
   }return filtered
 }
-export async function ensureReviewers(db:DB,item:Parameters<typeof stageReviewers>[1]){if(!(await stageReviewers(db,item)).length)throw new ApiError(409,'NO_REVIEWER','Нет доступного согласующего. Владелец должен проверить маршрут и права роли.')}
-export async function notifyStage(db:DB,item:Parameters<typeof stageReviewers>[1]&{id:string;typeNameSnapshot:string}){const people=await stageReviewers(db,item);if(people.length)await db.accountNotification.createMany({data:people.map(p=>({organizationId:item.organizationId,userId:p.userId,requestId:item.id,type:'REQUEST_CREATED',title:'Обращение на рассмотрении',message:item.typeNameSnapshot}))})}
-export async function canReadCustom(db:DB,actor:Awaited<ReturnType<typeof getMembership>>,item:{createdByMemberId:string;authorMemberId:string|null;locationId:string;formSnapshot:unknown;outcome?:unknown}){
+export async function ensureReviewers(db:DB,item:Parameters<typeof stageReviewers>[1]){const people=await stageReviewers(db,item);if(!people.length)throw new ApiError(409,'NO_REVIEWER','Нет доступного согласующего. Владелец должен проверить маршрут и права роли.');return people}
+export async function notifyStage(db:DB,item:Parameters<typeof stageReviewers>[1]&{id:string;typeNameSnapshot:string},recipients?:Awaited<ReturnType<typeof stageReviewers>>){const people=recipients??await stageReviewers(db,item);if(people.length)await db.accountNotification.createMany({data:people.map(p=>({organizationId:item.organizationId,userId:p.userId,requestId:item.id,type:'REQUEST_CREATED',title:'Обращение на рассмотрении',message:item.typeNameSnapshot}))})}
+export async function canReadCustom(db:DB,actor:Awaited<ReturnType<typeof getMembership>>,item:{createdByMemberId:string;authorMemberId:string|null;locationId:string;formSnapshot:unknown;outcome?:unknown},roles?:Array<{id:string;systemCode:string|null}>){
   if(actor.owner||item.createdByMemberId===actor.id||item.authorMemberId===actor.id)return true
   const outcome=item.outcome as {assignees?:string[]}|null
   if(outcome?.assignees?.includes(actor.id))return hasPermission(actor,'requests.own',item.locationId)
@@ -51,6 +51,6 @@ export async function canReadCustom(db:DB,actor:Awaited<ReturnType<typeof getMem
   const d=definitionOf(item.formSnapshot)
   if(d.visibility==='TEAM')return true
   if(!d.stages.length)return hasPermission(actor,'requests.resolve',item.locationId)||d.version===undefined
-  for(const stage of d.stages){if(stage.memberId===actor.id)return true;if(stage.roleId){const role=await db.accessRole.findFirst({where:{id:stage.roleId,organizationId:actor.organizationId}});if(actor.accessRoleId===stage.roleId||actor.accessAssignments.some(a=>a.locationId===item.locationId&&a.roleId===stage.roleId)||!actor.accessConfigured&&role?.systemCode===actor.role)return true}}
+  for(const stage of d.stages){if(stage.memberId===actor.id)return true;if(stage.roleId){const role=roles?roles.find(role=>role.id===stage.roleId):await db.accessRole.findFirst({where:{id:stage.roleId,organizationId:actor.organizationId}});if(actor.accessRoleId===stage.roleId||actor.accessAssignments.some(a=>a.locationId===item.locationId&&a.roleId===stage.roleId)||!actor.accessConfigured&&role?.systemCode===actor.role)return true}}
   return false
 }

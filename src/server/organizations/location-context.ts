@@ -5,9 +5,10 @@ import { prisma } from '../db.ts'
 import { ApiError } from '../api-error.ts'
 import type { AuthenticatedRequest } from '../auth.ts'
 import type { Prisma } from '../../generated/prisma/client.ts'
+import { getMembership } from './access/permissions.ts'
 
 // A scope belongs to one HTTP request. Services still check live membership and role.
-export const locationContext = new AsyncLocalStorage<{ organizationId: string; locationId: string }>()
+export const locationContext = new AsyncLocalStorage<{ organizationId: string; locationId?: string; memberships?: Map<string, Promise<unknown>> }>()
 export function scopedLocationId(organizationId: string) {
   const scope = locationContext.getStore()
   return scope?.organizationId === organizationId ? scope.locationId : undefined
@@ -28,6 +29,15 @@ export const selectLocation: RequestHandler = async (request, _response, next) =
     const organizationId = z.uuid().parse(request.params.organizationId)
     const selected = request.query.locationId ?? request.get('x-staffly-location')
     const requestedId = selected === undefined ? undefined : z.uuid().parse(selected)
+    if (request.method === 'GET' || request.method === 'HEAD') {
+      const context = { organizationId, locationId: requestedId, memberships: new Map<string, Promise<unknown>>() }
+      await locationContext.run(context, async () => {
+        const actor = await getMembership((request as AuthenticatedRequest).auth!.userId, organizationId)
+        context.locationId = actor.locationId
+        next()
+      })
+      return
+    }
     const membership = await prisma.organizationMember.findUnique({ where: { organizationId_userId: { organizationId, userId: (request as AuthenticatedRequest).auth!.userId } }, include: { organization: true } })
     if (!membership || membership.leftAt || membership.organization.deletedAt) throw new ApiError(404, 'ORGANIZATION_NOT_FOUND', 'Организация не найдена.')
     const location = await prisma.organizationLocation.findFirst({ where: { organizationId, ...(requestedId ? { id: requestedId } : { archivedAt: null }) }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] })

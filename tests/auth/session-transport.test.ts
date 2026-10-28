@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { it } from 'node:test'
-import { postAuthJson, accessTokenNeedsRefresh, requestWithSession } from '../../src/app/auth/session-transport.ts'
+import { postAuthJson, accessTokenNeedsRefresh, requestWithSession, refreshSession } from '../../src/app/auth/session-transport.ts'
 
 it('serializes cookie rotations from two tabs instead of sending the same refresh cookie twice', async () => {
   const originalFetch = globalThis.fetch
@@ -31,6 +31,36 @@ it('serializes cookie rotations from two tabs instead of sending the same refres
 })
 
 const jwt = (exp: number) => `header.${Buffer.from(JSON.stringify({ exp })).toString('base64url')}.signature`
+
+it('distinguishes a rejected session from temporary refresh failures and preserves retry hints', async () => {
+  const original = globalThis.fetch
+  try {
+    for (const status of [429, 500, 503, 504]) {
+      globalThis.fetch = async () => new Response('{"code":"DATABASE_BUSY"}', { status, headers: { 'Retry-After': '2' } })
+      await assert.rejects(refreshSession(), (error: Error & { status?: number; retryAfterMs?: number }) => error.status === status && error.retryAfterMs === 2000)
+    }
+    for (const status of [401, 403]) {
+      globalThis.fetch = async () => new Response('{}', { status })
+      assert.equal(await refreshSession(), null)
+    }
+    const offline = new TypeError('Network unavailable')
+    globalThis.fetch = async () => { throw offline }
+    await assert.rejects(refreshSession(), error => error === offline)
+    const fresh = { accessToken: jwt(Math.floor(Date.now() / 1000) + 900), user: { id: 'current-user' } }
+    globalThis.fetch = async () => Response.json(fresh)
+    assert.deepEqual(await refreshSession(), fresh)
+  } finally { globalThis.fetch = original }
+})
+
+it('spreads early refresh decisions without extending token expiry', () => {
+  const now = 1_800_000_000_000, exp = now / 1000 + 90
+  const tokens = Array.from({ length: 100 }, (_, i) => `header.${Buffer.from(JSON.stringify({ exp })).toString('base64url')}.signature-${i}`)
+  const decisions = tokens.map(token => accessTokenNeedsRefresh(token, now))
+  assert.ok(decisions.some(Boolean) && decisions.some(value => !value))
+  assert.deepEqual(tokens.map(token => accessTokenNeedsRefresh(token, now)), decisions)
+  assert.ok(tokens.every(token => accessTokenNeedsRefresh(token, exp * 1000 - 30000)))
+  assert.ok(tokens.every(token => !accessTokenNeedsRefresh(token, exp * 1000 - 151000)))
+})
 
 it('refreshes an expiring access token before the protected request', async () => {
   let token = jwt(Math.floor(Date.now() / 1000) - 1)

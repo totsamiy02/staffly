@@ -17,6 +17,19 @@ function zip(entries: Array<[string, string]>) {
   return Buffer.concat([...locals, directory, end])
 }
 const wordParts: Array<[string, string]> = [['[Content_Types].xml', '<Types><Override ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>'], ['_rels/.rels', '<Relationships/>'], ['word/document.xml', '<w:document/>']]
+it('keeps the API event loop available during bounded Office decompression and rejects excess concurrent parsers', async () => {
+  const contents = zip([...wordParts, ['word/large.xml', 'x'.repeat(20 * 1024 * 1024)]])
+  let timerRan = false
+  const timer = setTimeout(() => { timerRan = true }, 0)
+  try {
+    const first = validateDocumentFile(contents, documentMimeTypes.docx, 'first.docx')
+    const second = validateDocumentFile(contents, documentMimeTypes.docx, 'second.docx')
+    await assert.rejects(validateDocumentFile(contents, documentMimeTypes.docx, 'third.docx'), { code: 'FILE_VALIDATION_BUSY' })
+    await Promise.all([first, second])
+    assert.equal(timerRan, true, 'Office inflation blocked the HTTP event loop')
+    await validateDocumentFile(zip(wordParts), documentMimeTypes.docx, 'recovered.docx')
+  } finally { clearTimeout(timer) }
+})
 it('validates allowed signatures, MIME and extension while rejecting disguised active formats and paths', async () => {
   const pdf = Buffer.from('%PDF-1.4\n%%EOF')
   assert.equal((await validateDocumentFile(pdf, 'application/pdf', encodeURIComponent('Приказ.pdf'))).extension, 'pdf')

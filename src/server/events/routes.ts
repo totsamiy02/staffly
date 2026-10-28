@@ -1,5 +1,5 @@
 import { Router, type Request } from 'express'
-import { rateLimit } from 'express-rate-limit'
+import { accountRateLimit } from '../security/rate-limit.ts'
 import { z } from 'zod'
 import { requireAuth, type AuthenticatedRequest } from '../auth.ts'
 import { ApiError } from '../api-error.ts'
@@ -7,7 +7,7 @@ import { audienceQuery, eventBody, eventParams, listEventsQuery } from './schema
 import { cancelEvent, createEvent, eventMembers, getEvent, listEvents, updateEvent } from './service.ts'
 const router = Router()
 const base = '/organizations/:organizationId/events'
-const mutate = rateLimit({ windowMs: 60000, limit: 60, standardHeaders: 'draft-8', legacyHeaders: false })
+const mutate = accountRateLimit('events', 60, 60000)
 function user(request: Request) { return (request as AuthenticatedRequest).auth!.userId }
 function parse<T>(schema: z.ZodType<T>, value: unknown) { const result = schema.safeParse(value); if (!result.success) throw new ApiError(400, 'VALIDATION_ERROR', 'Проверьте данные события.', z.flattenError(result.error).fieldErrors); return result.data }
 router.use(base, requireAuth, (_request, response, next) => { response.set('Cache-Control', 'private, no-store'); next() })

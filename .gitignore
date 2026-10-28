@@ -25,6 +25,7 @@ dist-ssr
 docs
 .env.*
 !src/server/.env.example
+!deploy/.env.example
 /src/generated/prisma
 
 # Files uploaded to the local development storage.
@@ -38,3 +39,21 @@ docs
 
 # Generated local PDF.js fonts, CMaps and WASM (copied before dev/build).
 /public/pdfjs/
+
+# Generated test reports, diagnostics, screenshots and archived runs.
+/artifacts/
+
+# Local credentials, TLS material and database backups.
+**/.aws/
+**/.ssh/
+**/.codex/
+/secrets/
+/deploy/certs/
+*.env
+*.pem
+*.key
+*.p12
+*.pfx
+*.dump
+*.backup
+*.sql.gz

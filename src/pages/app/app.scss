@@ -181,7 +181,7 @@
 .member-row:last-child { border-bottom: 0; }
 .member-avatar { position: relative; }
 .member-presence { position: absolute; right: 0; bottom: 0; width: 10px; height: 10px; border: 2px solid var(--theme-border,#fff); border-radius: 50%; background: var(--theme-neutral-fill,#aaa); }
-.member-presence--online { background: var(--theme-success-bg,#49a15d); }
+.member-presence--online { background: var(--theme-online,#49a15d); }
 .member-profile-trigger { display: flex; min-width: 0; flex: 1; align-items: center; gap: 14px; border-radius: 10px; cursor: pointer; text-align: left; }
 .member-profile-trigger:hover .member-row__identity strong { text-decoration: underline; text-underline-offset: 3px; }
 .member-row__identity { display: grid; min-width: 0; flex: 1; }
@@ -311,6 +311,7 @@
 .account-password-field > div { display: flex; align-items: center; background: var(--theme-surface,#fff); }
 .account-password-field > div:focus-within { border-color: var(--theme-border-strong,#777); box-shadow: 0 0 0 3px rgb(0 0 0 / 5%); }
 .account-password-field input { min-width: 0; min-height: 48px; flex: 1; border: 0; outline: 0; appearance: none; background: transparent; padding: 0 14px; color: var(--theme-text-strong,#111); font: inherit; font-size: 14px; box-shadow: none; }
+.account-password-field input:is(:-webkit-autofill, :autofill) { -webkit-text-fill-color: var(--field-value); box-shadow: 0 0 0 1000px var(--theme-surface,#fff) inset; caret-color: var(--field-value); }
 .account-password-field button { display: grid; width: 44px; height: 44px; flex: 0 0 44px; place-items: center; color: var(--theme-muted,#777); cursor: pointer; }
 .account-password-field button svg { width: 19px; height: 19px; }
 .password-requirements { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -335,7 +336,7 @@
 .sessions-list span { display: flex; align-items: center; gap: 6px; margin-top: 3px; color: var(--theme-muted,#888); font-size: 10px; }
 .sessions-list span i { width: 7px; height: 7px; border-radius: 50%; background: var(--theme-neutral-fill,#aaa); }
 .sessions-list .session-current { color: var(--theme-success,#387447); }
-.sessions-list .session-current i { background: var(--theme-success-bg,#43a05a); box-shadow: 0 0 0 3px rgb(67 160 90 / 13%); }
+.sessions-list .session-current i { background: var(--theme-online,#43a05a); box-shadow: 0 0 0 3px rgb(67 160 90 / 13%); }
 .sessions-list small { margin-top: 3px; color: var(--theme-muted,#999); font-size: 9px; }
 .sessions-list article > button { padding: 8px 11px; border: 1px solid var(--theme-border,#ddd); border-radius: 8px; cursor: pointer; font-size: 10px; font-weight: 700; }
 

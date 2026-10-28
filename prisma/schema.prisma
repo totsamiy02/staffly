@@ -7,6 +7,36 @@ datasource db {
   provider = "postgresql"
 }
 
+model ApiRateLimit {
+  key String @id @db.VarChar(64)
+  hits Int
+  resetAt DateTime @map("reset_at") @db.Timestamptz(3)
+  @@index([resetAt])
+  @@map("api_rate_limits")
+}
+
+model ReportExport {
+  id String @id @default(uuid()) @db.Uuid
+  userId String @map("user_id") @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  input Json
+  inputHash String @map("input_hash") @db.VarChar(64)
+  status String @default("PENDING") @db.VarChar(16)
+  attempts Int @default(0)
+  leaseToken String? @map("lease_token") @db.Uuid
+  leaseUntil DateTime? @map("lease_until") @db.Timestamptz(3)
+  objectKey String? @map("object_key") @db.VarChar(512)
+  errorCode String? @map("error_code") @db.VarChar(64)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  @@index([status, leaseUntil, createdAt])
+  @@index([userId, createdAt])
+  @@index([expiresAt])
+  @@map("report_exports")
+}
+
 model AuthAttemptLimit {
   key       String   @id @db.VarChar(64)
   attempts  Int      @default(0)
@@ -17,6 +47,7 @@ model AuthAttemptLimit {
 }
 
 model User {
+  reportExports ReportExport[]
   id                  String    @id @default(uuid()) @db.Uuid
   email               String    @unique @db.VarChar(254)
   passwordHash        String?   @map("password_hash") @db.Text
@@ -232,6 +263,7 @@ enum RequestEventType {
 }
 
 model Organization {
+  reportExports ReportExport[]
   vacationStandardDays Int @default(28) @map("vacation_standard_days")
   vacationHolidays String[] @default([]) @map("vacation_holidays")
   coverageEnabled Boolean @default(false) @map("coverage_enabled")

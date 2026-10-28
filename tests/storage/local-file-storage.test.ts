@@ -5,6 +5,18 @@ import { mkdir, readFile, rm, symlink, writeFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { deleteObject, readObject, storageRoot, writeObject } from '../../src/server/storage/local-file-storage.ts'
 
+it('publishes exactly one complete object when writers race for the same key', async () => {
+  const key = `tests/${randomUUID()}/${randomUUID()}.pdf`
+  const bodies = Array.from({ length: 12 }, (_, i) => Buffer.alloc(1024 * 64, i))
+  try {
+    const results = await Promise.allSettled(bodies.map(body => writeObject(key, body)))
+    const winner = results.findIndex(result => result.status === 'fulfilled')
+    assert.equal(results.filter(result => result.status === 'fulfilled').length, 1)
+    assert.ok(results.every(result => result.status === 'fulfilled' || result.reason.code === 'EEXIST'))
+    assert.deepEqual(await readObject(key), bodies[winner])
+  } finally { await deleteObject(key) }
+})
+
 it('rejects traversal and unsafe keys and refuses overwrite', async () => {
   for (const key of ['../outside.pdf', '/tmp/outside.pdf', 'users/../../outside.pdf', 'users/a/%2e%2e.pdf', 'users/a/file.exe', 'users/a/x\\y.pdf']) {
     await assert.rejects(() => writeObject(key, Buffer.from('data')))

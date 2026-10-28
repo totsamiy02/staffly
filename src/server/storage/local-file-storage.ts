@@ -1,4 +1,4 @@
-import { chmod, lstat, mkdir, open, readdir, rename, rmdir, unlink, writeFile } from 'node:fs/promises'
+import { chmod, lstat, mkdir, open, readdir, link, rmdir, unlink, writeFile } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -6,9 +6,12 @@ import { randomUUID } from 'node:crypto'
 if (process.env.NODE_ENV === 'test' && (!process.env.LOCAL_STORAGE_ROOT || path.resolve(process.env.LOCAL_STORAGE_ROOT) === path.resolve('storage'))) throw new Error('Test storage must use an isolated LOCAL_STORAGE_ROOT')
 export const storageRoot = path.resolve(process.env.LOCAL_STORAGE_ROOT || path.join(process.cwd(), 'storage'))
 const objectKeyPattern = /^[a-z0-9-]+(?:\/[a-z0-9-]+)*\/[a-f0-9-]+\.(?:webp|jpg|png|pdf|doc|docx|xls|xlsx|csv|txt|md|ppt|pptx)$/
+export function validateObjectKey(objectKey: string) {
+  if (!objectKeyPattern.test(objectKey)) throw new Error('Invalid storage object key')
+}
 
 function objectPath(objectKey: string) {
-  if (!objectKeyPattern.test(objectKey)) throw new Error('Invalid local storage object key')
+  validateObjectKey(objectKey)
   const resolved = path.resolve(storageRoot, objectKey)
   if (!resolved.startsWith(`${storageRoot}${path.sep}`)) throw new Error('Object key escapes storage root')
   return resolved
@@ -35,8 +38,12 @@ export async function writeObject(objectKey: string, contents: Buffer) {
   await checkDirectories(destination, true)
   try {
     await writeFile(temporary, contents, { flag: 'wx', mode: 0o600 })
-    try { await lstat(destination); throw Object.assign(new Error('Storage object already exists'), { code: 'EEXIST' }) } catch (error) { if (!missing(error)) throw error }
-    await rename(temporary, destination)
+    // A hard link publishes a complete file atomically and cannot replace a concurrent writer.
+    try { await link(temporary, destination) } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw Object.assign(new Error('Storage object already exists'), { code: 'EEXIST' })
+      throw error
+    }
+    await unlink(temporary)
   } catch (error) {
     await unlink(temporary).catch(() => undefined)
     throw error

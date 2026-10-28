@@ -746,7 +746,7 @@ describe('session continuity, presence and cross-user synchronization regression
     focusManager.setEventListener(() => () => {})
     focusManager.setFocused(true)
     const delays: number[] = []
-    timeoutManager.setTimeoutProvider({ setTimeout, clearTimeout, setInterval: (callback, delay) => { delays.push(delay); return setInterval(callback, delay === liveQueryOptions.refetchInterval ? 20 : delay) }, clearInterval })
+    timeoutManager.setTimeoutProvider({ setTimeout, clearTimeout, setInterval: (callback, delay) => { delays.push(delay); return setInterval(callback, delay >= 30000 && delay < 40000 ? 20 : delay) }, clearInterval })
     const a = new QueryClient({ defaultOptions: { queries: { gcTime: 0 } } }); const b = new QueryClient({ defaultOptions: { queries: { gcTime: 0 } } })
     const cleanup: Array<() => void> = []
     async function waitUntil(predicate: () => boolean) { const until = Date.now() + 3_000; while (!predicate()) { if (Date.now() > until) assert.fail('Cross-user cache did not synchronize'); await new Promise(resolve => setTimeout(resolve, 10)) } }
@@ -787,7 +787,7 @@ describe('session continuity, presence and cross-user synchronization regression
       assert.equal(approval.status, 200)
       await waitUntil(() => mine.getCurrentResult().data?.requests.find((item: any) => item.id === request.id)?.status === 'APPROVED' && schedule.getCurrentResult().data?.shifts.find((item: any) => item.id === shift.id)?.scheduledStartAt === '2038-01-11T07:00:00.000Z')
       await waitUntil(() => history.getCurrentResult().data?.notifications.some((item: any) => item.type === 'REQUEST_APPROVED' && item.href?.includes(request.id)))
-      assert.ok(delays.includes(10_000))
+      assert.ok(delays.some(delay => delay >= 30000 && delay < 40000))
       assert.equal((await listAccountNotifications(second.id)).some(item => item.requestId === request.id && item.type === 'REQUEST_APPROVED'), true)
     } finally {
       cleanup.forEach(stop => stop()); await Promise.all([a.cancelQueries(), b.cancelQueries()]); a.clear(); b.clear(); focusManager.setFocused(undefined)

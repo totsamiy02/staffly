@@ -1,7 +1,37 @@
 import assert from 'node:assert/strict'
 import { it } from 'node:test'
 import { setImmediate as turn } from 'node:timers/promises'
-import { startBackgroundTask } from '../../src/server/background-task.ts'
+import { startBackgroundTask, backgroundTasksHealthy } from '../../src/server/background-task.ts'
+
+it('keeps a long progressing queue healthy while detecting a stalled task', async t => {
+  let clock = Date.now(), checkpoint!: () => boolean, finish!: () => void
+  t.mock.method(Date, 'now', () => clock)
+  const pending = new Promise<void>(resolve => { finish = resolve })
+  const stop = startBackgroundTask({ name: 'long-queue', intervalMs: 1000, run: async active => { checkpoint = active; await pending } })
+  try {
+    await turn(); clock += 300001
+    assert.equal(backgroundTasksHealthy(), false)
+    assert.equal(checkpoint(), true)
+    assert.equal(backgroundTasksHealthy(), true)
+  } finally { finish(); await stop() }
+})
+
+it('reports persistent failures and stalled tasks as unhealthy, then recovers after a successful run', async t => {
+  t.mock.timers.enable({ apis: ['setInterval'] })
+  t.mock.method(console, 'error', () => {})
+  let fail = true
+  const stop = startBackgroundTask({ name: 'health-fixture', intervalMs: 100, run: async () => { if (fail) throw new Error('unavailable') } })
+  try {
+    await turn(); assert.equal(backgroundTasksHealthy(), true)
+    t.mock.timers.tick(100); await turn()
+    t.mock.timers.tick(100); await turn()
+    assert.equal(backgroundTasksHealthy(), false)
+    fail = false; t.mock.timers.tick(100); await turn()
+    assert.equal(backgroundTasksHealthy(), true)
+    assert.equal(backgroundTasksHealthy(Date.now() + 300001), false)
+  } finally { await stop() }
+  assert.equal(backgroundTasksHealthy(), true)
+})
 
 it('stops scheduling, signals long work to stop and waits for that work before disconnect', async t => {
   t.mock.timers.enable({ apis: ['setInterval'] })

@@ -6,8 +6,9 @@ import { mediaUrl } from '../storage/image-service.ts'
 import { absenceLabels } from './absence-service.ts'
 import { checkMonthlyWorkload } from './workload.ts'
 import { cancelShiftRequests, lockShift } from '../requests/shift-conflicts.ts'
-import type { Prisma, WorkShift } from '../../generated/prisma/client.ts'
+import type { Prisma, WorkShift, ShiftOfferKind, ShiftOfferStatus } from '../../generated/prisma/client.ts'
 import { prisma } from '../db.ts'
+import { cachedRead } from '../read-cache.ts'
 import { ApiError } from '../api-error.ts'
 import { getMembership } from '../organizations/access/permissions.ts'
 import { addCalendarDays, startOfZonedDate, zonedDateTimeToUtc } from './timezone.ts'
@@ -99,6 +100,34 @@ export function publicShift(shift: WorkShift & { member: { user: { email: string
 
 export const shiftInclude = { offerReservation: { select: { offer: { select: { id: true, kind: true, status: true } } } }, member: { include: { user: { select: { email: true, firstName: true, lastName: true, middleName: true, avatarFileId: true } } } }, _count: { select: { adjustments: true } } } as const
 
+// A calendar returns many shifts. Read the projection in one query rather than
+// hydrating separate shift/member/user/offer relation graphs for every refresh.
+async function calendarShifts(organizationId: string, locationId: string | undefined, from: Date, to: Date, history: boolean, team: boolean, memberId: string) {
+  type Row = WorkShift & { userEmail: string; userFirstName: string | null; userLastName: string | null; userMiddleName: string | null; userAvatarId: string | null;
+    adjustmentCount: number; offerId: string | null; offerKind: ShiftOfferKind | null; offerStatus: ShiftOfferStatus | null }
+  const rows = await prisma.$queryRaw<Row[]>`
+    SELECT s.id, s.organization_id AS "organizationId", s.location_id AS "locationId", s.member_id AS "memberId",
+      s.created_by_member_id AS "createdByMemberId", s.attendance::text AS attendance, s.attendance_reason AS "attendanceReason",
+      s.scheduled_start_at AS "scheduledStartAt", s.scheduled_end_at AS "scheduledEndAt", s.break_minutes AS "breakMinutes",
+      s.actual_start_at AS "actualStartAt", s.actual_end_at AS "actualEndAt", s.actual_break_minutes AS "actualBreakMinutes",
+      s.position_id AS "positionId", s.position_name_snapshot AS "positionNameSnapshot", s.description, s.status::text AS status,
+      s.cancelled_at AS "cancelledAt", s.cancelled_by_member_id AS "cancelledByMemberId", s.cancellation_reason AS "cancellationReason",
+      s.assignment_read_at AS "assignmentReadAt", s.created_at AS "createdAt", s.updated_at AS "updatedAt",
+      u.email AS "userEmail", u.first_name AS "userFirstName", u.last_name AS "userLastName", u.middle_name AS "userMiddleName", u.avatar_file_id AS "userAvatarId",
+      (SELECT count(*)::int FROM work_shift_adjustments a WHERE a.shift_id=s.id) AS "adjustmentCount",
+      o.id AS "offerId", o.kind::text AS "offerKind", o.status::text AS "offerStatus"
+    FROM work_shifts s JOIN organization_members m ON m.id=s.member_id AND m.organization_id=s.organization_id
+    JOIN users u ON u.id=m.user_id
+    LEFT JOIN shift_offer_reservations r ON r.shift_id=s.id AND r.organization_id=s.organization_id
+    LEFT JOIN shift_offers o ON o.id=r.offer_id AND o.organization_id=s.organization_id
+    WHERE s.organization_id=${organizationId}::uuid AND (${locationId ?? null}::uuid IS NULL OR s.location_id=${locationId ?? null}::uuid)
+      AND (${team}::boolean OR s.member_id=${memberId}::uuid) AND s.status::text=${history ? 'CANCELLED' : 'SCHEDULED'}
+      AND s.scheduled_start_at < ${to} AND s.scheduled_end_at > ${from}
+    ORDER BY s.scheduled_start_at ASC, u.last_name ASC`
+  return rows.map(row => ({ ...row, member: { user: { email: row.userEmail, firstName: row.userFirstName, lastName: row.userLastName, middleName: row.userMiddleName, avatarFileId: row.userAvatarId } },
+    _count: { adjustments: row.adjustmentCount }, offerReservation: row.offerId ? { offer: { id: row.offerId, kind: row.offerKind!, status: row.offerStatus! } } : null }))
+}
+
 export async function listCancelledShifts(userId: string, organizationId: string, query: { page: number; limit: number; memberId?: string; order: 'asc' | 'desc' }) {
   const actor = await getMembership(userId, organizationId)
   requirePermission(actor, 'schedule.history')
@@ -117,13 +146,11 @@ export async function listSchedule(userId: string, organizationId: string, fromD
   if (mode === 'history') requirePermission(actor, 'schedule.history')
   if (!hasPermission(actor,'schedule.view') && !hasPermission(actor,'schedule.own') && hasPermission(actor,'coverage.view')) return {timezone:actor.organization.timezone,shifts:[],absences:[]}
   if (!hasPermission(actor, 'schedule.view')) requirePermission(actor, 'schedule.own')
-  const shifts = await prisma.workShift.findMany({
-    where: { organizationId, ...locationWhere(organizationId), ...(!hasPermission(actor, 'schedule.view') ? { memberId: actor.id } : {}), status: mode === 'history' ? 'CANCELLED' : 'SCHEDULED', scheduledStartAt: { lt: to }, scheduledEndAt: { gt: from } },
-    include: shiftInclude,
-    orderBy: [{ scheduledStartAt: 'asc' }, { member: { user: { lastName: 'asc' } } }],
-  })
-  const absences = await prisma.employeeAbsence.findMany({ where: { organizationId, member: locationMemberWhere(organizationId), ...(!hasPermission(actor, 'absences.view') && !hasPermission(actor, 'schedule.view') ? { memberId: actor.id } : {}), cancelledAt: null, startDate: { lt: new Date(`${toDate}T00:00:00.000Z`) }, endDate: { gte: new Date(`${fromDate}T00:00:00.000Z`) } }, include: { member: { include: { user: { select: { email: true, firstName: true, lastName: true, middleName: true, avatarFileId: true } } } } }, orderBy: { startDate: 'asc' } })
-  return { timezone: actor.organization.timezone, shifts: shifts.map(publicShift), absences: (mode === 'history' ? [] : absences).map((item) => ({ id: item.id, memberId: item.memberId, memberName: displayName(item.member.user), memberAvatarUrl: mediaUrl(item.member.user.avatarFileId), reason: !hasPermission(actor, 'absences.details') && item.memberId !== actor.id ? null : item.reason, type: !hasPermission(actor, 'absences.details') && item.memberId !== actor.id ? 'ABSENCE' as const : item.type, startDate: dateText(item.startDate), endDate: dateText(item.endDate) })) }
+  const scope = `${organizationId}:${scopedLocationId(organizationId) ?? 'all'}:${fromDate}:${toDate}:${mode ?? 'current'}:${hasPermission(actor, 'schedule.view') ? 'team' : actor.id}`
+  const shifts = await cachedRead(organizationId, `shifts:${scope}`, async () => (await calendarShifts(organizationId, scopedLocationId(organizationId), from, to, mode === 'history', hasPermission(actor, 'schedule.view'), actor.id)).map(publicShift))
+  const absenceScope = `${organizationId}:${scopedLocationId(organizationId) ?? 'all'}:${fromDate}:${toDate}:${hasPermission(actor, 'absences.view') || hasPermission(actor, 'schedule.view') ? 'team' : actor.id}`
+  const absences = await cachedRead(organizationId, `absences:${absenceScope}`, () => prisma.employeeAbsence.findMany({ where: { organizationId, member: locationMemberWhere(organizationId), ...(!hasPermission(actor, 'absences.view') && !hasPermission(actor, 'schedule.view') ? { memberId: actor.id } : {}), cancelledAt: null, startDate: { lt: new Date(`${toDate}T00:00:00.000Z`) }, endDate: { gte: new Date(`${fromDate}T00:00:00.000Z`) } }, include: { member: { include: { user: { select: { email: true, firstName: true, lastName: true, middleName: true, avatarFileId: true } } } } }, orderBy: { startDate: 'asc' } }))
+  return { timezone: actor.organization.timezone, shifts, absences: (mode === 'history' ? [] : absences).map((item) => ({ id: item.id, memberId: item.memberId, memberName: displayName(item.member.user), memberAvatarUrl: mediaUrl(item.member.user.avatarFileId), reason: !hasPermission(actor, 'absences.details') && item.memberId !== actor.id ? null : item.reason, type: !hasPermission(actor, 'absences.details') && item.memberId !== actor.id ? 'ABSENCE' as const : item.type, startDate: dateText(item.startDate), endDate: dateText(item.endDate) })) }
 }
 
 export async function listMyUpcomingShifts(userId: string, organizationId: string) {

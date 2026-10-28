@@ -5,12 +5,14 @@ import sharp from 'sharp'
 import { prisma } from '../src/server/db.ts'
 import { cleanupPendingFiles } from '../src/server/storage/image-service.ts'
 import { readObject, storageRoot } from '../src/server/storage/local-file-storage.ts'
+import { storage } from '../src/server/storage/provider.ts'
 
 // Read-only by default. Cleanup uses only explicit, due database deletion records.
 if (process.argv.slice(2).some(argument => argument !== '--cleanup')) throw new Error('Usage: npm run storage:audit -- [--cleanup]')
 const checksum = (data: Buffer) => createHash('sha256').update(data).digest('hex')
 try {
-  const info = await lstat(storageRoot).catch(error => { if (error.code === 'ENOENT') return null; throw error })
+  const shared = process.env.STORAGE_DRIVER === 's3'
+  const info = shared ? null : await lstat(storageRoot).catch(error => { if (error.code === 'ENOENT') return null; throw error })
   if (info && (!info.isDirectory() || info.isSymbolicLink())) throw new Error('Unsafe storage root')
   const files = await prisma.storedFile.findMany({ select: { objectKey: true, size: true, checksumSha256: true, pendingDeletionAt: true } })
   const known = new Map(files.map(file => [file.objectKey, file]))
@@ -40,9 +42,25 @@ try {
       if (contents.length !== file.size || hash !== file.checksumSha256) result.checksumMismatch++
     }
   }
-  if (info) await walk(storageRoot)
+  if (shared) {
+    // Audit the application registry without requiring bucket-wide list rights.
+    // Never interpret a remote failure as proof that an object is disposable.
+    for (const file of files) {
+      const object = await storage.stream(file.objectKey).catch(error => { if (error.code === 'ENOENT') return null; throw error })
+      if (!object) continue
+      const hash = createHash('sha256')
+      let bytes = 0
+      for await (const chunk of object.stream) { hash.update(chunk); bytes += chunk.length }
+      seen.add(file.objectKey); result.registered++
+      if (file.pendingDeletionAt) result.pendingDeletion++
+      const digest = hash.digest('hex')
+      if (fixtures.has(digest)) result.testFixtureMatches++
+      if (bytes !== file.size || digest !== file.checksumSha256) result.checksumMismatch++
+    }
+  } else if (info) await walk(storageRoot)
   result.missingRegistered = files.filter(file => !seen.has(file.objectKey)).length
   console.log(JSON.stringify(result, null, 2))
   console.log('Unregistered and unknown files are preserved; absence from this database alone does not prove they are disposable.')
+  if (shared) console.log('S3 audit covers registered objects only; unregistered objects require a separate bucket inventory.')
   if (process.argv.includes('--cleanup')) console.log('Explicit pending deletion cleanup:', await cleanupPendingFiles({ limit: 500 }))
 } finally { await prisma.$disconnect() }

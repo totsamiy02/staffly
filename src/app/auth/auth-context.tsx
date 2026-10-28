@@ -1,7 +1,9 @@
 import { documentMime } from '../file-preview/formats.ts'
 import { useLocation } from 'react-router-dom'
-import { postAuthJson as postJson, requestWithSession } from './session-transport.ts'
+import { postAuthJson as postJson, requestWithSession, readJson, refreshSession } from './session-transport.ts'
 import { useQueryClient } from '@tanstack/react-query'
+import { applyLiveHints, setLiveConnected, isLiveConnected } from '../live-query.ts'
+import { startLiveStream } from '../live-stream.ts'
 /* oxlint-disable react/only-export-components -- The provider and its hook share one context. */
 import { createContext, useCallback, useContext, useEffect, useRef, useState, useMemo, type ReactNode } from 'react'
 
@@ -27,24 +29,6 @@ type AuthContextValue = {
 const AuthContext = createContext<AuthContextValue | null>(null)
 let bootstrapRequest: Promise<AuthResult | null> | null = null
 
-async function readJson<T>(response: Response): Promise<T> {
-  if (response.status === 204) return undefined as T
-  const text = await response.text()
-  let parsed: unknown = {}
-  try { parsed = text ? JSON.parse(text) : {} } catch { parsed = {} }
-  const data = (parsed && typeof parsed === 'object' ? parsed : {}) as T & { message?: string; code?: string; errors?: unknown }
-  if (!response.ok) {
-    const fallback = response.status === 404 ? 'Запрошенные данные не найдены.' : response.status >= 500 ? 'Сервис временно недоступен. Попробуйте позже.' : 'Не удалось выполнить запрос.'
-    const error = new Error(data.message || fallback) as Error & { code?: string; status?: number; errors?: unknown }
-    error.code = data.code
-    error.status = response.status
-    error.errors = data.errors
-    throw error
-  }
-  return data
-}
-
-
 export async function authPost<T>(path: string, body: unknown): Promise<T> {
   return readJson<T>(await postJson(path, body))
 }
@@ -54,6 +38,9 @@ export async function authGet<T>(path: string): Promise<T> {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const route = useLocation()
+  const liveOrganizationId = /^\/app\/organizations\/([0-9a-f-]{36})(?:\/|$)/.exec(route.pathname)?.[1]
+  const liveEnabled = route.pathname === '/app' || route.pathname.startsWith('/app/')
   const queryClient = useQueryClient()
   const userIdRef = useRef<string | null>(null)
   const [user, setUser] = useState<AuthUser | null>(null)
@@ -82,8 +69,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refresh = useCallback(async () => {
     const startedAt = authVersion.current
-    refreshRef.current ??= postJson('refresh', {}).then(async (response) => response.ok ? await response.json() as AuthResult : null)
-      .catch(() => null)
+    refreshRef.current ??= refreshSession<AuthResult>()
       .finally(() => { refreshRef.current = null; bootstrapRequest = null })
     const result = await refreshRef.current
     if (authVersion.current !== startedAt) return tokenRef.current && userIdRef.current === result?.user.id ? result : null
@@ -94,16 +80,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let active = true
+    let retry: ReturnType<typeof setTimeout> | undefined, attempts = 0
     const startedAt = authVersion.current
-    bootstrapRequest ??= postJson('refresh', {}).then(async (response) => response.ok ? await response.json() as AuthResult : null)
-      .catch(() => null)
-      .finally(() => { bootstrapRequest = null })
-    void bootstrapRequest.then((result) => {
+    const bootstrap = () => {
       if (!active || authVersion.current !== startedAt) return
-      if (result) accept(result)
-      else clear()
-    })
-    return () => { active = false }
+      bootstrapRequest ??= refreshSession<AuthResult>()
+        .finally(() => { bootstrapRequest = null })
+      void bootstrapRequest.then((result) => {
+        if (!active || authVersion.current !== startedAt) return
+        if (result) accept(result)
+        else clear()
+      }).catch((error: Error & { retryAfterMs?: number }) => {
+        if (active && authVersion.current === startedAt) retry = setTimeout(bootstrap,
+          Math.min(30000, Math.max(error.retryAfterMs ?? 0, 1000 * 2 ** Math.min(attempts++, 5))) + Math.random() * 500)
+      })
+    }
+    bootstrap()
+    return () => { active = false; clearTimeout(retry) }
   }, [accept, clear])
 
   async function login(email: string, password: string) { accept(await authPost<AuthResult>('login', { email, password })) }
@@ -152,11 +145,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const downloadFile = useCallback(async (path: string, fileName: string, method: 'GET' | 'POST' = 'GET', body?: unknown) => {
     const execute = (token: string | null) => fetch(`/api${path}`, { method, credentials: 'same-origin', headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}) }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) })
-    const response = await requestWithSession(execute, () => tokenRef.current, refresh)
+    let response = await requestWithSession(execute, () => tokenRef.current, refresh)
+    if (response.status === 202) {
+      const result = await readJson<{ job: { statusUrl: string } }>(response)
+      const statusPath = result.job.statusUrl
+      if (!/^\/organizations\/[0-9a-f-]{36}\/statistics\/reports\/exports\/[0-9a-f-]{36}$/.test(statusPath)) throw new Error('Некорректный адрес отчёта.')
+      const deadline = Date.now() + 5 * 60000
+      let ready = false
+      while (Date.now() < deadline) {
+        const job = await apiRequest<{ status: string; message?: string }>(statusPath)
+        if (job.status === 'FAILED') throw new Error(job.message || 'Не удалось подготовить отчёт.')
+        if (job.status === 'READY') { ready = true; break }
+        await new Promise(resolve => setTimeout(resolve, 1500))
+      }
+      if (!ready) throw new Error('Подготовка отчёта заняла слишком много времени. Попробуйте позже.')
+      response = await requestWithSession(token => fetch(`/api${statusPath}/content`, { credentials: 'same-origin', headers: token ? { Authorization: `Bearer ${token}` } : {} }), () => tokenRef.current, refresh)
+    }
     if (!response.ok) { await readJson(response); return }
     const url = URL.createObjectURL(await response.blob())
     const anchor = document.createElement('a'); anchor.href = url; anchor.download = fileName; anchor.click(); URL.revokeObjectURL(url)
-  }, [refresh])
+  }, [refresh, apiRequest])
 
   const previewFile = useCallback(async (path: string, method: 'GET' | 'POST' = 'GET') => {
     const execute = (token: string | null) => fetch(`/api${path}`, { method, credentials: 'same-origin', headers: token ? { Authorization: `Bearer ${token}` } : {} })
@@ -167,8 +175,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const presenceUserId = user?.id
   useEffect(() => {
+    if (!presenceUserId || !liveEnabled) return
+    return startLiveStream({
+      open: signal => requestWithSession(token => fetch(`/api/live${liveOrganizationId ? `?organizationId=${liveOrganizationId}` : ''}`, {
+        signal, credentials: 'same-origin', cache: 'no-store', headers: token ? { Authorization: `Bearer ${token}` } : {},
+      }), () => tokenRef.current, refresh),
+      onReady: () => {
+        setLiveConnected(true)
+        void queryClient.invalidateQueries({ refetchType: 'active' })
+      },
+      onChange: hints => {
+        void applyLiveHints(queryClient, hints)
+        if (hints.some(hint => hint.topic === 'profile' && !hint.organizationId)) {
+          const version = authVersion.current
+          void apiRequest<{ user: AuthUser }>('/profile').then(result => {
+            if (version === authVersion.current && userIdRef.current === result.user.id) setUser(result.user)
+          }).catch(() => undefined)
+        }
+      },
+      onOffline: () => { if (setLiveConnected(false)) void queryClient.invalidateQueries({ refetchType: 'none' }) },
+    })
+  }, [presenceUserId, liveOrganizationId, queryClient, refresh, liveEnabled, apiRequest])
+  useEffect(() => {
     if (!presenceUserId) return
-    const heartbeat = () => { if (document.visibilityState === 'visible') void apiRequest('/profile/presence', { method: 'POST', body: { visible: true } }).catch(() => undefined) }
+    const heartbeat = () => { if (document.visibilityState === 'visible' && !isLiveConnected()) void apiRequest('/profile/presence', { method: 'POST', body: { visible: true } }).catch(() => undefined) }
     heartbeat()
     const timer = window.setInterval(heartbeat, 30_000)
     document.addEventListener('visibilitychange', heartbeat)

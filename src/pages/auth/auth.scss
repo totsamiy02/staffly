@@ -1,4 +1,5 @@
 .auth {
+  --auth-field-background: var(--theme-surface,#202020);
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   min-height: 100dvh;
@@ -165,11 +166,11 @@
   padding: 0 14px;
   border: 1px solid var(--theme-border-strong,#494949);
   border-radius: 12px;
-  background: var(--theme-translucent,rgb(255 255 255 / 4%));
+  background: var(--auth-field-background);
 }
 
 .auth__field:focus-within {
-  border-color: var(--theme-border,#ccc);
+  border-color: var(--theme-focus,#ccc);
 }
 
 .auth__field--invalid {
@@ -189,18 +190,18 @@
   min-width: 0;
   border: 0;
   outline: 0;
+  appearance: none;
+  border-radius: 0;
+  box-shadow: none;
   background: none;
   color: var(--theme-on-solid,#fff);
   font-size: 15px;
 }
 
-.auth__field input:-webkit-autofill,
-.auth__field input:-webkit-autofill:hover,
-.auth__field input:-webkit-autofill:focus {
-  -webkit-text-fill-color: var(--theme-on-solid,#fff);
-  box-shadow: 0 0 0 1000px #202020 inset;
-  caret-color: var(--theme-on-solid,#fff);
-  transition: background-color 9999s ease-out;
+.auth__field input:is(:-webkit-autofill, :autofill) {
+  -webkit-text-fill-color: var(--field-value);
+  box-shadow: 0 0 0 1000px var(--auth-field-background) inset;
+  caret-color: var(--field-value);
 }
 
 .auth__field input::placeholder {

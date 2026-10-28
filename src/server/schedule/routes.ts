@@ -4,7 +4,7 @@ import { offerBody, offerModesBody, offerListQuery, offerActionBody, getOfferMod
 import { reportSickness, listAbsences, changeAbsence, absenceReportBody, absenceEditBody, absenceCancelBody, absenceListQuery } from './absence-service.ts'
 import { planningData, savePosition, saveTemplate, assignPositions, saveWorkload, positionBody, templateBody, assignmentBody, workloadBody } from './planning/planning.ts'
 import { Router, type Request } from 'express'
-import { rateLimit } from 'express-rate-limit'
+import { accountRateLimit } from '../security/rate-limit.ts'
 import { z } from 'zod'
 import { requireAuth, type AuthenticatedRequest } from '../auth.ts'
 import { ApiError } from '../api-error.ts'
@@ -15,7 +15,7 @@ import { cancelledShiftsQuery } from './schemas.ts'
 import { listCancelledShifts } from './service.ts'
 
 const router = Router()
-const mutationLimiter = rateLimit({ windowMs: 60 * 1000, limit: 120, standardHeaders: 'draft-8', legacyHeaders: false, message: { code: 'TOO_MANY_REQUESTS', message: 'Слишком много изменений. Попробуйте через минуту.' } })
+const mutationLimiter = accountRateLimit('schedule', 120, 60000)
 router.use(requireAuth)
 
 router.get('/organizations/:organizationId/schedule/shifts/:shiftId/time-correction', async (request, response) => {

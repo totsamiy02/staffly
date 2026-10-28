@@ -131,9 +131,27 @@ export async function createRequest(userId: string, organizationId: string, inpu
   const startDate = dateValue(input.startDate)
   const endDate = type.dateMode === 'SINGLE' ? startDate : dateValue(input.endDate)
   return prisma.$transaction(async (tx) => {
-    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId}, 1))::text`
+    // Independent vacation/free-form submissions may proceed together. Shared
+    // locks still exclude membership, role, folder and organization transitions.
+    if (type.systemCode === 'VACATION' || type.systemCode === 'OTHER') {
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock_shared(hashtextextended(${organizationId}, 1))::text`
+    } else await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId}, 1))::text`
+    if (input.submissionKey) await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId + ':' + input.submissionKey}, 2))::text`
+    const currentAuthor = await getMembership(userId, organizationId, tx)
+    requirePermission(currentAuthor, type.systemCode === 'STAFFING' ? 'staffing.create' : 'requests.create')
+    if (scopedLocationId(organizationId) && !currentAuthor.assignedLocationId && currentAuthor.role !== 'OWNER' && type.systemCode !== 'STAFFING') throw new ApiError(403, 'MEMBER_NOT_IN_LOCATION', 'Сотрудник больше не назначен в эту точку.')
+    if (definition.submitRoleIds.length && !currentAuthor.owner) {
+      const roles = await tx.accessRole.findMany({ where: { organizationId, id: { in: definition.submitRoleIds } } })
+      if (!roles.some(role => currentAuthor.accessRoleId === role.id || currentAuthor.accessAssignments.some(assignment => assignment.locationId === currentAuthor.locationId && assignment.roleId === role.id) || !currentAuthor.accessConfigured && role.systemCode === currentAuthor.role)) throw new ApiError(403, 'SUBMISSION_FORBIDDEN', 'Роль не может подавать этот тип обращения.')
+    }
+    if (author.id !== actor.id) {
+      requirePermission(currentAuthor, 'requests.onBehalf')
+      const target = await getMembership(actor.userId, organizationId, tx)
+      if (target.id !== actor.id || target.locationId !== actor.locationId || !target.assignedLocationId) throw new ApiError(409, 'MEMBER_CHANGED', 'Состав сотрудников изменился. Повторите запрос.')
+    }
+    await tx.$queryRaw`SELECT id FROM request_types WHERE id = ${type.id}::uuid AND organization_id = ${organizationId}::uuid FOR SHARE`
     if(input.submissionKey){const existing=await tx.organizationRequest.findFirst({where:{organizationId,submissionKey:input.submissionKey,authorMemberId:author.id}});if(existing)return existing}
-    if (!await tx.requestType.findFirst({ where: { id: type.id, organizationId, isActive: true, deletedAt: null } })) throw new ApiError(409, 'REQUEST_TYPE_NOT_FOUND', 'Этот тип больше недоступен для новых заявок.')
+    if (!await tx.requestType.findFirst({ where: { id: type.id, organizationId, version: type.version, isActive: true, deletedAt: null } })) throw new ApiError(409, 'REQUEST_TYPE_NOT_FOUND', 'Этот тип изменился или больше недоступен для новых заявок.')
     if (type.systemCode === 'STAFFING') await requireLocationManager(tx, userId, organizationId, actor.locationId, 'staffing.create')
     if (shift) {
       await lockShift(tx, shift.id)
@@ -143,7 +161,7 @@ export async function createRequest(userId: string, organizationId: string, inpu
     const request = await tx.organizationRequest.create({ data: { organizationId, locationId: actor.locationId, createdByMemberId: actor.id, authorMemberId:author.id, submissionKey:input.submissionKey, formSnapshot:{...definition,dateMode:type.dateMode,requiresComment:type.requiresComment,allowsAttachments:type.allowsAttachments,version:type.version}, answers, status:input.draft?"DRAFT":"PENDING", dueAt:input.draft?null:new Date(Date.now()+definition.deadlineDays*86400000), requestTypeId: type.id, typeNameSnapshot: type.name, systemCodeSnapshot: type.systemCode, startDate, endDate, comment: input.comment?.trim() || null, relatedShiftId: input.relatedShiftId || null, originalStartAt: shift?.scheduledStartAt, originalEndAt: shift?.scheduledEndAt, proposedStartAt, proposedEndAt, ...(type.systemCode === 'STAFFING' ? { staffingPositionId: position?.id, staffingPositionName: position?.name ?? input.staffingPositionName } : {}) } })
     await tx.requestEvent.create({ data: { requestId: request.id, actorMemberId: actor.id, type: 'CREATED' } })
     if(input.draft)return request
-    if(!type.systemCode || type.systemCode==='VACATION'){await ensureReviewers(tx,request);await notifyStage(tx,request)}
+    if(!type.systemCode || type.systemCode==='VACATION')await notifyStage(tx,request,await ensureReviewers(tx,request))
     if (type.systemCode === 'STAFFING') {
       const recipients = await tx.organizationMember.findMany({ where: { organizationId, leftAt: null, user: { deletedAt: null }, locationMemberships: { some: { leftAt: null, locationId: { not: actor.locationId }, location: { archivedAt: null } }, none: { locationId: actor.locationId, leftAt: null } } }, select: { userId: true } })
       if (recipients.length) await tx.accountNotification.createMany({ data: recipients.map(member => ({ organizationId, userId: member.userId, requestId: request.id, type: 'REQUEST_CREATED', title: 'Нужен сотрудник на подмену', message: `${actor.location.name} · ${position?.name ?? input.staffingPositionName}` })) })
@@ -248,8 +266,6 @@ export async function listRequests(userId: string, organizationId: string, scope
   if (scope !== 'mine' && scope !== 'staffing' && options.pointId && options.pointId !== 'all') await requireLocationManager(prisma, userId, organizationId, options.pointId, 'requests.view')
   if (scope !== 'mine' && scope !== 'staffing' && !selfProfile && !options.pointId) requirePermission(actor, 'requests.view')
   await reconcileShiftRequests(organizationId)
-  const custom=await prisma.organizationRequest.findMany({where:{organizationId,systemCodeSnapshot:null},select:{id:true,createdByMemberId:true,authorMemberId:true,locationId:true,formSnapshot:true,outcome:true}})
-  const denied:string[]=[];for(const r of custom)if(!await canReadCustom(prisma,actor,r))denied.push(r.id)
   const selectedRole=options.roleId?await prisma.accessRole.findFirst({where:{organizationId,id:options.roleId},select:{systemCode:true}}):null
   const dateFilters: Prisma.OrganizationRequestWhereInput[] = []
   if (options.from || options.to) {
@@ -260,13 +276,22 @@ export async function listRequests(userId: string, organizationId: string, scope
       { startDate: null, proposedStartAt: null, createdAt: { ...(options.from ? { gte: startOfZonedDate(options.from, actor.organization.timezone) } : {}), ...(options.to ? { lt: startOfZonedDate(addCalendarDays(options.to, 1), actor.organization.timezone) } : {}) } },
     ] })
   }
-  const where: Prisma.OrganizationRequestWhereInput = { organizationId, id:{notIn:denied}, ...pointScope,
+  const where: Prisma.OrganizationRequestWhereInput = { organizationId, ...pointScope,
     ...(scope === 'profile' ? { createdByMemberId: options.memberId, status: options.status ?? (selfProfile ? undefined : { notIn: ['DRAFT', 'RETURNED'] }) } : scope === 'staffing' ? { systemCodeSnapshot: 'STAFFING', status: options.status ?? 'PENDING', proposedStartAt: { gt: new Date() } } : scope === 'mine' ? { OR:[{createdByMemberId:actor.id},{authorMemberId:actor.id},{outcome:{path:['assignees'],array_contains:[actor.id]}}], ...(options.status ? { status: options.status } : {}) } : scope === 'incoming' ? { status: 'PENDING' } : { status: options.status ? options.status : { in: ['APPROVED', 'REGISTERED', 'REJECTED', 'CANCELLED','EXPIRED','INVALID'] } }),
     ...(options.typeId ? { requestTypeId: options.typeId } : {}), ...(options.memberId && scope !== 'mine' ? { createdByMemberId: options.memberId } : {}),
     ...(options.roleId&&scope!=='mine'?{OR:[{creator:{accessRoleId:options.roleId}},...((options.pointId&&options.pointId!=='all')?[options.pointId]:locationsFor(actor,'requests.view')).map(locationId=>({locationId,creator:{OR:[{accessAssignments:{some:{locationId,roleId:options.roleId}}},...(selectedRole?.systemCode==='ADMIN'||selectedRole?.systemCode==='MEMBER'?[{accessConfigured:false,locationMemberships:{some:{locationId,leftAt:null,role:selectedRole.systemCode as 'ADMIN'|'MEMBER'}}}]:[])]}}))]}:options.role && scope !== 'mine' ? { creator: { role: options.role } } : {}),
     AND: [...dateFilters, ...(scope === 'profile' && !selfProfile ? [{ status: { notIn: ['DRAFT', 'RETURNED'] as RequestStatus[] } }] : []), ...(options.search ? options.search.trim().split(/\s+/).map((term) => ({ creator: { user: { OR: [{ email: { contains: term, mode: 'insensitive' as const } }, { firstName: { contains: term, mode: 'insensitive' as const } }, { lastName: { contains: term, mode: 'insensitive' as const } }, { middleName: { contains: term, mode: 'insensitive' as const } }] } } })) : [])],
   }
-  const [total, rows] = await prisma.$transaction([prisma.organizationRequest.count({ where }), prisma.organizationRequest.findMany({ where, include: requestInclude, orderBy: { createdAt: 'desc' }, skip: (options.page - 1) * options.pageSize, take: options.pageSize })])
+  if (!actor.owner && scope !== 'staffing') {
+    // Apply point, author, status, date and search filters BEFORE loading snapshots.
+    // Roles are bounded by the organization role limit and reused across all rows.
+    const custom = await prisma.organizationRequest.findMany({ where: { ...where, systemCodeSnapshot: null }, select: { id: true, createdByMemberId: true, authorMemberId: true, locationId: true, formSnapshot: true, outcome: true } })
+    const roles = custom.length ? await prisma.accessRole.findMany({ where: { organizationId }, select: { id: true, systemCode: true } }) : []
+    const denied: string[] = []
+    for (const item of custom) if (!await canReadCustom(prisma, actor, item, roles)) denied.push(item.id)
+    if (denied.length) where.id = { notIn: denied }
+  }
+  const [total, rows] = await prisma.$transaction([prisma.organizationRequest.count({ where }), prisma.organizationRequest.findMany({ where, include: requestInclude, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], skip: (options.page - 1) * options.pageSize, take: options.pageSize })])
   const unread = scope === 'incoming' ? await prisma.organizationRequest.count({ where: { ...where, reads: { none: { memberId: actor.id } } } }) : 0
   return { requests: rows.map((item) => publicRequest(item, actor.id, actor)), pagination: { page: options.page, pageSize: options.pageSize, total, pages: Math.max(1, Math.ceil(total / options.pageSize)) }, counters: { pending: scope === 'incoming' ? total : 0, unread } }
 }

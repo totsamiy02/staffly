@@ -1,11 +1,19 @@
 import { ApiError } from '../api-error.ts'
 
 type DateParts = { year: number; month: number; day: number; hour: number; minute: number; second: number }
+const formatters = new Map<string, Intl.DateTimeFormat>()
+const conversions = new Map<string, number>()
 
 function partsInZone(date: Date, timeZone: string): DateParts {
-  const values = new Intl.DateTimeFormat('en-CA', {
-    timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
-  }).formatToParts(date).reduce<Record<string, string>>((result, part) => { result[part.type] = part.value; return result }, {})
+  let formatter = formatters.get(timeZone)
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+    })
+    if (formatters.size >= 128) formatters.delete(formatters.keys().next().value!)
+    formatters.set(timeZone, formatter)
+  }
+  const values = formatter.formatToParts(date).reduce<Record<string, string>>((result, part) => { result[part.type] = part.value; return result }, {})
   return { year: Number(values.year), month: Number(values.month), day: Number(values.day), hour: Number(values.hour), minute: Number(values.minute), second: Number(values.second) }
 }
 
@@ -15,6 +23,9 @@ function offsetAt(date: Date, timeZone: string) {
 }
 
 export function zonedDateTimeToUtc(dateValue: string, timeValue: string, timeZone: string) {
+  const key = `${dateValue}T${timeValue}@${timeZone}`
+  const cached = conversions.get(key)
+  if (cached !== undefined) return new Date(cached)
   const [year, month, day] = dateValue.split('-').map(Number)
   const [hour, minute] = timeValue.split(':').map(Number)
   const wallClock = Date.UTC(year, month - 1, day, hour, minute)
@@ -24,6 +35,8 @@ export function zonedDateTimeToUtc(dateValue: string, timeValue: string, timeZon
   if (actual.year !== year || actual.month !== month || actual.day !== day || actual.hour !== hour || actual.minute !== minute) {
     throw new ApiError(400, 'INVALID_LOCAL_TIME', 'Выбранное местное время не существует в часовом поясе организации.')
   }
+  if (conversions.size >= 4096) conversions.delete(conversions.keys().next().value!)
+  conversions.set(key, result.getTime())
   return result
 }
 

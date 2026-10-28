@@ -1,7 +1,7 @@
 import { needsPreparedPreview, preparePreview, readPreviewSource } from '../file-preview/service.ts'
 import express, { Router, type Request } from 'express'
 import { z } from 'zod'
-import { rateLimit } from 'express-rate-limit'
+import { accountRateLimit } from '../security/rate-limit.ts'
 import { pipeline } from 'node:stream/promises'
 import { requireAuth, type AuthenticatedRequest } from '../auth.ts'
 import { ApiError } from '../api-error.ts'
@@ -9,8 +9,8 @@ import { assignSchema, folderSchema, listSchema, metadataSchema, paramsSchema } 
 import { MAX_DOCUMENT_BYTES } from './file-validation.ts'
 import { previewDocumentAudience, acknowledgeDocument, assignAcknowledgements, cancelAcknowledgement, deleteDocument, deleteFolder, deliverDocument, documentMembers, documentProgress, getDocument, listDocuments, personalDocuments, recordDocumentOpened, saveFolder, setFolderPinned, updateDocument, uploadDocument } from './service.ts'
 const router = Router()
-const mutate = rateLimit({ windowMs: 60000, limit: 60, standardHeaders: 'draft-8', legacyHeaders: false })
-const upload = rateLimit({ windowMs: 15 * 60000, limit: 20, standardHeaders: 'draft-8', legacyHeaders: false })
+const mutate = accountRateLimit('documents', 60, 60000)
+const upload = accountRateLimit('document-uploads', 20, 900000)
 const body = express.raw({ type: () => true, limit: MAX_DOCUMENT_BYTES })
 const base = '/organizations/:organizationId/documents'
 function user(request: Request) { return (request as AuthenticatedRequest).auth!.userId }

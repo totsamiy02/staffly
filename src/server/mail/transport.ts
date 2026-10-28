@@ -6,7 +6,13 @@ const smtpPassword = process.env.SMTP_APP_PASSWORD
 const smtpReady = Boolean(smtpUser && smtpPassword)
 if (process.env.NODE_ENV === 'production' && !smtpReady) throw new Error('SMTP_USER and SMTP_APP_PASSWORD are required in production')
 if (process.env.NODE_ENV === 'development' && !smtpReady) console.log('SMTP is not configured: email contents will be printed in this terminal.')
-const transport = smtpReady ? nodemailer.createTransport({ connectionTimeout: 15_000, greetingTimeout: 10_000, socketTimeout: 30_000, host: process.env.SMTP_HOST ?? 'smtp.yandex.ru', port: Number(process.env.SMTP_PORT ?? 465), secure: Number(process.env.SMTP_PORT ?? 465) === 465, auth: { user: smtpUser?.endsWith('@yandex.ru') ? smtpUser.split('@')[0] : smtpUser, pass: smtpPassword } }) : null
+export function getSmtpOptions(env: NodeJS.ProcessEnv = process.env) {
+  const port = Number(env.SMTP_PORT ?? 465), user = env.SMTP_USER
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('SMTP_PORT must be a valid port')
+  return { connectionTimeout: 15_000, greetingTimeout: 10_000, socketTimeout: 30_000, host: env.SMTP_HOST ?? 'smtp.yandex.ru', port, secure: port === 465, requireTLS: port !== 465, tls: { minVersion: 'TLSv1.2' as const }, auth: { user: user?.endsWith('@yandex.ru') ? user.split('@')[0] : user, pass: env.SMTP_APP_PASSWORD } }
+}
+const smtpOptions = getSmtpOptions()
+const transport = smtpReady ? nodemailer.createTransport(smtpOptions) : null
 
 export type EmailContent = {
   title: string; eyebrow?: string; intro: string; organization?: string;

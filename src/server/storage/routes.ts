@@ -1,16 +1,16 @@
 import express, { Router, type Request } from 'express'
-import { rateLimit } from 'express-rate-limit'
+import { accountRateLimit } from '../security/rate-limit.ts'
 import { z } from 'zod'
 import { ApiError } from '../api-error.ts'
 import { requireAuth, type AuthenticatedRequest } from '../auth.ts'
 import { prisma } from '../db.ts'
 import { organizationIdParams } from '../organizations/schemas.ts'
 import { MAX_IMAGE_BYTES, removeOrganizationLogo, removeUserAvatar, replaceOrganizationLogo, replaceUserAvatar } from './image-service.ts'
-import { readObject } from './local-file-storage.ts'
+import { storage } from './provider.ts'
 
 const router = Router()
 const imageBody = express.raw({ type: ['image/jpeg', 'image/png', 'image/webp'], limit: MAX_IMAGE_BYTES })
-const uploadLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 20, standardHeaders: 'draft-8', legacyHeaders: false, message: { code: 'TOO_MANY_UPLOADS', message: 'Слишком много загрузок. Попробуйте позже.' } })
+const uploadLimiter = accountRateLimit('image-uploads', 20, 900000)
 
 function auth(request: Request) { return (request as AuthenticatedRequest).auth! }
 
@@ -20,7 +20,7 @@ router.get('/media/:fileId', async (request, response) => {
   const file = await prisma.storedFile.findFirst({ where: { id: parsed.data, pendingDeletionAt: null, purpose: { in: ['USER_AVATAR', 'ORGANIZATION_LOGO'] } } })
   if (!file) throw new ApiError(404, 'MEDIA_NOT_FOUND', 'Изображение не найдено.')
   let contents: Buffer
-  try { contents = await readObject(file.objectKey) }
+  try { contents = await storage.read(file.objectKey) }
   catch (error) {
     if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') throw new ApiError(404, 'MEDIA_NOT_FOUND', 'Изображение не найдено.')
     throw error

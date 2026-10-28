@@ -3,7 +3,7 @@ import type { NextFunction, Request, Response } from 'express'
 import { Router } from 'express'
 import { rateLimit, ipKeyGenerator } from 'express-rate-limit'
 import type { User } from '../generated/prisma/client.ts'
-import { SignJWT, jwtVerify } from 'jose'
+import { SignJWT, jwtVerify, errors as joseErrors } from 'jose'
 import { z } from 'zod'
 import { prisma } from './db.ts'
 import { deliverSecurityCode } from './mail/transport.ts'
@@ -14,7 +14,10 @@ import { passwordSchema as password, passwordHash, verifyLoginPassword } from '.
 import { lockAccount, invalidateSecurityChallenges, revokeOtherSessions, securityChanged } from './auth/account-security.ts'
 import { createEmailChangeRouter } from './auth/email-change-routes.ts'
 import { clearPasswordAttempts, reserveAuthAttempt } from './auth/attempt-limits.ts'
+import { accountRateLimit, PostgresRateLimitStore } from './security/rate-limit.ts'
 export { verifyLoginPassword } from './auth/passwords.ts'
+import { sessionTransaction } from './auth/session-transaction.ts'
+import { recordTiming } from './performance.ts'
 
 const jwtSecret = process.env.JWT_SECRET
 if (!jwtSecret || jwtSecret.length < 32) throw new Error('JWT_SECRET must contain at least 32 characters')
@@ -41,9 +44,11 @@ const verifyBody = resetBody.and(z.object({ consentData: z.literal(true), consen
 const changeBody = z.object({ currentPassword: z.string().min(1).max(256), newPassword: password })
 
 const tooManyRequests = (_request: Request, response: Response) => response.status(429).json({ message: 'Слишком много запросов. Попробуйте позже.' })
-const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 100, standardHeaders: 'draft-8', legacyHeaders: false, handler: tooManyRequests, skip: request => request.method === 'GET' || request.path === '/refresh' })
-const refreshLimiter = rateLimit({ windowMs: 60_000, limit: 120, standardHeaders: 'draft-8', legacyHeaders: false, handler: tooManyRequests })
-const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: 'draft-8', legacyHeaders: false, handler: tooManyRequests })
+const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 100, store: new PostgresRateLimitStore('auth-ip', 100), standardHeaders: 'draft-8', legacyHeaders: false, handler: tooManyRequests, skip: request => request.method === 'GET' || request.path === '/refresh' })
+const refreshLimiter = rateLimit({ windowMs: 60_000, limit: 120, store: new PostgresRateLimitStore('refresh-ip', 120), standardHeaders: 'draft-8', legacyHeaders: false, handler: tooManyRequests })
+// Account-level password attempts remain 10/15 min across every IP and replica.
+// This coarser IP budget permits a normal 20–40-person office to sign in together.
+const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 100, store: new PostgresRateLimitStore('login-ip', 100), standardHeaders: 'draft-8', legacyHeaders: false, handler: tooManyRequests })
 const accountLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 5,
@@ -104,7 +109,10 @@ export async function createSession(user: User, request: Request, response: Resp
   const browserCookie = request.cookies?.[BROWSER_COOKIE_NAME]
   const browserToken = typeof browserCookie === 'string' && /^[A-Za-z0-9_-]{64}$/.test(browserCookie) ? browserCookie : newToken()
   const browserTokenHash = digest(browserToken)
-  const { session, account } = await prisma.$transaction(async tx => {
+  const { session, account } = await sessionTransaction(() => prisma.$transaction(async tx => {
+    // Serialize continuity for one browser, then lock the account against security
+    // changes. Fresh READ COMMITTED snapshots avoid unrelated SSI conflicts at login.
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${browserTokenHash}, 7))::text`
     await tx.$queryRaw`SELECT id FROM users WHERE id = ${user.id}::uuid FOR UPDATE`
     const account = await tx.user.findUnique({ where: { id: user.id } })
     if (!account || account.deletedAt || !account.emailVerifiedAt || account.securityVersion !== user.securityVersion) throw securityChanged()
@@ -119,31 +127,44 @@ export async function createSession(user: User, request: Request, response: Resp
     if (previous && previous.id !== current?.id && !previous.revokedAt) await tx.authSession.update({ where: { id: previous.id }, data: { revokedAt: new Date(now), lastActiveAt: null } })
     const session = current ? await tx.authSession.update({ where: { id: current.id }, data: { ...data, idleExpiresAt: new Date(Math.min(now + IDLE_MS, current.absoluteExpiresAt.getTime())) } }) : await tx.authSession.create({ data: { ...data, userId: user.id, absoluteExpiresAt: new Date(now + ABSOLUTE_MS) } })
     return { session, account }
-  }, { isolationLevel: 'Serializable' })
+  }, { isolationLevel: 'ReadCommitted' }))
   setRefreshCookie(response, rawToken)
   response.cookie(BROWSER_COOKIE_NAME, browserToken, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', path: COOKIE_PATH, maxAge: 365 * 24 * 60 * 60 * 1000 })
   return { user: publicUser(account), accessToken: await accessToken(account.id, session.id) }
 }
 
-export type AuthenticatedRequest = Request & { auth?: { userId: string; sessionId: string; email: string } }
+export type AuthenticatedRequest = Request & { auth?: { userId: string; sessionId: string; email: string; accessExpiresAt?: number } }
+// Only this middleware can populate the cache. It lives for one Request, never across requests.
+const authenticatedRequests = new WeakSet<Request>()
+const accountTraffic = accountRateLimit('api-account', 600)
 
 export async function requireAuth(request: AuthenticatedRequest, response: Response, next: NextFunction) {
+  if (authenticatedRequests.has(request)) { next(); return }
+  const started = performance.now()
   const bearer = request.get('authorization')?.match(/^Bearer (.+)$/)
   if (!bearer) { response.status(401).json({ message: 'Требуется вход в аккаунт.' }); return }
   try {
     const { payload } = await jwtVerify(bearer[1], jwtKey, { algorithms: ['HS256'] })
-    if (typeof payload.sub !== 'string' || typeof payload.sid !== 'string') throw new Error('Invalid token')
-    const session = await prisma.authSession.findUnique({ where: { id: payload.sid }, include: { user: true } })
+    if (typeof payload.sub !== 'string' || typeof payload.sid !== 'string' || !z.uuid().safeParse(payload.sub).success || !z.uuid().safeParse(payload.sid).success) throw new Error('Invalid token')
+    const blocked = accountTraffic.blocked(payload.sub)
+    if (blocked) { response.set('Retry-After', String(Math.max(1, Math.ceil((+blocked.resetTime - Date.now()) / 1000)))).status(429).json({ code: 'TOO_MANY_REQUESTS', message: 'Слишком много запросов. Повторите попытку позже.' }); return }
+    const [session] = await prisma.$queryRaw<Array<{ id: string; userId: string; revokedAt: Date | null; idleExpiresAt: Date; absoluteExpiresAt: Date; lastUsedAt: Date; email: string; userDeletedAt: Date | null; emailVerifiedAt: Date | null }>>`
+      SELECT s.id, s.user_id AS "userId", s.revoked_at AS "revokedAt", s.idle_expires_at AS "idleExpiresAt",
+        s.absolute_expires_at AS "absoluteExpiresAt", s.last_used_at AS "lastUsedAt", u.email,
+        u.deleted_at AS "userDeletedAt", u.email_verified_at AS "emailVerifiedAt"
+      FROM auth_sessions s JOIN users u ON u.id = s.user_id WHERE s.id = ${payload.sid}::uuid LIMIT 1`
     const now = new Date()
-    if (!session || session.userId !== payload.sub || session.revokedAt || session.idleExpiresAt <= now || session.absoluteExpiresAt <= now || session.user.deletedAt || !session.user.emailVerifiedAt) {
+    if (!session || session.userId !== payload.sub || session.revokedAt || session.idleExpiresAt <= now || session.absoluteExpiresAt <= now || session.userDeletedAt || !session.emailVerifiedAt) {
       response.status(401).json({ message: 'Сессия завершена.' }); return
     }
-    request.auth = { userId: session.userId, sessionId: session.id, email: session.user.email }
+    request.auth = { userId: session.userId, sessionId: session.id, email: session.email, accessExpiresAt: typeof payload.exp === 'number' ? payload.exp * 1000 : undefined }
+    authenticatedRequests.add(request)
     if (session.lastUsedAt.getTime() < now.getTime() - 60_000) await prisma.authSession.updateMany({ where: { id: session.id, revokedAt: null }, data: { lastUsedAt: now } })
-    next()
-  } catch {
-    response.status(401).json({ message: 'Сессия завершена.' })
-  }
+    accountTraffic(request, response, next)
+  } catch (error) {
+    if (error instanceof joseErrors.JOSEError || error instanceof Error && error.message === 'Invalid token') response.status(401).json({ message: 'Сессия завершена.' })
+    else next(error)
+  } finally { recordTiming('auth', performance.now() - started) }
 }
 
 const sentMessage = process.env.NODE_ENV === 'development' && (!process.env.SMTP_USER || !process.env.SMTP_APP_PASSWORD)
