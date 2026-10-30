@@ -3,7 +3,7 @@
 :root { --dialog-viewport-gap:24px; --dialog-radius:14px; }
 .schedule-modal {
   position:fixed; z-index:40; display:grid; inset:0; place-items:center; grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(0,1fr);
-  padding:var(--dialog-viewport-gap); overflow:hidden;
+  width:100vw; padding:var(--dialog-viewport-gap); overflow:hidden;
   background:rgb(0 0 0 / 42%); backdrop-filter:blur(3px);
   animation:schedule-fade-in .2s ease both;
   >* {animation:schedule-modal-in .24s cubic-bezier(.2,.75,.2,1) both;}

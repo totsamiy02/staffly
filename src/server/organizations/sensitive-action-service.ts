@@ -63,10 +63,8 @@ export async function claimSensitiveToken(tx: Prisma.TransactionClient, userId: 
     where: { id: token.id, usedAt: null, attempts: { lt: MAX_ATTEMPTS }, expiresAt: { gt: new Date() } },
     data: { attempts: { increment: 1 }, ...(valid ? { usedAt: new Date() } : {}) },
   })
-  if (!claimed.count || !valid) {
-    if (action === 'ARCHIVE_LOCATION') return null
-    throw new ApiError(400, 'INVALID_VERIFICATION_CODE', 'Код неверен или срок его действия истёк.')
-  }
+  // Return a failed claim so callers commit its attempt counter before reporting an error.
+  if (!claimed.count || !valid) return null
   return token
 }
 
@@ -76,7 +74,8 @@ export async function confirmOwnershipTransfer(userId: string, organizationId: s
   const actorUser = await prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { email: true } })
   const result = await prisma.$transaction(async (tx) => {
     const token = await claimSensitiveToken(tx, userId, organizationId, 'TRANSFER_OWNERSHIP', code)
-    if (!token?.targetUserId) throw new ApiError(400, 'INVALID_OWNERSHIP_TARGET', 'Участник для передачи владения не найден.')
+    if (!token) return null
+    if (!token.targetUserId) throw new ApiError(400, 'INVALID_OWNERSHIP_TARGET', 'Участник для передачи владения не найден.')
     const target = await tx.organizationMember.findUnique({ where: { organizationId_userId: { organizationId, userId: token.targetUserId } }, include: { user: true } })
     if (!target || target.leftAt || target.user.deletedAt || target.role === 'OWNER') throw new ApiError(400, 'INVALID_OWNERSHIP_TARGET', 'Участник для передачи владения недоступен.')
     await tx.organizationMember.update({ where: { id: actor.id }, data: { role: 'MEMBER' } })
@@ -93,19 +92,23 @@ export async function confirmOwnershipTransfer(userId: string, organizationId: s
     await enqueueEmail(tx, { userId, organizationId, sourceKind: 'MANDATORY', sourceKey: `ownership:previous:${token.id}`, content: { title: 'Владение передано', eyebrow: 'Безопасность', organization: actor.organization.name, intro: `Вы передали организацию «${actor.organization.name}» участнику ${targetName}.`, fields: [['Ваша новая роль', 'Администратор']], action, footer: 'Если это сделали не вы, немедленно восстановите доступ.' } })
     return { ownerUserId: target.userId }
   }, { isolationLevel: 'Serializable' })
+  if (!result) throw new ApiError(400, 'INVALID_VERIFICATION_CODE', 'Код неверен или срок его действия истёк.')
   return { ownerUserId: result.ownerUserId }
 }
 
 export async function confirmOrganizationDeletion(userId: string, organizationId: string, code: string) {
   const actor = await getMembership(userId, organizationId)
   requireOrganizationRole(actor.role, ['OWNER'])
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const token = await claimSensitiveToken(tx, userId, organizationId, 'DELETE_ORGANIZATION', code)
+    if (!token) return null
     const now = new Date()
     const deleted = await tx.organization.updateMany({ where: { id: organizationId, deletedAt: null }, data: { deletedAt: now } })
     if (!deleted.count) throw new ApiError(404, 'ORGANIZATION_NOT_FOUND', 'Организация не найдена.')
     await tx.organizationInvite.updateMany({ where: { organizationId, acceptedAt: null, rejectedAt: null, revokedAt: null }, data: { revokedAt: now } })
-    await enqueueEmail(tx, { userId, organizationId, sourceKind: 'MANDATORY', sourceKey: `organization:deleted:${token!.id}`, content: { title: 'Организация удалена', eyebrow: 'Подтверждение действия', intro: `Удаление организации «${actor.organization.name}» подтверждено. Доступ к ней закрыт.`, fields: [['Дата и время', now.toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' }) + ' МСК']], action: { label: 'К моим организациям', path: '/app' }, footer: 'Если это сделали не вы, проверьте безопасность аккаунта.' } })
+    await enqueueEmail(tx, { userId, organizationId, sourceKind: 'MANDATORY', sourceKey: `organization:deleted:${token.id}`, content: { title: 'Организация удалена', eyebrow: 'Подтверждение действия', intro: `Удаление организации «${actor.organization.name}» подтверждено. Доступ к ней закрыт.`, fields: [['Дата и время', now.toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' }) + ' МСК']], action: { label: 'К моим организациям', path: '/app' }, footer: 'Если это сделали не вы, проверьте безопасность аккаунта.' } })
     return { deleted: true }
   }, { isolationLevel: 'Serializable' })
+  if (!result) throw new ApiError(400, 'INVALID_VERIFICATION_CODE', 'Код неверен или срок его действия истёк.')
+  return result
 }

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { before, after, describe, it } from 'node:test'
 import { randomUUID } from 'node:crypto'
 import { prisma } from '../../src/server/db.ts'
-import { createOrganization } from '../../src/server/organizations/organization-service.ts'
+import { createBusinessOrganization as createOrganization } from '../support/business-organization.ts'
 import { memberProfile, type MemberProfileOptions } from '../../src/server/organizations/member-profile-service.ts'
 import { locationContext } from '../../src/server/organizations/location-context.ts'
 

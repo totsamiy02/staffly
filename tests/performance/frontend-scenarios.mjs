@@ -51,7 +51,7 @@ async function inventory(directory) {
 export async function runFrontend({ prisma, env, root, temporary, output, options, startApi }) {
   const requestTab = options['request-tab'] ?? 'mine'
   assert(['mine', 'incoming'].includes(requestTab), '--request-tab must be mine or incoming')
-  const { createOrganization } = await import('../../src/server/organizations/organization-service.ts')
+  const { createBusinessOrganization: createOrganization } = await import('../support/business-organization.ts')
   const ui = options.ui === 'true'
   const passwordHash = await hash(randomUUID())
   const owner = await prisma.user.create({ data: { email: ui ? 'anna@example.test' : `frontend-${randomUUID()}@example.test`, passwordHash, emailVerifiedAt: new Date(), firstName: ui ? 'Анна' : 'Performance', lastName: ui ? 'Смирнова' : 'Test' } })
@@ -192,7 +192,7 @@ export async function runFrontend({ prisma, env, root, temporary, output, option
       result.viewerImports = { files: viewers, exports: imported.result.value, passed: true }
     } finally { cdp.close(); await fetch(`http://127.0.0.1:${port}/json/close/${target.id}`) }
     if (ui) {
-      const { runUiSmoke } = await import('./ui-scenarios.mjs')
+      const { runUiSmoke } = await import(options['subscriptions-ui'] === 'true' ? './subscription-ui-scenarios.mjs' : './ui-scenarios.mjs')
       result.ui = await runUiSmoke({ prisma, owner, org, origin, port, root, temporary, output, connect, controls, publishGuideExamples: options['publish-guide-examples'] === 'true' })
     }
     await rm(path.join(output, 'frontend-progress.json'), { force: true })

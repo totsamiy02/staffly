@@ -1,3 +1,4 @@
+import { requireLocationInPlan, requirePlanFeature } from '../../subscriptions/access.ts'
 import { mediaUrl } from '../../storage/image-service.ts'
 import { normalizePermissions } from '../../../app/access/catalog.ts'
 import { z } from 'zod'
@@ -22,6 +23,7 @@ export async function saveAccessRole(userId: string, org: string, id: string | n
     await db.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${org}, 1))::text`
     const actor = await owner(db, userId, org), roles = await ensureAccessRoles(db, org), current = roles.find(r => r.id === id)
     if (id && !current) throw new ApiError(404, 'ROLE_NOT_FOUND', 'Роль не найдена.')
+    if (!current?.systemCode) await requirePlanFeature(org, 'customRoles', db)
     if (current?.systemCode === 'OWNER') throw new ApiError(403, 'PROTECTED_ROLE', 'Владелец сохраняет полный доступ.')
     if (current && data.revision !== current.revision) throw new ApiError(409, 'ROLE_CHANGED', 'Роль уже изменена. Откройте её заново.')
     if (!id && roles.length >= 100) throw new ApiError(400, 'ROLE_LIMIT', 'Можно создать до 100 ролей.')
@@ -68,7 +70,11 @@ export async function saveMemberAccess(userId: string, org: string, memberId: st
     const ids = [...data.assignments.map(a => a.roleId), ...(data.organizationRoleId ? [data.organizationRoleId] : [])]
     if (ids.some(id => !roles.some(r => r.id === id && r.systemCode !== 'OWNER')) || new Set(data.assignments.map(a => a.locationId)).size !== data.assignments.length) throw new ApiError(400, 'INVALID_ROLE', 'Проверьте роли и точки.')
     if (await db.organizationLocation.count({ where: { organizationId: org, id: { in: data.assignments.map(a => a.locationId) }, archivedAt: null } }) !== data.assignments.length) throw new ApiError(400, 'INVALID_LOCATION', 'Точка недоступна.')
+    if (ids.some(id => roles.some(role => role.id === id && !role.systemCode))) await requirePlanFeature(org, 'customRoles', db)
     const before = await db.accessAssignment.findMany({ where: { memberId, organizationId: org } })
+    const existingLocations = new Set(before.map(assignment => assignment.locationId))
+    if (!target.accessConfigured) for (const membership of await db.locationMember.findMany({ where: { organizationId: org, memberId, leftAt: null }, select: { locationId: true } })) existingLocations.add(membership.locationId)
+    for (const assignment of data.assignments) if (!existingLocations.has(assignment.locationId)) await requireLocationInPlan(db, org, assignment.locationId)
     await db.organizationMember.update({ where: { id: memberId }, data: { accessConfigured: true, accessRoleId: data.organizationRoleId } })
     await db.accessAssignment.deleteMany({ where: { organizationId: org, memberId } })
     if (data.assignments.length) await db.accessAssignment.createMany({ data: data.assignments.map(a => ({ ...a, memberId, organizationId: org })) })

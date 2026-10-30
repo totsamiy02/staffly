@@ -77,6 +77,7 @@ model AuthAttemptLimit {
 }
 
 model User {
+  subscriptionPurchases SubscriptionPurchase[]
   reportExports ReportExport[]
   id                  String    @id @default(uuid()) @db.Uuid
   email               String    @unique @db.VarChar(254)
@@ -225,6 +226,7 @@ enum WorkShiftStatus {
 }
 
 enum AccountNotificationType {
+  SUBSCRIPTION_STATUS
   REQUEST_VACATION_COLLECTION
   REQUEST_VACATION_REMINDER
   SCHEDULE_DISCUSSION
@@ -295,6 +297,8 @@ enum RequestEventType {
 }
 
 model Organization {
+  subscription OrganizationSubscription?
+  subscriptionPurchases SubscriptionPurchase[]
   resourceBudget OrganizationResourceBudget?
   reportExports ReportExport[]
   vacationStandardDays Int @default(28) @map("vacation_standard_days")
@@ -369,6 +373,7 @@ model StoredFile {
   organizationId    String?           @map("organization_id") @db.Uuid
   createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
   pendingDeletionAt DateTime?         @map("pending_deletion_at") @db.Timestamptz(3)
+  purgedAt          DateTime?         @map("purged_at") @db.Timestamptz(3)
   deletionAttempts  Int               @default(0) @map("deletion_attempts")
   lastDeletionError String?           @map("last_deletion_error") @db.VarChar(500)
 
@@ -386,6 +391,7 @@ model StoredFile {
 }
 
 model AccountNotification {
+  subscriptionDeliveryKey String? @unique @map("subscription_delivery_key") @db.VarChar(200)
   vacationCampaignId String? @map("vacation_campaign_id") @db.Uuid
   vacationCampaign VacationCampaign? @relation(fields: [organizationId,vacationCampaignId], references: [organizationId,id], onDelete: Cascade)
   scheduleDraftId String? @map("schedule_draft_id") @db.Uuid
@@ -1426,4 +1432,45 @@ model VacationCampaign {
   @@unique([organizationId,id])
   @@index([organizationId, year])
   @@map("vacation_campaigns")
+}
+
+model OrganizationSubscription {
+  organizationId String @id @map("organization_id") @db.Uuid
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  plan String @default("FREE") @db.VarChar(16)
+  version String @default("2026-10-v1") @db.VarChar(32)
+  periodStart DateTime? @map("period_start") @db.Timestamptz(3)
+  periodEnd DateTime? @map("period_end") @db.Timestamptz(3)
+  trialEndsAt DateTime? @map("trial_ends_at") @db.Timestamptz(3)
+  trialStartedAt DateTime? @map("trial_started_at") @db.Timestamptz(3)
+  nextPlan String? @map("next_plan") @db.VarChar(16)
+  nextStartsAt DateTime? @map("next_starts_at") @db.Timestamptz(3)
+  nextEndsAt DateTime? @map("next_ends_at") @db.Timestamptz(3)
+  revision Int @default(1)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  @@map("organization_subscriptions")
+}
+model SubscriptionPurchase {
+  id String @id @default(uuid()) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userId String? @map("user_id") @db.Uuid
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+  plan String @db.VarChar(16)
+  version String @default("2026-10-v1") @db.VarChar(32)
+  status String @default("PENDING") @db.VarChar(16)
+  kind String @db.VarChar(16)
+  amountMinor Int @map("amount_minor")
+  currency String @default("RUB") @db.VarChar(3)
+  subscriptionRevision Int @map("subscription_revision")
+  periodStart DateTime @map("period_start") @db.Timestamptz(3)
+  periodEnd DateTime @map("period_end") @db.Timestamptz(3)
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+  activatedAt DateTime? @map("activated_at") @db.Timestamptz(3)
+  email String? @db.VarChar(254)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  @@index([organizationId, createdAt])
+  @@index([expiresAt, status])
+  @@map("subscription_purchases")
 }

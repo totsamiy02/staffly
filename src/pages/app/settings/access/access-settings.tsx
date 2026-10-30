@@ -1,3 +1,5 @@
+import { useSubscription } from '../../../../app/subscriptions/context.ts'
+import { LockBadge } from '../../subscriptions/plan-ui.tsx'
 import { accessGroups, accessModules, permissionHints } from './access-presentation.ts'
 import MemberProfileLink from '../../../../component/ui/member-profile-link.tsx'
 import MemberAvatar from '../../../../component/ui/member-avatar.tsx'
@@ -22,6 +24,8 @@ const errorText = (error: unknown) => error instanceof Error ? error.message : '
 const auditLabels: Record<string, string> = { MEMBER_EXCLUDED: 'Сотрудник исключён из организации', MEMBER_LOCATION_REMOVED: 'Сотрудник убран из точки', ROLE_CREATED: 'Роль создана', ROLE_UPDATED: 'Права роли изменены', ROLE_DELETED: 'Роль удалена', ASSIGNMENTS_UPDATED: 'Назначения изменены', DOCUMENT_ACCESS: 'Доступ к документу изменён', FOLDER_ACCESS: 'Доступ к папке изменён' }
 
 export default function AccessSettings({ organization }: { organization: OrganizationSummary }) {
+  const subscription = useSubscription()
+  function openEditor(value: AccessRole | 'new') { if ((value === 'new' || !value.systemCode) && !subscription.available('customRoles')) { subscription.request({ feature: 'customRoles' }); return }; setEditing(value) }
   const org = organization.id
   const roles = useAccessRoles(org)
   const { apiRequest } = useAuth()
@@ -50,7 +54,7 @@ export default function AccessSettings({ organization }: { organization: Organiz
     <section className="access-card access-roles-card">
       <div className="access-heading">
         <div className="access-heading__identity"><span className="access-tile"><AccessIcon name="shield" /></span><div><h2>Роли и доступ</h2><p>Настройте возможности сотрудников и области их действия.</p></div></div>
-        <button className="app-primary" onClick={() => setEditing('new')}><AccessIcon name="plus" />Создать роль</button>
+        <button className="app-primary" onClick={() => openEditor('new')}><AccessIcon name="plus" />Создать роль{!subscription.available('customRoles') && <LockBadge plan="BUSINESS" />}</button>
       </div>
       <div className="access-toolbar">
         <div className="access-role-totals"><span>Все роли <b>{allRoles.length}</b></span><span>Свои роли <b>{allRoles.filter(role => !role.systemCode).length}</b></span></div>
@@ -62,7 +66,7 @@ export default function AccessSettings({ organization }: { organization: Organiz
             <td><div className="access-role-name"><span className={`access-tile access-tile--${role.systemCode === 'OWNER' ? 'owner' : role.systemCode ? 'neutral' : 'custom'}`}><AccessIcon name={role.systemCode === 'OWNER' ? 'crown' : role.systemCode === 'ADMIN' ? 'shield' : 'people'} /></span><div><strong>{role.name}</strong><small>{role.description || 'Собственный набор прав для вашей команды'}</small></div></div></td>
             <td><span className={`access-tag${role.systemCode === 'OWNER' ? ' access-tag--owner' : !role.systemCode ? ' access-tag--custom' : ''}`}>{role.systemCode === 'OWNER' ? <><AccessIcon name="lock" />Защищённая</> : role.systemCode ? 'Стандартная' : 'Своя роль'}</span></td>
             <td><span className="access-member-count"><AccessIcon name="people" />{role.memberCount}</span></td>
-            <td><div className="access-row-actions"><button className="access-open-role" aria-label={`${role.systemCode === 'OWNER' ? 'Посмотреть' : 'Настроить'} роль «${role.name}»`} onClick={() => setEditing(role)}>{role.systemCode === 'OWNER' ? 'Посмотреть' : 'Настроить'}<AccessIcon name="shield" /></button>{!role.systemCode && <DocumentActionsMenu label={`Действия с ролью «${role.name}»`}><button className="is-danger" onClick={() => { remove.reset(); setReplacement(''); setDeleting(role) }}><AccessIcon name="trash" />Удалить роль</button></DocumentActionsMenu>}</div></td>
+            <td><div className="access-row-actions"><button className="access-open-role" aria-label={`${role.systemCode === 'OWNER' ? 'Посмотреть' : 'Настроить'} роль «${role.name}»`} onClick={() => openEditor(role)}>{role.systemCode === 'OWNER' ? 'Посмотреть' : 'Настроить'}<AccessIcon name="shield" /></button>{!role.systemCode && <DocumentActionsMenu label={`Действия с ролью «${role.name}»`}><button className="is-danger" onClick={() => { remove.reset(); setReplacement(''); setDeleting(role) }}><AccessIcon name="trash" />Удалить роль</button></DocumentActionsMenu>}</div></td>
           </tr>)}</tbody>
         </table>{!visibleRoles.length && <div className="access-empty"><AccessIcon name="search" /><strong>Роли не найдены</strong><p>Попробуйте другое название или описание.</p></div>}
       </div>}

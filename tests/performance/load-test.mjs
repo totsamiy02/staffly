@@ -124,7 +124,7 @@ async function monitor(phase, work) {
 }
 const fixtures = []
 async function seed() {
-  const { createOrganization } = await import('../../src/server/organizations/organization-service.ts')
+  const { createBusinessOrganization: createOrganization } = await import('../support/business-organization.ts')
   for (let group = 0; group < 11; group++) {
     const count = group === 0 ? 100 : 10
     const users = Array.from({ length: count }, (_, i) => ({ id: randomUUID(), email: `load-${group}-${i}@example.test`,

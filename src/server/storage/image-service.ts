@@ -45,11 +45,20 @@ async function normalizeImage(input: unknown) {
 type RemoveObject = (objectKey: string) => Promise<void>
 
 export async function deletePendingFile(fileId: string, removeObject: RemoveObject = storage.delete) {
-  const file = await prisma.storedFile.findFirst({ where: { id: fileId, pendingDeletionAt: { not: null } } })
+  const file = await prisma.storedFile.findFirst({ where: { id: fileId, pendingDeletionAt: { not: null }, purgedAt: null }, include: { document: { select: { deletedAt: true } } } })
   if (!file) return true
+  // A bound active document must never lose its content through the cleanup queue.
+  if (file.document && !file.document.deletedAt) return false
   try {
     await removeObject(file.objectKey)
-    await prisma.storedFile.deleteMany({ where: { id: file.id, pendingDeletionAt: { not: null } } })
+    if (file.document) {
+      await prisma.$transaction(async tx => {
+        const now = new Date()
+        const changed = await tx.storedFile.updateMany({ where: { id: file.id, pendingDeletionAt: { not: null }, purgedAt: null }, data: { purgedAt: now, pendingDeletionAt: null, lastDeletionError: null } })
+        // The document update also emits its existing live hint, including worker retries.
+        if (changed.count) await tx.document.updateMany({ where: { storedFileId: file.id, deletedAt: { not: null } }, data: { updatedAt: now } })
+      })
+    } else await prisma.storedFile.deleteMany({ where: { id: file.id, pendingDeletionAt: { not: null } } })
     return true
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown storage deletion error'

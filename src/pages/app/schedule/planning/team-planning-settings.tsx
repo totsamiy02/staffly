@@ -1,3 +1,5 @@
+import { useSubscription } from '../../../../app/subscriptions/context.ts'
+import { LockBadge } from '../../subscriptions/plan-ui.tsx'
 import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '../../../../app/auth/auth-context.tsx'
@@ -9,12 +11,14 @@ import { useToast } from '../../../../component/ui/toast/toast-context.ts'
 import PlanningIcon from './planning-icon.tsx'
 import './team-planning.scss'
 export default function TeamPlanningSettings({organization}:{organization:OrganizationSummary}) {
+  const subscription = useSubscription()
   const settings=useTeamSettings(organization.id),{apiRequest}=useAuth(),client=useQueryClient(),toast=useToast()
   const [pending,setPending]=useState<Settings|null>(null),[error,setError]=useState('')
   if(settings.isLoading)return <p className="planning-empty">Загружаем настройки планирования…</p>
   if(settings.isError||!settings.data)return <p className="form-inline-error" role="alert">Не удалось загрузить настройки. <button onClick={()=>void settings.refetch()}>Повторить</button></p>
   const value=pending??settings.data,manage=!!(organization.owner||organization.organizationPermissions?.includes('schedule.settings')),busy=!!pending
   async function save(next:Settings) {
+    if ((next.coverageEnabled || next.discussionEnabled) && !subscription.available('planning')) { subscription.request({ feature: 'planning' }); return }
     setPending(next);setError('')
     try {
       const saved=await apiRequest<Settings>(`/organizations/${organization.id}/schedule/team-settings`,{method:'PUT',body:next})
@@ -24,7 +28,7 @@ export default function TeamPlanningSettings({organization}:{organization:Organi
     finally {setPending(null)}
   }
   return <section className="team-planning planning-options">
-    <header><h3>Планирование команды</h3><p>Функции включаются сразу для всех заведений организации. Потребность и графики у каждого заведения свои. Изменения сохраняются сразу.</p></header>
+    <header><h3>Планирование команды {!subscription.available('planning') && <LockBadge plan="BUSINESS" />}</h3><p>Функции включаются сразу для всех заведений организации. Потребность и графики у каждого заведения свои. Изменения сохраняются сразу.</p></header>
     <div className="planning-option"><span className="planning-option__icon" aria-hidden="true"><PlanningIcon name="coverage"/></span><div><strong>Потребность и покрытие</strong><p>Задайте, сколько людей нужно по должностям и времени. В календаре будет видно, где не хватает сотрудников.</p></div><button type="button" role="switch" aria-checked={value.coverageEnabled} aria-label="Потребность и покрытие" className="planning-toggle" disabled={!manage||busy} onClick={()=>void save({...value,coverageEnabled:!value.coverageEnabled})}><i/></button></div>
     <div className="planning-option"><span className="planning-option__icon" aria-hidden="true"><PlanningIcon name="people"/></span><div><strong>Согласование графика</strong><p>Подготовьте график в разделе «Расписание → Согласование» и обсудите его с командой перед применением.</p></div><button type="button" role="switch" aria-checked={value.discussionEnabled} aria-label="Согласование графика" className="planning-toggle" disabled={!manage||busy} onClick={()=>void save({...value,discussionEnabled:!value.discussionEnabled})}><i/></button></div>
     <p className="planning-footnote">Чтобы выключить согласование, сначала примените или отмените незавершённые графики во всех заведениях. Обычные смены можно назначать напрямую.</p>

@@ -10,7 +10,7 @@ import DocumentDialog from '../../../component/ui/modal/document-dialog.tsx'
 import NotificationItem from './notification-item.tsx'
 import NotificationIcon from './notification-icon.tsx'
 
-const categories = [['', 'Все типы'], ['SHIFT', 'Смены'], ['SCHEDULE', 'Согласование графика'], ['REQUEST', 'Заявки'], ['EVENT', 'События'], ['DOCUMENT', 'Документы'], ['ABSENCE', 'Отсутствия'], ['ROLE', 'Доступ'], ['ORGANIZATION', 'Приглашения']]
+const categories = [['', 'Все типы'], ['SHIFT', 'Смены'], ['SCHEDULE', 'Согласование графика'], ['REQUEST', 'Заявки'], ['EVENT', 'События'], ['DOCUMENT', 'Документы'], ['ABSENCE', 'Отсутствия'], ['ROLE', 'Доступ'], ['ORGANIZATION', 'Приглашения'], ['SUBSCRIPTION', 'Тарифы']]
 
 export default function NotificationHistoryModal({ organizationId, locationId, onClose }: { organizationId?: string; locationId?: string | null; onClose: () => void }) {
   const [unread, setUnread] = useState(false)

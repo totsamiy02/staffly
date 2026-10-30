@@ -39,7 +39,7 @@ export default function PasswordSetupReminder() {
     <aside className="password-reminder" aria-label="Запасной способ входа">
       <span className="password-reminder__icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><rect x="5" y="10" width="14" height="11" rx="3" /><path d="M8 10V7a4 4 0 0 1 8 0v3m4 4v3" /></svg></span>
       <div><strong>Добавьте запасной пароль</strong><p>Яндекс ID работает без него. Запасной пароль поможет, если вход через Яндекс станет недоступен.</p></div>
-      <Link to={securityPage ? '/app/settings?section=security#login-methods' : `/app/settings?section=security&returnTo=${encodeURIComponent(returnTo)}`} onClick={() => { close(); if (securityPage) document.getElementById('login-methods')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}>Создать пароль <span aria-hidden="true">→</span></Link>
+      <Link to={securityPage ? '/app/settings?section=security#login-methods' : `/app/settings?section=security&returnTo=${encodeURIComponent(returnTo)}`} onClick={() => { close(); if (securityPage) document.getElementById('login-methods')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}>Создать пароль</Link>
     </aside>
     {offered && createPortal(<AnimatedOverlay variant="modal" dismissible={!busy} onClose={close}>{requestClose => <DocumentDialog eyebrow="Безопасность аккаунта" title="Добавьте запасной способ входа" description="Вы вошли через Яндекс ID. Пароля Staffly у вас пока нет — создайте его, чтобы входить ещё и по почте." busy={busy} onClose={requestClose} className="password-reminder-dialog">
       <div className="password-reminder-dialog__email"><span>Почта вашего аккаунта</span><strong>{user.email}</strong></div>

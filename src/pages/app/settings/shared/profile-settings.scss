@@ -10,17 +10,29 @@
 .profile-details__wide {grid-column:1 / -1;}
 .profile-details__empty {color:var(--theme-muted,#898490);font-size:13px;font-weight:400;}
 .profile-details .profile-details__action {display:flex;align-items:center;gap:6px;width:fit-content;max-width:100%;margin-top:8px;color:var(--theme-muted,#756580);font-size:12px;font-weight:500;line-height:1.5;text-decoration:none;white-space:normal;span{flex-shrink:0;} &:hover{text-decoration:underline;text-underline-offset:3px;} &:focus-visible{outline:2px solid var(--theme-focus,#82708f);outline-offset:3px;border-radius:3px;}}
-.profile-editor--view >aside .profile-editor__identity h2 {font-size:19px;line-height:1.4;white-space:normal;overflow-wrap:anywhere;}
-.profile-editor--view >aside .profile-editor__identity p {line-height:1.5;white-space:normal;overflow-wrap:anywhere;}
+.profile-editor >aside .profile-editor__identity h2 {font-size:19px;line-height:1.4;white-space:normal;overflow-wrap:anywhere;}
+.profile-editor >aside .profile-editor__identity p {line-height:1.5;white-space:normal;overflow-wrap:anywhere;}
 .profile-edit-fields { min-width:0; margin:0; padding:0; border:0; }
 .profile-settings-note { margin:12px 0 0; color:var(--theme-muted,#888); font-size:11px; line-height:1.6; }
 .ownership-transfer-form { align-items:end; .employee-picker { margin:0; } .form-inline-error,.profile-settings-note { grid-column:1 / -1; } }
 @media(max-width:600px) { .profile-settings-heading { flex-wrap:wrap; gap:12px; } .profile-details { grid-template-columns:minmax(0,1fr); gap:18px; padding:16px; } .profile-details-section>header {padding:12px 16px;} .profile-edit-actions { max-width:100%; >button { flex:1; } } form>.profile-edit-actions { width:100%; margin-top:20px; } }
 @media(max-width:600px) {
-  .profile-editor--view > aside { display:grid; grid-template-columns:72px minmax(0,1fr); align-items:center; gap:16px; text-align:left; }
-  .profile-editor--view > aside .image-upload { width:auto; }
-  .profile-editor--view > aside .account-profile-card__avatar { width:72px; height:72px; font-size:24px; }
-  .profile-editor--view .profile-editor__identity { margin:0; padding:0; border:0; }
-  .profile-editor--view > aside .profile-editor__identity h2 { font-size:17px; white-space:normal; overflow-wrap:anywhere; }
-  .profile-editor--view > aside .profile-editor__identity p { white-space:normal; overflow-wrap:anywhere; }
+  .profile-editor > aside { display:grid; grid-template-columns:72px minmax(0,1fr); align-items:center; gap:16px; text-align:left; }
+  .profile-editor > aside .image-upload { width:auto; }
+  .profile-editor > aside .account-profile-card__avatar { width:72px; height:72px; font-size:24px; }
+  .profile-editor .profile-editor__identity { margin:0; padding:0; border:0; }
+  .profile-editor > aside .profile-editor__identity h2 { font-size:17px; white-space:normal; overflow-wrap:anywhere; }
+  .profile-editor > aside .profile-editor__identity p { white-space:normal; overflow-wrap:anywhere; }
 }
+
+.profile-details dd>.profile-field-value,.profile-details dd>input,.profile-details dd>.staffly-select{min-height:44px;box-sizing:border-box;}.profile-field-value{display:flex;align-items:center;padding:10px 12px;border:1px solid transparent;border-radius:9px;font-size:14px;font-weight:450;line-height:22px;white-space:pre-wrap;overflow-wrap:anywhere;}.profile-details--prose .profile-field-value{display:block;min-height:112px;}.profile-details :is(input,textarea){display:block;width:100%;min-width:0;padding:10px 12px;border:1px solid var(--theme-border,#ddd);border-radius:9px;background:var(--theme-surface,#fff);color:var(--theme-text-strong,#25212c);font:inherit;font-size:14px;font-weight:450;line-height:22px;outline:none;transition:border-color .18s,box-shadow .18s;}.profile-details textarea{height:112px;resize:vertical;}.profile-details :is(input,textarea):focus{border-color:var(--theme-focus,#8b6eaf);box-shadow:0 0 0 3px var(--theme-accent-bg,#f0eaf7);}.profile-details input[readonly]{background:var(--theme-surface-muted,#f7f7f9);color:var(--theme-muted,#777);}.profile-details .staffly-control{min-height:44px;font-size:14px;}.profile-details-groups .profile-details{gap:14px 20px;}.profile-email-link{width:fit-content;font-size:12px;color:var(--theme-accent,#77598f);}.organization-profile-editor>.organization-profile-form{margin-top:20px;}.profile-edit-fields+.profile-edit-actions{margin-top:20px;}
+.image-upload--floating{position:relative;width:fit-content!important;}.image-upload__floating-actions{position:absolute;right:-8px;bottom:-8px;display:flex;gap:5px;z-index:1;>button{display:grid;place-items:center;width:32px;height:32px;min-height:32px!important;padding:0!important;border:1px solid var(--theme-border,#ddd);border-radius:50%;background:var(--theme-surface,#fff);color:var(--theme-accent,#77598f);box-shadow:0 3px 9px #0001;cursor:pointer;transition:background .18s,transform .18s;svg{width:16px;height:16px;}&:hover{background:var(--theme-accent-bg,#f1ebf7);transform:translateY(-2px);}}}
+@media(max-width:600px){.profile-editor>aside{display:grid;grid-template-columns:72px minmax(0,1fr);align-items:center;gap:16px;text-align:left;}.profile-editor>aside .account-profile-card__avatar{width:72px;height:72px;font-size:24px;}.profile-editor .profile-editor__identity{margin:0;padding:0;border:0;}.profile-details .profile-field-value{padding-inline:10px;}.profile-details-groups .profile-details{gap:14px;}}
+@media(prefers-reduced-motion:reduce){.image-upload__floating-actions>button,.profile-details input,.profile-details textarea{transition:none;}}
+
+.profile-details:not(.profile-details--prose) .profile-field-value{height:44px;white-space:nowrap;text-overflow:ellipsis;overflow:hidden;display:block;line-height:22px;}
+
+.profile-settings-heading .profile-edit-actions>button{min-width:136px;}
+.profile-details--prose .profile-field-value{height:112px;overflow:auto;}
+
+.organization-profile-editor .profile-details--prose{padding:12px 16px;dt{display:none;}.profile-field-value{min-height:44px;height:auto;max-height:280px;overflow:auto;}textarea{min-height:44px;max-height:280px;height:auto;}}

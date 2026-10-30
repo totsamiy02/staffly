@@ -41,7 +41,7 @@ function accessVisibility(visibility: Document['visibility'], folderId: string |
   return visibility
 }
 function metadataLocation(org: string, data: { pointId?: string | null; shared?: boolean }) { return data.pointId !== undefined ? data.pointId : data.shared ? null : scopedLocationId(org) ?? null }
-const include = { location: { select: { name: true } }, storedFile: { select: { mimeType: true, size: true } }, uploadedBy: { include: { user: { select: { email: true, firstName: true, lastName: true, middleName: true, avatarFileId: true } } } }, targetMember: { include: { user: { select: { email: true, firstName: true, lastName: true, middleName: true, avatarFileId: true } } } } } satisfies Prisma.DocumentInclude
+const include = { location: { select: { name: true } }, storedFile: { select: { mimeType: true, size: true, purgedAt: true, pendingDeletionAt: true } }, uploadedBy: { include: { user: { select: { email: true, firstName: true, lastName: true, middleName: true, avatarFileId: true } } } }, targetMember: { include: { user: { select: { email: true, firstName: true, lastName: true, middleName: true, avatarFileId: true } } } } } satisfies Prisma.DocumentInclude
 const memberName = (user: { email: string; firstName: string | null; lastName: string | null; middleName: string | null }) => [user.lastName, user.firstName, user.middleName].filter(Boolean).join(' ') || user.email
 export function acknowledgementState(item: Pick<DocumentAcknowledgement, 'cancelledAt' | 'acknowledgedAt' | 'openedAt' | 'deadline'>, timezone: string, now = new Date()) {
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now)
@@ -53,7 +53,7 @@ const acknowledgementInclude = { assignedBy: { include: { user: { select: { emai
 function ackDto(item: DocumentAcknowledgement & { assignedBy?: { user: { email: string; firstName: string | null; lastName: string | null; middleName: string | null } } }, timezone: string) { return { id: item.id, assignedBy: item.assignedBy ? memberName(item.assignedBy.user) : null, assignedAt: item.assignedAt, openedAt: item.openedAt, acknowledgedAt: item.acknowledgedAt, cancelledAt: item.cancelledAt, deadline: item.deadline?.toISOString().slice(0, 10) ?? null, comment: item.comment, ...acknowledgementState(item, timezone) } }
 function documentDto(item: Prisma.DocumentGetPayload<{ include: typeof include }> & { acknowledgements: Array<DocumentAcknowledgement & { assignedBy?: { user: { email: string; firstName: string | null; lastName: string | null; middleName: string | null } } }> }, actor: DocumentActor, timezone: string, folders: Array<{ id: string; parentId: string | null; visibility: string }> = []) {
   const own = item.acknowledgements.find(ack => ack.memberId === actor.id)
-  const result = { id: item.id, organizationId: item.organizationId, locationId: item.locationId, locationName: item.location?.name ?? null, canManage: documentManager(actor, item.locationId), canEdit: docPermission(actor, 'documents.edit', item.locationId), canDelete: docPermission(actor, 'documents.delete', item.locationId), canAssign: docPermission(actor, 'documents.assign', item.locationId), canControl: docPermission(actor, 'documents.control', item.locationId), canDownload: docPermission(actor, 'documents.download', item.locationId), canAccess: docPermission(actor, 'documents.access', item.locationId), canUpload: docPermission(actor, 'documents.upload', item.locationId), audienceRoleIds: item.audienceRoleIds, audienceMemberIds: item.audienceMemberIds, inheritAccess: item.inheritAccess, folderId: item.folderId, displayName: item.displayName, fileName: item.fileName, visibility: item.visibility, accessVisibility: accessVisibility(item.visibility, item.folderId, folders), targetMemberId: item.targetMemberId, createdAt: item.createdAt, updatedAt: item.updatedAt, deletedAt: item.deletedAt, mimeType: item.storedFile.mimeType, size: item.storedFile.size, previewable: supportsPreview(item.storedFile.mimeType, item.storedFile.size), uploadedBy: { name: memberName(item.uploadedBy.user), avatarUrl: mediaUrl(item.uploadedBy.user.avatarFileId) }, targetMember: item.targetMember ? { id: item.targetMember.id, name: memberName(item.targetMember.user), avatarUrl: mediaUrl(item.targetMember.user.avatarFileId), former: Boolean(item.targetMember.leftAt) } : null, acknowledgement: own ? ackDto(own, timezone) : null }
+  const result = { id: item.id, organizationId: item.organizationId, locationId: item.locationId, locationName: item.location?.name ?? null, canManage: documentManager(actor, item.locationId), canEdit: docPermission(actor, 'documents.edit', item.locationId), canDelete: docPermission(actor, 'documents.delete', item.locationId), canAssign: docPermission(actor, 'documents.assign', item.locationId), canControl: docPermission(actor, 'documents.control', item.locationId), canDownload: !item.storedFile.purgedAt && !item.storedFile.pendingDeletionAt && docPermission(actor, 'documents.download', item.locationId), fileRemovedAt: item.storedFile.purgedAt, filePurgePending: !!item.storedFile.pendingDeletionAt, canPurge: !!item.deletedAt && !item.storedFile.purgedAt && !item.storedFile.pendingDeletionAt && docPermission(actor, 'documents.delete', item.locationId), canAccess: docPermission(actor, 'documents.access', item.locationId), canUpload: docPermission(actor, 'documents.upload', item.locationId), audienceRoleIds: item.audienceRoleIds, audienceMemberIds: item.audienceMemberIds, inheritAccess: item.inheritAccess, folderId: item.folderId, displayName: item.displayName, fileName: item.fileName, visibility: item.visibility, accessVisibility: accessVisibility(item.visibility, item.folderId, folders), targetMemberId: item.targetMemberId, createdAt: item.createdAt, updatedAt: item.updatedAt, deletedAt: item.deletedAt, mimeType: item.storedFile.mimeType, size: item.storedFile.size, previewable: !item.storedFile.purgedAt && !item.storedFile.pendingDeletionAt && supportsPreview(item.storedFile.mimeType, item.storedFile.size), uploadedBy: { name: memberName(item.uploadedBy.user), avatarUrl: mediaUrl(item.uploadedBy.user.avatarFileId) }, targetMember: item.targetMember ? { id: item.targetMember.id, name: memberName(item.targetMember.user), avatarUrl: mediaUrl(item.targetMember.user.avatarFileId), former: Boolean(item.targetMember.leftAt) } : null, acknowledgement: own ? ackDto(own, timezone) : null }
   if (!docPermission(actor, 'documents.control', item.locationId)) return result
   const active = item.acknowledgements.filter(ack => !ack.cancelledAt)
   return { ...result, progress: { total: active.length, acknowledged: active.filter(ack => ack.acknowledgedAt).length, unopened: active.filter(ack => !ack.openedAt && !ack.acknowledgedAt).length, opened: active.filter(ack => ack.openedAt && !ack.acknowledgedAt).length, overdue: active.filter(ack => acknowledgementState(ack, timezone).overdue).length, cancelled: item.acknowledgements.length - active.length } }
@@ -200,6 +200,25 @@ export async function deleteDocument(userId: string, organizationId: string, doc
     // Bytes and file binding remain retained for manager history. Cleanup is separate.
   })
 }
+/** Remove an archived document's bytes while retaining its metadata and acknowledgement history. */
+export async function purgeDocumentFile(userId: string, organizationId: string, documentId: string) {
+  const fileId = await transaction(userId, organizationId, async (tx, actor) => {
+    const doc = await accessible(tx, actor, documentId)
+    assertDocumentManager(actor, doc.locationId, 'documents.delete')
+    if (!doc.deletedAt) throw new ApiError(409, 'DOCUMENT_NOT_ARCHIVED', 'Сначала удалите документ из библиотеки.')
+    const file = await tx.storedFile.findUniqueOrThrow({ where: { id: doc.storedFileId } })
+    if (file.purgedAt) return null
+    if (!file.pendingDeletionAt) {
+      await tx.storedFile.update({ where: { id: file.id }, data: { pendingDeletionAt: new Date(), lastDeletionError: null } })
+      await tx.document.update({ where: { id: doc.id }, data: { updatedAt: new Date() } })
+      await auditAccess(tx, actor, 'DOCUMENT_FILE_PURGE_REQUESTED', { documentId, name: doc.displayName, fileName: doc.fileName, size: file.size })
+    }
+    return file.id
+  })
+  const removed = !fileId || await deletePendingFile(fileId)
+  return { removed, cleanupPending: !removed }
+}
+
 export async function assignAcknowledgements(userId: string, organizationId: string, documentId: string, data: Assignment) {
   return transaction(userId, organizationId, async (tx, actor) => {
      const doc = await accessible(tx, actor, documentId)
@@ -247,7 +266,7 @@ export async function deliverDocument(userId: string, organizationId: string, do
   return transaction(userId, organizationId, async (tx, actor) => {
     const doc = await accessible(tx, actor, documentId)
     if (action === 'download') assertDocumentManager(actor, doc.locationId, 'documents.download')
-    const file = await tx.storedFile.findFirst({ where: { id: doc.storedFileId, organizationId, purpose: 'DOCUMENT', pendingDeletionAt: null } })
+    const file = await tx.storedFile.findFirst({ where: { id: doc.storedFileId, organizationId, purpose: 'DOCUMENT', pendingDeletionAt: null, purgedAt: null } })
     if (!file) throw missing()
     if (action === 'preview' && !supportsPreview(file.mimeType, file.size)) throw new ApiError(415, 'PREVIEW_UNSUPPORTED', 'Предпросмотр недоступен. Скачайте документ.')
     let object: Awaited<ReturnType<typeof storage.stream>>

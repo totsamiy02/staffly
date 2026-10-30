@@ -7,7 +7,8 @@ import { requireAuth, type AuthenticatedRequest } from '../auth.ts'
 import { ApiError } from '../api-error.ts'
 import { assignSchema, folderSchema, listSchema, metadataSchema, paramsSchema } from './schemas.ts'
 import { MAX_DOCUMENT_BYTES } from './file-validation.ts'
-import { previewDocumentAudience, acknowledgeDocument, assignAcknowledgements, cancelAcknowledgement, deleteDocument, deleteFolder, deliverDocument, documentMembers, documentProgress, getDocument, listDocuments, personalDocuments, recordDocumentOpened, saveFolder, setFolderPinned, updateDocument, uploadDocument } from './service.ts'
+import { listRequestFiles } from './request-files.ts'
+import { previewDocumentAudience, acknowledgeDocument, assignAcknowledgements, cancelAcknowledgement, deleteDocument, purgeDocumentFile, deleteFolder, deliverDocument, documentMembers, documentProgress, getDocument, listDocuments, personalDocuments, recordDocumentOpened, saveFolder, setFolderPinned, updateDocument, uploadDocument } from './service.ts'
 const router = Router()
 const mutate = accountRateLimit('documents', 60, 60000)
 const upload = accountRateLimit('document-uploads', 20, 900000)
@@ -20,6 +21,11 @@ router.use(['/profile/documents', '/organizations/:organizationId/documents', '/
 router.get('/profile/documents', async (request, response) => { const { page, search } = parse(listSchema, request.query); const organizationId = typeof request.query.organizationId === 'string' ? parse(z.uuid(), request.query.organizationId) : undefined; response.json(await personalDocuments(user(request), page, search, organizationId)) })
 router.get('/organizations/:organizationId/documents-members', async (request, response) => { const { organizationId } = parse(paramsSchema, request.params); response.json({ members: await documentMembers(user(request), organizationId, parse(z.object({ all: z.enum(['true', 'false']).optional() }), request.query).all === 'true') }) })
 router.get(base, async (request, response) => { const { organizationId } = parse(paramsSchema, request.params); response.json(await listDocuments(user(request), organizationId, parse(listSchema, request.query))) })
+router.get(base + '/request-attachments', async (request, response) => {
+  const { organizationId } = parse(paramsSchema, request.params)
+  const options = parse(z.object({ page: z.coerce.number().int().min(1).max(10000).default(1), search: z.string().trim().max(160).default(''), pointId: z.uuid().optional() }), request.query)
+  response.json(await listRequestFiles(user(request), organizationId, options))
+})
 router.post(base + '/access-preview', mutate, async (request,response) => { const {organizationId}=parse(paramsSchema,request.params); response.json(await previewDocumentAudience(user(request),organizationId,parse(metadataSchema,{displayName:'Проверка доступа',...request.body}))) })
 router.put(base, upload, body, async (request, response) => {
   const { organizationId } = parse(paramsSchema, request.params)
@@ -36,7 +42,8 @@ router.post(`${base}/:documentId/content`, mutate, async (request, response) => 
   if (action === 'preview' && needsPreparedPreview(file.fileName)) {
     const prepared = await preparePreview(await readPreviewSource(file.stream), file.fileName, organizationId)
     // Parsing/queue can take time. Re-authorize against current membership, folder and audience.
-    await getDocument(actor, organizationId, documentId!)
+    const current = await getDocument(actor, organizationId, documentId!)
+    if (current.fileRemovedAt || current.filePurgePending) throw new ApiError(404, 'DOCUMENT_FILE_MISSING', 'Файл документа удалён или ожидает очистки.')
     response.set({ 'Content-Type': prepared.mime, 'Content-Length': String(prepared.bytes.length), 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "sandbox; default-src 'none'" })
     response.once('finish', () => { void recordDocumentOpened(actor, organizationId, documentId!).catch(error => console.error('Document preview status failed:', error)) })
     response.send(prepared.bytes)
@@ -49,6 +56,11 @@ router.post(`${base}/:documentId/content`, mutate, async (request, response) => 
     await pipeline(file.stream, response)
     if (!response.destroyed || response.writableFinished) await recordDocumentOpened(actor, organizationId, documentId!).catch(error => console.error('Document delivery status failed:', error))
   } catch (error) { file.stream.destroy(); if (!response.headersSent) throw error }
+})
+router.delete(`${base}/:documentId/content`, mutate, async (request, response) => {
+  const { organizationId, documentId } = parse(paramsSchema, request.params)
+  parse(z.object({ confirm: z.literal(true) }).strict(), request.body)
+  response.json(await purgeDocumentFile(user(request), organizationId, documentId!))
 })
 router.post(`${base}/:documentId/assign`, mutate, async (request, response) => { const { organizationId, documentId } = parse(paramsSchema, request.params); response.json(await assignAcknowledgements(user(request), organizationId, documentId!, parse(assignSchema, request.body))) })
 router.post(`${base}/:documentId/acknowledge`, mutate, async (request, response) => { const { organizationId, documentId } = parse(paramsSchema, request.params); await acknowledgeDocument(user(request), organizationId, documentId!); response.status(204).end() })

@@ -95,3 +95,6 @@
   .header__buttons {gap:4px;}
   .header__buttons .button {padding-inline:8px;font-size:12px;}
 }
+
+.header__workspace-link{font-size:13px;font-weight:600;color:var(--theme-text-strong,#222);padding:10px 14px;border:1px solid var(--theme-border,#ddd);border-radius:10px;transition:background .2s,border-color .2s;&:hover{background:var(--theme-accent-bg,#f1ebf7);border-color:var(--theme-accent-border,#bda8d0);}}
+@media(max-width:600px){.header__workspace-link{display:none;}}

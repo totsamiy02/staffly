@@ -1,3 +1,4 @@
+import SubscriptionSettings from '../../subscriptions/subscription-settings.tsx'
 import PageHeading from '../../../../component/ui/page-heading/page-heading.tsx'
 import { useImageDraft } from '../../../../component/ui/image-upload/use-image-draft.ts'
 import AccessSettings from '../access/access-settings.tsx'
@@ -8,7 +9,7 @@ import PlanningSettings from '../../schedule/planning/planning-settings.tsx'
 import EmployeePicker from '../../shared/employee-picker.tsx'
 import { ProfileDetails, ProfileEditActions } from '../shared/profile-settings.tsx'
 import Select from '../../../../component/ui/select/select.tsx'
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../../../app/auth/auth-context.tsx'
@@ -21,6 +22,21 @@ import { RUSSIAN_TIMEZONES } from '../../../../app/organizations/russian-timezon
 import LocationSettings from './location-settings.tsx'
 import RequestTypesSettings from '../../requests/types/request-types-settings.tsx'
 
+function OrganizationDescriptionEditor({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const ref = useRef<HTMLTextAreaElement>(null)
+  const resize = () => { const field = ref.current; if (!field) return; field.style.height = 'auto'; field.style.height = `${Math.max(44, Math.min(280, field.scrollHeight + 2))}px` }
+  useLayoutEffect(resize, [value])
+  useLayoutEffect(() => {
+    const field = ref.current
+    if (!field) return
+    let width = field.clientWidth
+    const observer = new ResizeObserver(() => { if (field.clientWidth !== width) { width = field.clientWidth; resize() } })
+    observer.observe(field)
+    return () => observer.disconnect()
+  }, [])
+  return <textarea ref={ref} aria-label="Информация для команды" value={value} onChange={event => onChange(event.target.value)} maxLength={1000} rows={1} />
+}
+
 export default function OrganizationSettings({ organization }: { organization: OrganizationSummary }) {
   const { apiRequest } = useAuth()
   const queryClient = useQueryClient()
@@ -28,7 +44,7 @@ export default function OrganizationSettings({ organization }: { organization: O
   const resetLogo = logoDraft.reset
   const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
-  const section =  ['profile', 'locations', 'schedule', 'requests', 'roles', 'access'].includes(params.get('section') ?? '') ? params.get('section')! : 'profile'
+  const section =  ['profile', 'locations', 'schedule', 'requests', 'roles', 'access', 'subscription'].includes(params.get('section') ?? '') ? params.get('section')! : 'profile'
   const members = useOrganizationDirectory(organization.id, organization.owner && section === 'access')
   function changeSection(value: string) { setMessage(''); setError(''); setParams(previous => { previous.set('section', value); return previous }, { replace: true }) }
   const [targetMemberId, setTargetMemberId] = useState('')
@@ -119,36 +135,28 @@ export default function OrganizationSettings({ organization }: { organization: O
   const candidates = members.data?.members.filter((member) => member.role !== 'OWNER') ?? []
 
   return <section className="settings-page"><PageHeading title="Настройки" description={canEditProfile ? 'Профиль организации и управление настройками.' : 'Публичная информация вашей организации.'}/>
-    <SegmentedNav label="Разделы настроек">{[['profile', 'Профиль организации'], ['locations', 'Точки'], ...(planningAllowed ? [['schedule','Расписание']] : []), ...(canAccess(organization,'requestTypes.manage') ? [['requests','Типы заявок']] : []), ...(organization.owner ? [['roles','Роли и доступ'],['access','Владение']] : [])].map(([key, label]) => <button key={key} type="button" aria-pressed={section === key} onClick={() => changeSection(key)}>{label}</button>)}</SegmentedNav>
+    <SegmentedNav label="Разделы настроек">{[['profile', 'Профиль организации'], ['locations', 'Точки'], ['subscription', 'Тариф'], ...(planningAllowed ? [['schedule','Расписание']] : []), ...(canAccess(organization,'requestTypes.manage') ? [['requests','Типы заявок']] : []), ...(organization.owner ? [['roles','Роли и доступ'],['access','Владение']] : [])].map(([key, label]) => <button key={key} type="button" aria-pressed={section === key} onClick={() => changeSection(key)}>{label}</button>)}</SegmentedNav>
     {section !== 'schedule' && error && <p className="app-alert app-alert--error">{error}</p>}
+    {section === 'subscription' && <SubscriptionSettings organization={organization} />}
     {section === 'roles' && organization.role === 'OWNER' && <AccessSettings organization={organization} />}
     {section === 'profile' && <article className="organization-profile-editor">
-      <div className="profile-settings-heading"><div><p className="app-eyebrow">Публичная информация</p><h2>Профиль организации</h2><p>Эти данные доступны всем участникам организации.</p></div>{canEditProfile && !editing && <ProfileEditActions editing={false} onEdit={() => editProfile(true)} onCancel={() => editProfile(false)} />}</div>
-      <div className="organization-logo-editor"><ImageUpload endpoint={`/organizations/${organization.id}/logo`} imageUrl={logoDraft.url} onDraftChange={logoDraft.change} name={organization.name} avatarClassName="organization-logo-editor__preview" disabled={!editing || busy} onBusyChange={setImageBusy} onChange={async () => { await Promise.all([queryClient.invalidateQueries({ queryKey: ['organization', organization.id] }), queryClient.invalidateQueries({ queryKey: ['organizations'] })]) }} onMessage={setMessage} onError={setError} /></div>
-      {editing ? <form onSubmit={saveOrganization}>
-        <fieldset className="profile-edit-fields" disabled={busy || imageBusy}><div className="organization-profile-fields">
-          <label><span>Название</span><input autoFocus value={name} onChange={event => setName(event.target.value)} minLength={2} maxLength={120} required /></label>
-          <label><span>Часовой пояс</span><Select disabled={busy || imageBusy} value={timezone} onChange={event => setTimezone(event.target.value)}>{RUSSIAN_TIMEZONES.map(item => <option value={item.value} key={item.value}>{item.label}</option>)}</Select></label>
-          <label><span>Рабочая почта</span><input type="email" value={contactEmail} onChange={event => setContactEmail(event.target.value)} maxLength={254} placeholder="hello@company.ru" /></label>
-          <label><span>Телефон</span><input type="tel" inputMode="tel" value={phone} onChange={event => setPhone(formatRussianPhone(event.target.value))} maxLength={18} placeholder="+7 (999) 123-45-67" /></label>
-          <label className="profile-field--wide"><span>Сайт</span><input type="url" value={website} onChange={event => setWebsite(event.target.value)} maxLength={2048} placeholder="https://company.ru" /></label>
-          <label className="profile-field--wide"><span>Адрес</span><input value={address} onChange={event => setAddress(event.target.value)} maxLength={300} placeholder="Город, улица, дом" /></label>
-          <label className="profile-field--wide"><span>Описание</span><textarea value={description} onChange={event => setDescription(event.target.value)} maxLength={1000} rows={4} /><small>{description.length}/1000</small></label>
-        </div></fieldset>
-        <ProfileEditActions editing busy={busy || imageBusy} onEdit={() => editProfile(true)} onCancel={() => editProfile(false)} />
-      </form> : <div className="profile-details-groups">
-        <ProfileDetails title="Об организации" icon="building" items={[
-          { label: 'Название', value: organization.name },
-          { label: 'Часовой пояс', value: RUSSIAN_TIMEZONES.find(item => item.value === (organization.organizationTimezone ?? organization.timezone))?.label ?? organization.organizationTimezone ?? organization.timezone },
+      <div className="profile-settings-heading"><div><p className="app-eyebrow">Публичная информация</p><h2>Профиль организации</h2><p>Эти данные доступны всем участникам организации.</p></div>{canEditProfile && <ProfileEditActions editing={false} busy={editing} onEdit={() => editProfile(true)} onCancel={() => editProfile(false)} />}</div>
+      <div className="organization-logo-editor"><ImageUpload floatingControls endpoint={`/organizations/${organization.id}/logo`} imageUrl={logoDraft.url} onDraftChange={logoDraft.change} name={organization.name} avatarClassName="organization-logo-editor__preview" disabled={!editing || busy} onBusyChange={setImageBusy} onChange={async () => { await Promise.all([queryClient.invalidateQueries({ queryKey: ['organization', organization.id] }), queryClient.invalidateQueries({ queryKey: ['organizations'] })]) }} onMessage={setMessage} onError={setError} /></div>
+      <form onSubmit={saveOrganization} className="organization-profile-form"><fieldset className="profile-edit-fields" disabled={busy || imageBusy}><div className="profile-details-groups">
+        <ProfileDetails title="Об организации" icon="building" editing={editing} items={[
+          { label: 'Название', value: organization.name, editor: <input aria-label="Название" value={name} onChange={e => setName(e.target.value)} minLength={2} maxLength={120} required /> },
+          { label: 'Часовой пояс', value: RUSSIAN_TIMEZONES.find(item => item.value === (organization.organizationTimezone ?? organization.timezone))?.label ?? organization.organizationTimezone ?? organization.timezone, editor: <Select aria-label="Часовой пояс" disabled={busy || imageBusy} value={timezone} onChange={e => setTimezone(e.target.value)}>{RUSSIAN_TIMEZONES.map(item => <option value={item.value} key={item.value}>{item.label}</option>)}</Select> },
         ]} />
-        <ProfileDetails title="Контакты и адрес" icon="mail" items={[
-          { label: 'Рабочая почта', value: organization.contactEmail }, { label: 'Телефон', value: formatRussianPhone(organization.phone ?? '') },
-          { label: 'Сайт', value: organization.website }, { label: 'Адрес', value: organization.address },
+        <ProfileDetails title="Контакты и адрес" icon="mail" editing={editing} items={[
+          { label: 'Рабочая почта', value: organization.contactEmail, editor: <input aria-label="Рабочая почта" type="email" value={contactEmail} onChange={e => setContactEmail(e.target.value)} maxLength={254} /> },
+          { label: 'Телефон', value: formatRussianPhone(organization.phone ?? ''), editor: <input aria-label="Телефон" type="tel" value={phone} onChange={e => setPhone(formatRussianPhone(e.target.value))} maxLength={18} /> },
+          { label: 'Сайт', value: organization.website, editor: <input aria-label="Сайт" type="url" value={website} onChange={e => setWebsite(e.target.value)} maxLength={2048} placeholder="https://company.ru" /> },
+          { label: 'Адрес', value: organization.address, editor: <input aria-label="Адрес" value={address} onChange={e => setAddress(e.target.value)} maxLength={300} /> },
         ]} />
-        <ProfileDetails title="Описание" icon="info" columns={1} prose items={[
-          { label: 'Информация для команды', value: organization.description },
+        <ProfileDetails title="Описание" icon="info" columns={1} prose editing={editing} items={[
+          { label: 'Информация для команды', value: organization.description, editor: <OrganizationDescriptionEditor value={description} onChange={setDescription} /> },
         ]} />
-      </div>}
+      </div></fieldset>{editing && <ProfileEditActions editing busy={busy || imageBusy} onEdit={() => editProfile(true)} onCancel={() => editProfile(false)} />}</form>
 
     </article>}
     {section === 'schedule' && planningAllowed && <PlanningSettings organization={organization} />}

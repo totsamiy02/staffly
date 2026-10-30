@@ -73,6 +73,6 @@ export function GuideModule({ collection, articles }: { collection: Collection; 
       <header className="guide-reader-heading"><span className="guide-reader-heading__number">{String(index + 1).padStart(2, '0')}</span><div><h2 id={`title-${article.slug}`}>{article.title}</h2><p>{article.summary}</p></div></header>
       <GuideArticleContent article={article} continuous />
     </article>)}
-    {next && <Link className="guide-module-next" to={`/guide/category/${next.id}`}><span><small>Следующий модуль</small><strong>{next.title}</strong></span><GuideIcon name="arrow" /></Link>}
+    {next && <Link className="guide-module-next" to={`/guide/category/${next.id}`}><span><small>Следующий модуль</small><strong>{next.title}</strong></span></Link>}
   </div></div>
 }

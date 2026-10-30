@@ -14,7 +14,7 @@ try {
   const shared = process.env.STORAGE_DRIVER === 's3'
   const info = shared ? null : await lstat(storageRoot).catch(error => { if (error.code === 'ENOENT') return null; throw error })
   if (info && (!info.isDirectory() || info.isSymbolicLink())) throw new Error('Unsafe storage root')
-  const files = await prisma.storedFile.findMany({ select: { objectKey: true, size: true, checksumSha256: true, pendingDeletionAt: true } })
+  const files = await prisma.storedFile.findMany({ where: { purgedAt: null }, select: { objectKey: true, size: true, checksumSha256: true, pendingDeletionAt: true } })
   const known = new Map(files.map(file => [file.objectKey, file]))
   const fixtures = new Set([
     checksum(Buffer.from('%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF')),

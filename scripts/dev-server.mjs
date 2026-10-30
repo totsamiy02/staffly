@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
-const watched = ['src/server', 'src/shared', 'src/app/access', 'src/app/requests', 'src/app/schedule', 'src/app/notifications', 'src/app/file-preview']
+const watched = ['src/server', 'src/shared', 'src/app/access', 'src/app/requests', 'src/app/schedule', 'src/app/notifications', 'src/app/file-preview', 'src/app/subscriptions']
 let child, timer, restarting = false, dirty = false, stopping = false
 const watchers = []
 

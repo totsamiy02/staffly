@@ -15,7 +15,7 @@ import './guide.scss'
 function ArticleRow({ article, number }: { article: GuideArticle; number?: number }) {
   return <Link className="guide-row" to={guideHref(article.slug)}>
     {number !== undefined && <span className="guide-row__number">{String(number).padStart(2, '0')}</span>}
-    <span className="guide-row__body"><strong>{article.title}</strong><span>{article.summary}</span><small><GuideIcon name="clock" />{readingMinutes(article)} мин чтения</small></span><GuideIcon name="arrow" />
+    <span className="guide-row__body"><strong>{article.title}</strong><span>{article.summary}</span><small><GuideIcon name="clock" />{readingMinutes(article)} мин чтения</small></span>
   </Link>
 }
 
@@ -27,7 +27,7 @@ function GuideSearch({ query, onChange }: { query?: string; onChange?: (value: s
   return <form className="guide-search" role="search" onSubmit={event => { event.preventDefault(); navigate(`/guide${value.trim() ? `?q=${encodeURIComponent(value.trim())}` : ''}`) }}>
     <GuideIcon name="search" /><input type="search" aria-label="Поиск по всему справочнику" placeholder="Поиск по всему справочнику" maxLength={200} value={value} onChange={event => change(event.target.value)} />
     {value && <button type="button" onClick={() => change('')} aria-label="Очистить поиск">×</button>}
-    {!onChange && <button className="guide-search__submit" type="submit" aria-label="Найти в справочнике"><GuideIcon name="arrow" /></button>}
+    {!onChange && <button className="guide-search__submit" type="submit" aria-label="Найти в справочнике"><GuideIcon name="search" /></button>}
   </form>
 }
 
@@ -50,7 +50,7 @@ function GuideCatalog({ categoryId }: { categoryId?: string }) {
   return <>
     {categoryId && <nav className="guide-breadcrumbs" aria-label="Путь страницы"><Link to="/guide"><GuideIcon name="back" />Справочник</Link><span>/</span><span aria-current="page">{collection?.title ?? category?.title}</span></nav>}
     {!categoryId && !filtering ? <header className="guide-hero">
-      <div className="guide-hero__copy"><span className="guide-hero__badge"><GuideIcon name="book" />Руководство пользователя</span><h1>Работать проще,<br />когда всё <em>понятно.</em></h1><p>От первой смены до управления командой.<br />Инструкции, примеры и ответы — в одном месте.</p><div className="guide-hero__actions"><Link className="guide-blue-button" to={guideHref('first-day')}>Начать с основ<GuideIcon name="arrow" /></Link><a href="#guide-topics">Выбрать тему<span>↓</span></a></div></div>
+      <div className="guide-hero__copy"><span className="guide-hero__badge"><GuideIcon name="book" />Руководство пользователя</span><h1>Работать проще,<br />когда всё <em>понятно.</em></h1><p>От первой смены до управления командой.<br />Инструкции, примеры и ответы — в одном месте.</p><div className="guide-hero__actions"><Link className="guide-blue-button" to={guideHref('first-day')}>Начать с основ</Link><a href="#guide-topics">Выбрать тему</a></div></div>
       <div className="guide-hero__art"><GuideArtwork /><span><i />Ваш путеводитель по Staffly</span></div>
     </header> : <header className={`guide-intro${categoryId ? ' guide-intro--chapter' : ''}`}>
       <div><p className="guide-kicker">{categoryId ? `Модуль ${String(guideCollections.indexOf(collection ?? guideCollectionFor(category!.id)) + 1).padStart(2, '0')}` : 'Поиск в справочнике'}</p><h1>{collection?.title ?? category?.title ?? 'Найдём нужную инструкцию'}</h1><p>{collection?.description ?? category?.description ?? 'Пошаговые ответы на рабочие вопросы.'}</p></div>
@@ -63,7 +63,7 @@ function GuideCatalog({ categoryId }: { categoryId?: string }) {
     </div>
     {!categoryId && !filtering ? <section className="guide-topics" id="guide-topics"><div className="guide-section-heading"><div><p className="guide-kicker">Содержание справочника</p><h2>Выберите, с чего начать</h2></div><span>5 тем · {guidePlural(guideArticles.length, ['инструкция', 'инструкции', 'инструкций'])}</span></div><div className="guide-collections">{guideCollections.map((item, index) => <Link className={`guide-collection guide-collection--${item.id}`} key={item.id} to={`/guide/category/${item.id}`}>
       <div className="guide-collection__cover" aria-hidden="true"><span className="guide-collection__number">{String(index + 1).padStart(2, '0')}</span><span className="guide-collection__art"><GuideIcon name={item.icon} /></span><span className="guide-collection__orbit" /></div>
-      <div className="guide-collection__body"><h3>{item.title}</h3><p>{item.description}</p><div className="guide-collection__bottom"><span>{guidePlural(guideArticles.filter(article => item.categories.includes(article.category)).length, ['инструкция', 'инструкции', 'инструкций'])}</span><span className="guide-collection__open"><GuideIcon name="arrow" /></span></div></div>
+      <div className="guide-collection__body"><h3>{item.title}</h3><p>{item.description}</p><div className="guide-collection__bottom"><span>{guidePlural(guideArticles.filter(article => item.categories.includes(article.category)).length, ['инструкция', 'инструкции', 'инструкций'])}</span></div></div>
     </Link>)}</div></section> : <section className="guide-results">{(!collection || filtering) && <div className="guide-section-heading"><h2>{query.trim() ? 'Результаты по всему справочнику' : 'Подходящие инструкции'}</h2><span role="status">{guidePlural(articles.length, ['материал', 'материала', 'материалов'])}</span></div>}
       {articles.length ? collection && !filtering ? <GuideModule collection={collection} articles={articles}/> : <div className="guide-article-list">{articles.map((item, index) => <ArticleRow key={item.slug} article={item} number={index + 1} />)}</div> : <div className="guide-empty"><GuideIcon name="search" /><h2>Ничего не найдено</h2><p>Попробуйте другое слово или выберите все роли.</p><button className="app-secondary" onClick={() => setParams({})}>Сбросить поиск и фильтры</button></div>}
     </section>}
@@ -90,7 +90,7 @@ function GuideArticleView({ article }: { article: GuideArticle }) {
 
       <GuideArticleContent article={article} />
       {article.related.length > 0 && <section className="guide-related"><h2>По этой теме</h2><div className="guide-article-list">{article.related.map(slug => guideArticleBySlug.get(slug)).filter((item): item is GuideArticle => Boolean(item)).map((item, index) => <ArticleRow key={item.slug} article={item} number={index + 1} />)}</div></section>}
-      <footer className="guide-article-foot"><span>Обновлено {new Date(article.updated + 'T12:00:00').toLocaleDateString('ru-RU')}</span><Link to="/app">Перейти к работе<GuideIcon name="arrow" /></Link></footer>
+      <footer className="guide-article-foot"><span>Обновлено {new Date(article.updated + 'T12:00:00').toLocaleDateString('ru-RU')}</span><Link to="/app">Перейти к работе</Link></footer>
     </article></div>
 
   </>
@@ -134,7 +134,7 @@ export default function GuidePage() {
     return () => cancelAnimationFrame(frame)
   }, [location.pathname, location.hash, location.search, location.key])
   return <div ref={root} className="guide-page"><a className="guide-skip" href="#guide-content">К содержимому</a>
-    <HeaderFrame><div className="site-header__actions"><ThemeToggle /><Link className="app-secondary" to="/app">К работе<GuideIcon name="arrow" /></Link></div></HeaderFrame>
+    <HeaderFrame><div className="site-header__actions"><ThemeToggle /><Link className="app-secondary" to="/app">К работе</Link></div></HeaderFrame>
 
     <main ref={main} tabIndex={-1} id="guide-content" className={`guide-main${article ? ' guide-main--article' : ''}`} key={location.pathname}>{home || categoryId ? <GuideCatalog categoryId={categoryId} /> : article ? <GuideArticleView key={article.slug} article={article} /> : <GuideNotFound />}</main>
     <footer className="guide-footer"><span>Staffly · Справочник для всех команд</span><span>Примеры вымышлены</span></footer>

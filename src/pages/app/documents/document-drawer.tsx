@@ -15,7 +15,7 @@ import DocumentDialog from '../../../component/ui/modal/document-dialog.tsx'
 function FileIcon() {
   return <svg viewBox="0 0 32 40" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M5 2h14l8 8v28H5V2Z" /><path d="M19 2v9h8M10 20h12M10 26h12" /></svg>
 }
-export default function DocumentDrawer({ organizationId, documentId, manager, pointId, onClose, onEdit, onAssign, onDelete, onRevision, folders = [] }: { organizationId: string; documentId: string; manager: boolean; pointId?: string | null; folders?: Folder[]; onRevision?: (item: DocumentItem) => void; onClose: () => void; onEdit?: (item: DocumentItem) => void; onAssign?: (item: DocumentItem) => void; onDelete?: (item: DocumentItem) => void }) {
+export default function DocumentDrawer({ organizationId, documentId, manager, pointId, onClose, onEdit, onAssign, onDelete, onPurge, onRevision, folders = [] }: { organizationId: string; documentId: string; manager: boolean; pointId?: string | null; folders?: Folder[]; onRevision?: (item: DocumentItem) => void; onClose: () => void; onEdit?: (item: DocumentItem) => void; onAssign?: (item: DocumentItem) => void; onDelete?: (item: DocumentItem) => void; onPurge?: (item: DocumentItem) => void }) {
   const toast = useToast()
   const { locationId, apiRequest, previewFile, downloadFile } = useAuth(), refresh = useDocumentRefresh()
   const path = documentPath(organizationId, documentId) + (pointId ? `?locationId=${pointId}` : '')
@@ -62,20 +62,21 @@ export default function DocumentDrawer({ organizationId, documentId, manager, po
   return <DocumentDialog key="viewer" viewer title={item?.displayName ?? 'Документ'} onClose={onClose} className={item?.previewable ? 'document-viewer--preview' : 'document-viewer--compact'} headerContent={<header className="document-viewer-header">
     <div className="document-viewer-heading"><span className="document-viewer-file-icon"><FileIcon /></span><div><h2>{item?.displayName ?? 'Документ'}</h2>{item && <p>{extension.toUpperCase()} · {sizeLabel(item.size)}</p>}</div></div>
     <div className="document-viewer-header__actions">{item && item.canDownload !== false && <button className="app-primary" disabled={fileBusy} onClick={() => void openFile()}>{fileAction === 'download' ? 'Скачиваем…' : 'Скачать'}</button>}
-      {manager && item?.canManage && item && !item.deletedAt && <DocumentActionsMenu label="Действия с документом">
-        {onEdit && item.canEdit && <><button onClick={() => onEdit(item)}>Переименовать</button><button onClick={() => onEdit(item)}>Переместить</button></>}
-        {onEdit && item.canAccess && <button onClick={() => onEdit(item)}>Изменить доступ</button>}
-        {onRevision && item.canUpload && <button onClick={() => onRevision(item)}>Загрузить новую редакцию</button>}
-        {onDelete && item.canDelete && <button className="document-action-delete" onClick={() => onDelete(item)}>Удалить документ</button>}
+      {manager && item?.canManage && item && (!item.deletedAt || item.canPurge && onPurge) && <DocumentActionsMenu label="Действия с документом">
+        {!item.deletedAt && onEdit && item.canEdit && <><button onClick={() => onEdit(item)}>Переименовать</button><button onClick={() => onEdit(item)}>Переместить</button></>}
+        {!item.deletedAt && onEdit && item.canAccess && <button onClick={() => onEdit(item)}>Изменить доступ</button>}
+        {!item.deletedAt && onRevision && item.canUpload && <button onClick={() => onRevision(item)}>Загрузить новую редакцию</button>}
+        {!item.deletedAt && onDelete && item.canDelete && <button className="document-action-delete" onClick={() => onDelete(item)}>Удалить документ</button>}
+        {onPurge && item.canPurge && <button className="document-action-delete" onClick={() => onPurge(item)}>Удалить файл навсегда</button>}
       </DocumentActionsMenu>}
       <button className="document-viewer-close" type="button" aria-label="Закрыть" onClick={onClose}>×</button>
     </div>
   </header>}>
     {doc.isLoading ? <div className="app-state document-viewer-state" role="status"><span className="app-spinner" />Загружаем документ…</div> : doc.isError || !item ? <div className="app-state document-viewer-state" role="alert"><p>{doc.error instanceof Error ? doc.error.message : 'Документ недоступен.'}</p><button className="app-secondary" onClick={() => void doc.refetch()}>Повторить</button></div> : <div className="document-viewer-body">
       <section className="document-viewer-main" aria-label="Содержимое документа">
-        <FilePreview key={`${organizationId}:${documentId}:${pointId ?? locationId}`} sourceKey={`${documentId}:${item.fileName}`} name={item.fileName}
+        {item.fileRemovedAt || item.filePurgePending ? <div className="app-state document-viewer-state"><p>{item.fileRemovedAt ? 'Файл удалён навсегда.' : 'Файл ожидает очистки хранилища.'}</p><small>Сведения о документе и история ознакомлений сохранены.</small></div> : <FilePreview key={`${organizationId}:${documentId}:${pointId ?? locationId}`} sourceKey={`${documentId}:${item.fileName}`} name={item.fileName}
           load={() => previewFile(`${documentPath(organizationId, documentId)}/content?action=preview${pointId ? `&locationId=${pointId}` : ''}`, 'POST')}
-          onLoaded={() => { void previewDelivered().catch(() => undefined) }} />
+          onLoaded={() => { void previewDelivered().catch(() => undefined) }} />}
         {error && <div className="document-viewer-error" role="alert"><p>{error}</p><button className="app-secondary" disabled={fileBusy} onClick={() => void openFile()}>Повторить скачивание</button></div>}
       </section>
       <aside className="document-viewer-sidebar" aria-label="Сведения и управление документом">

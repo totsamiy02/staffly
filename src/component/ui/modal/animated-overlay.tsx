@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import './dialog-shell.scss'
 
 const overlayStack: symbol[] = []
@@ -31,5 +32,5 @@ export default function AnimatedOverlay({ variant, className = '', dismissible =
   }, [requestClose])
 
   const base = `schedule-${variant}`
-  return <div className={`${base}${className ? ` ${className}` : ''}${closing ? ' is-closing' : ''}`} onMouseDown={(event) => { if (event.target === event.currentTarget) requestClose() }}>{children(requestClose)}</div>
+  return createPortal(<div className={`${base}${className ? ` ${className}` : ''}${closing ? ' is-closing' : ''}`} onMouseDown={(event) => { if (event.target === event.currentTarget) requestClose() }}>{children(requestClose)}</div>, document.body)
 }

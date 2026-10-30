@@ -1,3 +1,6 @@
+import { useSubscription } from '../../../../app/subscriptions/context.ts'
+import { LockBadge } from '../../subscriptions/plan-ui.tsx'
+import { useSearchParams } from 'react-router-dom'
 import AsyncPanel from '../../../../component/ui/async-panel.tsx'
 import ShiftDetailsDialog from '../time/shift-details-dialog.tsx'
 import MemberProfileLink from '../../../../component/ui/member-profile-link.tsx'
@@ -6,7 +9,7 @@ import ActionSurface from '../../../../component/ui/action-surface.tsx'
 import { canAccess } from '../../../../app/access/catalog.ts'
 import EmployeePicker from '../../shared/employee-picker.tsx'
 import Select from '../../../../component/ui/select/select.tsx'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { OrganizationSummary } from '../../../../app/organizations/types.ts'
 import { formatDuration, monthKeyInZone, moveMonth } from '../../../../app/schedule/date-utils.ts'
 import { useMemberWorkTime, useShiftDetails, useWorkTimeStatistics } from '../../../../app/schedule/queries.ts'
@@ -24,6 +27,8 @@ const columns: Array<{ key: 'name' | 'workedMinutes' | 'workedShifts' | 'average
 ]
 
 export default function StatisticsPage({ organization }: { organization: OrganizationSummary }) {
+  const subscription = useSubscription(), [searchParams, setSearchParams] = useSearchParams()
+  function openReport() { if (subscription.available('reports')) setReportOpen(true); else subscription.request({ feature: 'reports' }) }
   const initialMonth = monthKeyInZone(new Date(), organization.timezone)
   const [month, setMonth] = useState(initialMonth)
   const [allTime, setAllTime] = useState(false)
@@ -36,6 +41,7 @@ export default function StatisticsPage({ organization }: { organization: Organiz
   const [auditPage, setAuditPage] = useState(1)
   const [reportOpen, setReportOpen] = useState(false)
   const [reportBusy, setReportBusy] = useState(false)
+  useEffect(() => { if (searchParams.get('report') === '1') { if (subscription.available('reports')) setReportOpen(true); else subscription.request({ feature: 'reports' }); setSearchParams(previous => { const next = new URLSearchParams(previous); next.delete('report'); return next }, { replace: true }) } }, [searchParams, setSearchParams, subscription])
   const from = allTime ? undefined : `${month}-01`
   const to = allTime ? undefined : `${moveMonth(month, 1)}-01`
   const params = { from, to, memberState, sort, direction }
@@ -52,10 +58,10 @@ export default function StatisticsPage({ organization }: { organization: Organiz
     else { setSort(key); setDirection(key === 'name' ? 'asc' : 'desc') }
   }
 
-  if (!canAccess(organization,'statistics.view') && (canAccess(organization,'reports.preview') || canAccess(organization,'reports.export'))) return <section className="schedule-page"><ScheduleSectionHeader organization={organization} title="Отчёты" description="Рабочие часы и смены для выгрузки"><button className="app-primary" onClick={()=>setReportOpen(true)}>Сформировать отчёт</button></ScheduleSectionHeader>{reportOpen && <AnimatedOverlay variant="modal" dismissible={!reportBusy} onClose={()=>setReportOpen(false)}>{close=><ReportDialog organization={organization} month={month} onClose={close} onBusy={setReportBusy}/>}</AnimatedOverlay>}</section>
+  if (!canAccess(organization,'statistics.view') && (canAccess(organization,'reports.preview') || canAccess(organization,'reports.export'))) return <section className="schedule-page"><ScheduleSectionHeader organization={organization} title="Отчёты" description="Рабочие часы и смены для выгрузки"><button className="app-primary" onClick={openReport}>Сформировать отчёт</button></ScheduleSectionHeader>{reportOpen && subscription.available('reports') && <AnimatedOverlay variant="modal" dismissible={!reportBusy} onClose={()=>setReportOpen(false)}>{close=><ReportDialog organization={organization} month={month} onClose={close} onBusy={setReportBusy}/>}</AnimatedOverlay>}</section>
   if (!canAccess(organization, 'statistics.view')) return <div className="schedule-state">Общая статистика доступна владельцу и администраторам.</div>
-  return <section className="schedule-page schedule-redesign"><ScheduleSectionHeader organization={organization} title="Статистика смен" description="Завершённые смены и плановые рабочие часы">{(canAccess(organization, 'reports.preview') || canAccess(organization, 'reports.export')) && <button type="button" className="app-primary" onClick={() => setReportOpen(true)}>Выгрузить Excel</button>}</ScheduleSectionHeader>
-    {reportOpen && <AnimatedOverlay variant="modal" dismissible={!reportBusy} onClose={() => setReportOpen(false)}>{close => <ReportDialog organization={organization} month={allTime ? initialMonth : month} onClose={close} onBusy={setReportBusy} />}</AnimatedOverlay>}
+  return <section className="schedule-page schedule-redesign"><ScheduleSectionHeader organization={organization} title="Статистика смен" description="Завершённые смены и плановые рабочие часы">{(canAccess(organization, 'reports.preview') || canAccess(organization, 'reports.export')) && <button type="button" className="app-primary" onClick={openReport}>Выгрузить Excel{!subscription.available('reports') && <LockBadge plan="TEAM" />}</button>}</ScheduleSectionHeader>
+    {reportOpen && subscription.available('reports') && <AnimatedOverlay variant="modal" dismissible={!reportBusy} onClose={() => setReportOpen(false)}>{close => <ReportDialog organization={organization} month={allTime ? initialMonth : month} onClose={close} onBusy={setReportBusy} />}</AnimatedOverlay>}
     <div className="statistics-member-picker"><EmployeePicker label="Найти сотрудника" members={pickerMembers} value="" onChange={(id) => { setSelectedMember(id || null); setHistoryPage(1) }} emptyLabel="Поиск по имени или почте" required={false} disabled={organizationMembers.isLoading} /><small>Выберите сотрудника или нажмите его строку для просмотра часов. Общая сводка не меняется.</small></div>
     <div className="statistics-filters"><div className="statistics-period"><button className={allTime ? '' : 'active'} onClick={() => setAllTime(false)}>Месяц</button><button className={allTime ? 'active' : ''} onClick={() => setAllTime(true)}>За всё время</button></div>{!allTime && <><Select aria-label="Месяц" value={monthNumber} onChange={(event) => setMonth(`${year}-${String(event.target.value).padStart(2, '0')}`)}>{months.map((label, index) => <option value={index + 1} key={label}>{label}</option>)}</Select><Select aria-label="Год" value={year} onChange={(event) => setMonth(`${event.target.value}-${String(monthNumber).padStart(2, '0')}`)}>{years.map((value) => <option value={value} key={value}>{value}</option>)}</Select></>}<Select aria-label="Состав сотрудников" value={memberState} onChange={(event) => setMemberState(event.target.value as typeof memberState)}><option value="active">Активные</option><option value="all">Все</option><option value="former">Бывшие</option></Select></div>
     <AsyncPanel pending={statistics.isLoading} identity={`${month}:${allTime}:${memberState}:${sort}:${direction}`} minHeight={350}>{statistics.isLoading ? <div className="schedule-state"><span className="app-spinner" />Считаем рабочее время…</div> : statistics.isError ? <div className="schedule-state"><strong>Не удалось загрузить статистику</strong><button className="app-secondary" onClick={() => void statistics.refetch()}>Повторить</button></div> : <>

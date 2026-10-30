@@ -1,3 +1,4 @@
+import { requirePlanFeature, subscriptionSnapshot } from '../../subscriptions/access.ts'
 import { randomUUID } from 'node:crypto'
 import type { Prisma, ScheduleDraft, DraftShift } from '../../../generated/prisma/client.ts'
 import type { WorkShift as PublicShift } from '../../../app/schedule/types.ts'
@@ -34,12 +35,14 @@ async function demandData(tx: DB, organizationId: string, locationId: string) {
 }
 export async function getTeamSettings(userId: string, organizationId: string) {
   const actor = await getMembership(userId, organizationId)
-  return { coverageEnabled: actor.organization.coverageEnabled, discussionEnabled: actor.organization.discussionEnabled, discussionHours: 24 }
+  const enabled = (await subscriptionSnapshot(organizationId)).features.includes('planning')
+  return { coverageEnabled: enabled && actor.organization.coverageEnabled, discussionEnabled: enabled && actor.organization.discussionEnabled, discussionHours: 24 }
 }
 export async function saveTeamSettings(userId: string, organizationId: string, input: z.infer<typeof schemas.teamSettingsBody>) {
   return prisma.$transaction(async tx => {
     await organizationLock(tx, organizationId)
     const actor = await getMembership(userId, organizationId, tx); requirePermission(actor, 'schedule.settings', null)
+    if (input.coverageEnabled || input.discussionEnabled) await requirePlanFeature(organizationId, 'planning', tx)
     if (!input.discussionEnabled && await tx.scheduleDraft.count({ where: { organizationId, status: { in: [...activeStatuses] } } })) throw new ApiError(409, 'ACTIVE_DISCUSSION', 'Сначала примените или отмените незавершённые графики во всех заведениях организации. История сохранится.')
     const saved = await tx.organization.update({ where: { id: organizationId }, data: { coverageEnabled: input.coverageEnabled, discussionEnabled: input.discussionEnabled }, select: { coverageEnabled: true, discussionEnabled: true } })
     return { ...saved, discussionHours: 24 }
@@ -47,12 +50,14 @@ export async function saveTeamSettings(userId: string, organizationId: string, i
 }
 export async function getDemand(userId: string, organizationId: string) {
   const actor = await getMembership(userId, organizationId); requirePermission(actor, 'coverage.view')
+  await requirePlanFeature(organizationId, 'planning')
   return demandData(prisma, organizationId, actor.locationId)
 }
 export async function saveDemand(userId: string, organizationId: string, input: z.infer<typeof schemas.demandVersionBody> | z.infer<typeof schemas.demandExceptionBody>) {
   return prisma.$transaction(async tx => {
     await organizationLock(tx, organizationId)
     const actor = await getMembership(userId, organizationId, tx); requirePermission(actor, 'coverage.manage')
+    await requirePlanFeature(organizationId, 'planning', tx)
     if (!actor.organization.coverageEnabled) throw new ApiError(409, 'COVERAGE_DISABLED', 'Включите потребность и покрытие в настройках расписания.')
     const data = await demandData(tx, organizationId, actor.locationId)
     const intervals = 'days' in input ? input.days.flatMap(day => day ?? []) : input.intervals ?? []
@@ -84,12 +89,14 @@ async function coverageFor(tx: DB, actor: Actor, from: string, to: string, shift
 }
 export async function getCoverage(userId: string, organizationId: string, from: string, to: string) {
   const actor = await getMembership(userId, organizationId); requirePermission(actor, 'coverage.view')
+  await requirePlanFeature(organizationId, 'planning')
   return { days: await coverageFor(prisma, actor, from, to) }
 }
 export async function saveDemandDates(userId: string, organizationId: string, input: z.infer<typeof schemas.demandDatesBody>) {
   return prisma.$transaction(async tx => {
     await organizationLock(tx, organizationId)
     const actor = await getMembership(userId, organizationId, tx); requirePermission(actor, 'coverage.manage')
+    await requirePlanFeature(organizationId, 'planning', tx)
     if (!actor.organization.coverageEnabled) throw new ApiError(409, 'COVERAGE_DISABLED', 'Включите потребность в настройках расписания.')
     if (input.dates.some(day => day.date < localToday(actor.organization.timezone))) throw new ApiError(400, 'DEMAND_PAST', 'Выберите сегодняшние или будущие даты.')
     if (input.repeat && input.repeat.effectiveFrom < localToday(actor.organization.timezone)) throw new ApiError(400, 'DEMAND_PAST', 'Повторение начинается с сегодняшней или будущей даты.')
@@ -144,12 +151,14 @@ async function workPicture(tx: DB, _actor: Actor, d: ScheduleDraft, proposals: D
 }
 export async function listDrafts(userId: string, organizationId: string) {
   const actor = await getMembership(userId, organizationId)
+  if (!(await subscriptionSnapshot(organizationId)).features.includes('planning')) return { drafts: [] }
   await expire(prisma, organizationId)
   const drafts = await prisma.scheduleDraft.findMany({ where: { organizationId, locationId: actor.locationId, ...(!hasPermission(actor,'drafts.view') ? { publishedAt: { not: null }, recipients: { some: { memberId: actor.id } } } : {}) }, orderBy: { createdAt: 'desc' }, take: 100 })
   return { drafts: drafts.map(publicDraft) }
 }
 export async function listDraftInbox(userId: string, organizationId: string) {
   const actor = await getMembership(userId, organizationId)
+  if (!(await subscriptionSnapshot(organizationId)).features.includes('planning')) return { drafts: [] }
   await expire(prisma, organizationId)
   const drafts = await prisma.scheduleDraft.findMany({ where: { organizationId, status: { in: [...activeStatuses] } }, include: { location: { select: { name: true } }, recipients: { where: { memberId: actor.id } } }, orderBy: { createdAt: 'desc' } })
   return { drafts: drafts.filter(d => hasPermission(actor, 'drafts.view', d.locationId) || !!d.publishedAt && d.recipients.length > 0).map(d => ({ ...publicDraft(d), locationName: d.location.name, canManage: hasPermission(actor, 'drafts.view', d.locationId), ownResponse: d.recipients[0]?.response ?? null, needsResponse: d.status === 'OPEN' && !!d.recipients[0] && (!d.recipients[0].response || d.recipients[0].respondedRevision !== d.recipients[0].requiredRevision) })) }
@@ -158,6 +167,7 @@ export async function createDraft(userId: string, organizationId: string, input:
   return prisma.$transaction(async tx => {
     await organizationLock(tx, organizationId)
     const actor = await getMembership(userId, organizationId, tx); requirePermission(actor,'drafts.edit')
+    await requirePlanFeature(organizationId, 'planning', tx)
     if (!actor.organization.discussionEnabled) throw new ApiError(409, 'DISCUSSION_DISABLED', 'Включите предварительное согласование в настройках расписания.')
     if (actor.location.archivedAt) throw new ApiError(409, 'LOCATION_ARCHIVED', 'Точка закрыта.')
     const existing = await tx.scheduleDraft.findFirst({ where: { organizationId, locationId: actor.locationId, status: { in: [...activeStatuses] }, fromDate: { lte: new Date(input.toDate) }, toDate: { gte: new Date(input.fromDate) } } })
@@ -176,6 +186,7 @@ export async function getDraft(userId: string, organizationId: string, id: strin
   const actor = await getMembership(userId, organizationId)
   await expire(prisma, organizationId)
   const d = await draftFor(prisma,actor,id), { manager } = await accessible(prisma,actor,d)
+  await requirePlanFeature(organizationId, 'planning')
   const team = manager && hasPermission(actor,'schedule.view')
   const [rows, recipients, comments, events] = await Promise.all([
     prisma.draftShift.findMany({ where: { draftId: id }, orderBy: { id: 'asc' } }),
@@ -206,6 +217,7 @@ async function withDraft<T>(userId: string, organizationId: string, id: string, 
     const actor = await getMembership(userId,organizationId,tx)
     await expire(tx,organizationId)
     const d = await draftFor(tx,actor,id,revision)
+    await accessible(tx,actor,d)
     return fn(tx,actor,d)
   }, { isolationLevel:'Serializable', timeout:30000 }).catch(error => {
     if (error?.code === 'P2034') throw new ApiError(409,'DRAFT_CHANGED','График или рабочий календарь изменился. Обновите страницу и повторите действие.')
@@ -214,7 +226,7 @@ async function withDraft<T>(userId: string, organizationId: string, id: string, 
 }
 export async function editDraft(userId:string,organizationId:string,id:string,input:z.infer<typeof schemas.draftEditBody>) {
   return withDraft(userId,organizationId,id,input.revision,async(tx,actor,d)=> {
-    requirePermission(actor,'drafts.edit');editable(d)
+    requirePermission(actor,'drafts.edit'); await requirePlanFeature(organizationId, 'planning', tx);editable(d)
     const changed = await tx.scheduleDraft.update({ where:{id}, data:{title:input.title,description:input.description,revision:{increment:1}} })
     await history(tx,changed,actor,'DETAILS_CHANGED',{title:input.title,description:input.description})
     return publicDraft(changed)
@@ -232,7 +244,7 @@ async function makeProposed(tx: DB, actor: Actor, input: ShiftInput, id: string)
 function material(s:PublicShift) { return JSON.stringify([s.memberId,s.scheduledStartAt,s.scheduledEndAt,s.positionId??null]) }
 export async function changeDraftProposals(userId:string,organizationId:string,id:string,input:z.infer<typeof schemas.draftProposalBody>) {
   return withDraft(userId,organizationId,id,input.revision,async(tx,actor,d)=> {
-    requirePermission(actor,'drafts.edit');editable(d)
+    requirePermission(actor,'drafts.edit'); await requirePlanFeature(organizationId, 'planning', tx);editable(d)
     if(actor.organization.timezone!==d.timezone) throw new ApiError(409,'DRAFT_TIMEZONE_CHANGED','Часовой пояс точки изменился. Создайте график в актуальном часовом поясе.')
     const row = input.proposalId ? await tx.draftShift.findFirst({where:{id:input.proposalId,draftId:id}}):null
     if(input.proposalId && !row) throw new ApiError(404,'PROPOSAL_NOT_FOUND','Предложение не найдено.')
@@ -326,7 +338,7 @@ async function validateDraftIn(tx:DB,actor:Actor,d:ScheduleDraft):Promise<DraftV
   return {errors,warnings,coverage}
 }
 export async function validateDraft(userId:string,organizationId:string,id:string) {
-  return withDraft(userId,organizationId,id,undefined,async(tx,actor,d)=> {requirePermission(actor,'drafts.view');return validateDraftIn(tx,actor,d)})
+  return withDraft(userId,organizationId,id,undefined,async(tx,actor,d)=> {requirePermission(actor,'drafts.view');await requirePlanFeature(organizationId, 'planning', tx);return validateDraftIn(tx,actor,d)})
 }
 async function refreshRecipients(tx:DB,_actor:Actor,d:ScheduleDraft) {
   const rows=await tx.draftShift.findMany({where:{draftId:d.id}}), proposals=rows.map(proposal)
@@ -344,6 +356,7 @@ export async function actOnDraft(userId:string,organizationId:string,id:string,i
   const result=await withDraft(userId,organizationId,id,input.revision,async(tx,actor,d)=> {
     editable(d)
     requirePermission(actor,input.action==='APPLY'?'drafts.apply':'drafts.discuss')
+    await requirePlanFeature(organizationId, 'planning', tx)
     let status=d.status,deadline=d.deadline
     const now=new Date()
     if(input.action==='PUBLISH') {
@@ -426,9 +439,10 @@ export async function actOnDraft(userId:string,organizationId:string,id:string,i
 }
 export async function respondToDraft(userId:string,organizationId:string,id:string,input:z.infer<typeof schemas.draftResponseBody>) {
   return withDraft(userId,organizationId,id,input.revision,async(tx,actor,d)=> {
-    await accessible(tx,actor,d);open(d)
+    await accessible(tx,actor,d)
     const r=await tx.draftRecipient.findUnique({where:{draftId_memberId:{draftId:id,memberId:actor.id}}})
     if(!r)throw new ApiError(403,'NOT_A_PARTICIPANT','Вы не включены в обсуждение.')
+    await requirePlanFeature(organizationId, 'planning', tx);open(d)
     if(input.response==='NO_OBJECTIONS'&&await tx.draftComment.count({where:{draftId:id,memberId:actor.id,status:'OPEN'}}))throw new ApiError(409,'OWN_OPEN_COMMENT','Сначала отзовите свои открытые замечания или дождитесь решения руководителя.')
     const response=await tx.draftRecipient.update({where:{draftId_memberId:{draftId:id,memberId:actor.id}},data:{response:input.response,respondedRevision:r.requiredRevision,respondedAt:new Date()}})
     const proposals=(await tx.draftShift.findMany({where:{draftId:id}})).map(proposal)
@@ -439,12 +453,13 @@ export async function respondToDraft(userId:string,organizationId:string,id:stri
 }
 export async function commentOnDraft(userId:string,organizationId:string,id:string,input:z.infer<typeof schemas.draftCommentBody>) {
   return withDraft(userId,organizationId,id,input.revision,async(tx,actor,d)=> {
-    const {recipient}=await accessible(tx,actor,d);open(d)
+    const {recipient}=await accessible(tx,actor,d)
     if(!recipient)throw new ApiError(403,'NOT_A_PARTICIPANT','Вы не включены в обсуждение.')
     const proposals=(await tx.draftShift.findMany({where:{draftId:id}})).map(proposal)
     const p=input.proposalId?proposals.find(p=>p.id===input.proposalId):null
     if(input.proposalId&&(!p || p.proposed.memberId!==actor.id&&p.source?.memberId!==actor.id))throw new ApiError(403,'OWN_SHIFT_REQUIRED','Замечание можно оставить только к своей смене.')
     if(input.date&&(input.date<dateText(d.fromDate)||input.date>dateText(d.toDate)))throw new ApiError(400,'OUTSIDE_DRAFT_PERIOD','Дата должна входить в период графика.')
+    await requirePlanFeature(organizationId, 'planning', tx);open(d)
     const ownSnapshot=proposals.filter(p=>p.proposed.memberId===actor.id||p.source?.memberId===actor.id).map(p=>({id:p.id,kind:p.kind,proposed:p.proposed.memberId===actor.id?p.proposed:null,source:p.source?.memberId===actor.id?p.source:null}))
     const unchanged=(await workPicture(tx,actor,d,proposals)).filter(s=>s.memberId===actor.id && !ownSnapshot.some(p=>p.proposed?.id===s.id)).map(s=>({id:s.id,kind:'KEEP',proposed:s,source:null}))
     const comment=await tx.draftComment.create({data:{organizationId,draftId:id,memberId:actor.id,proposalId:p?.id,date:input.date?new Date(input.date):null,revision:recipient.requiredRevision,snapshot:json(p?ownSnapshot.filter(s=>s.id===p.id):[...ownSnapshot,...unchanged].filter(s=>!input.date || s.proposed?.scheduledStartAt && new Date(s.proposed.scheduledStartAt)>=startOfZonedDate(input.date,d.timezone) && new Date(s.proposed.scheduledStartAt)<startOfZonedDate(addCalendarDays(input.date,1),d.timezone))),text:input.text}})
@@ -455,12 +470,13 @@ export async function commentOnDraft(userId:string,organizationId:string,id:stri
 }
 export async function decideDraftComment(userId:string,organizationId:string,id:string,commentId:string,input:z.infer<typeof schemas.draftDecisionBody>) {
   return withDraft(userId,organizationId,id,undefined,async(tx,actor,d)=> {
-    await accessible(tx,actor,d);editable(d)
+    await accessible(tx,actor,d)
     const c=await tx.draftComment.findFirst({where:{id:commentId,draftId:id}})
     if(!c)throw new ApiError(404,'COMMENT_NOT_FOUND','Замечание не найдено.')
     if(c.status!=='OPEN')throw new ApiError(409,'COMMENT_CLOSED','По замечанию уже есть решение.')
     if(input.action==='WITHDRAWN') {open(d);if(c.memberId!==actor.id)throw new ApiError(403,'OWN_COMMENT_REQUIRED','Можно отозвать только своё замечание.')}
     else {requirePermission(actor,'drafts.resolve');if(input.text.length<3)throw new ApiError(400,'EXPLANATION_REQUIRED','Укажите комментарий к решению.')}
+    await requirePlanFeature(organizationId, 'planning', tx);editable(d)
     const result=await tx.draftComment.update({where:{id:commentId},data:{status:input.action,decision:input.text||null,decidedByMemberId:actor.id,decidedAt:new Date()}})
     await history(tx,d,actor,'COMMENT_'+input.action,{commentId,text:input.text,memberId:c.memberId})
     if(input.action!=='WITHDRAWN')await notification(tx,d,[c.memberId],'Ответ на замечание к графику',input.text)

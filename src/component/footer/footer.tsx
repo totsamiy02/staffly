@@ -1,13 +1,5 @@
-import { useEffect, useState } from 'react'
 import logo from '../../assets/images/logo/staffly-logo.svg'
 import './footer.scss'
-
-type DatabaseStatus = {
-  connected: boolean
-  database?: string
-  server_time?: string
-  message?: string
-}
 
 const footerLinks = [
   {
@@ -57,15 +49,6 @@ function TelegramIcon() {
 }
 
 function Footer() {
-  const [databaseStatus, setDatabaseStatus] = useState<DatabaseStatus | null>(null)
-
-  useEffect(() => {
-    if (!import.meta.env.DEV) return
-    fetch('/api/database-status')
-      .then(async (response) => setDatabaseStatus((await response.json()) as DatabaseStatus))
-      .catch(() => setDatabaseStatus({ connected: false, message: 'API не отвечает' }))
-  }, [])
-
   return (
     <footer className="footer">
       <div className="container footer__container">
@@ -100,17 +83,6 @@ function Footer() {
           ))}
         </nav>
       </div>
-
-      {import.meta.env.DEV && <div className="container footer__database-check" aria-live="polite">
-        <strong>Проверка БД</strong>
-        {databaseStatus === null ? (
-          <span>Проверяем соединение…</span>
-        ) : databaseStatus.connected ? (
-          <span>PostgreSQL подключён: {databaseStatus.database}. Время сервера: {new Date(databaseStatus.server_time!).toLocaleString('ru-RU')}.</span>
-        ) : (
-          <span>Подключение не удалось: {databaseStatus.message}</span>
-        )}
-      </div>}
 
       <div className="container footer__bottom">
         <p>© {new Date().getFullYear()} Staffly. Все права защищены.</p>

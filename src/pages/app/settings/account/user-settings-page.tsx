@@ -132,30 +132,24 @@ export default function UserSettingsPage() {
     {section === 'notifications' && <EmailNotificationSettings />}
     {section === 'documents' && <PersonalDocuments organizationId={organizationId} />}
     {section === 'profile' && <section className={`profile-editor${profileEditing ? '' : ' profile-editor--view'}`}>
-      <aside><ImageUpload endpoint="/profile/avatar" imageUrl={avatarDraft.url} onDraftChange={avatarDraft.change} name={user?.displayName ?? initial} avatarClassName="account-profile-card__avatar" disabled={!profileEditing || profileBusy} onBusyChange={setImageBusy} onChange={(avatarUrl) => { if (user) updateUser({ ...user, avatarUrl }); void queryClient.invalidateQueries({ queryKey: ['organization-members'] }) }} onMessage={setMessage} onError={setProfileError} /><div className="profile-editor__identity"><span>Ваша учетная запись</span><h2>{user?.displayName}</h2><p>{user?.email}</p>{organization && <div className="profile-editor__organization-role"><RoleBadge role={organization.organizationRole ?? organization.role} /><span>в «{organization.name}»</span></div>}</div></aside>
+      <aside><ImageUpload floatingControls endpoint="/profile/avatar" imageUrl={avatarDraft.url} onDraftChange={avatarDraft.change} name={user?.displayName ?? initial} avatarClassName="account-profile-card__avatar" disabled={!profileEditing || profileBusy} onBusyChange={setImageBusy} onChange={(avatarUrl) => { if (user) updateUser({ ...user, avatarUrl }); void queryClient.invalidateQueries({ queryKey: ['organization-members'] }) }} onMessage={setMessage} onError={setProfileError} /><div className="profile-editor__identity"><span>Ваша учетная запись</span><h2>{user?.displayName}</h2><p>{user?.email}</p>{organization && <div className="profile-editor__organization-role"><RoleBadge role={organization.organizationRole ?? organization.role} /><span>в «{organization.name}»</span></div>}</div></aside>
       <form onSubmit={saveProfile} noValidate>
-        <div className="profile-settings-heading"><div><h2>Личные данные</h2><p>Имя и фамилия будут использоваться в шапке и списке сотрудников.</p></div>{!profileEditing && <ProfileEditActions editing={false} onEdit={() => editProfile(true)} onCancel={() => editProfile(false)} />}</div>
-        {profileEditing ? <fieldset className="profile-edit-fields" disabled={profileBusy || imageBusy}>
-        <div className="profile-fields-grid">
-          <label><span>Фамилия</span><input autoFocus value={lastName} onChange={(event) => setLastName(event.target.value)} maxLength={80} autoComplete="family-name" placeholder="Иванов" /></label>
-          <label><span>Имя</span><input value={firstName} onChange={(event) => setFirstName(event.target.value)} maxLength={80} autoComplete="given-name" placeholder="Ярослав" /></label>
-          <label><span>Отчество</span><input value={middleName} onChange={(event) => setMiddleName(event.target.value)} maxLength={80} autoComplete="additional-name" placeholder="Сергеевич" /></label>
-          <label><span>Телефон</span><input type="tel" inputMode="tel" value={phone} onChange={(event) => setPhone(formatRussianPhone(event.target.value))} maxLength={18} autoComplete="tel" placeholder="+7 (999) 123-45-67" /></label>
-          <label className="profile-field--wide"><span>Электронная почта</span><input value={user?.email ?? ''} readOnly aria-readonly="true" /><Link to="/app/settings?section=security">Изменить в настройках безопасности</Link></label>
-          <label className="profile-field--wide"><span>О себе</span><textarea value={bio} onChange={(event) => setBio(event.target.value)} maxLength={500} rows={4} placeholder="Короткая информация, которую увидят коллеги" /><small>{bio.length}/500</small></label>
-        </div>
-        </fieldset> : <div className="profile-details-groups">
-          <ProfileDetails title="Основная информация" icon="people" columns={3} items={[
-            { label: 'Фамилия', value: user?.lastName }, { label: 'Имя', value: user?.firstName }, { label: 'Отчество', value: user?.middleName },
+        <div className="profile-settings-heading"><div><h2>Личные данные</h2><p>Имя и фамилия будут использоваться в шапке и списке сотрудников.</p></div><ProfileEditActions editing={false} busy={profileEditing} onEdit={() => editProfile(true)} onCancel={() => editProfile(false)} /></div>
+        <fieldset className="profile-edit-fields" disabled={profileBusy || imageBusy}><div className="profile-details-groups">
+          <ProfileDetails title="Основная информация" icon="people" columns={3} editing={profileEditing} items={[
+            { label: 'Фамилия', value: user?.lastName, editor: <input aria-label="Фамилия" value={lastName} onChange={e => setLastName(e.target.value)} maxLength={80} autoComplete="family-name" /> },
+            { label: 'Имя', value: user?.firstName, editor: <input aria-label="Имя" value={firstName} onChange={e => setFirstName(e.target.value)} maxLength={80} autoComplete="given-name" /> },
+            { label: 'Отчество', value: user?.middleName, editor: <input aria-label="Отчество" value={middleName} onChange={e => setMiddleName(e.target.value)} maxLength={80} autoComplete="additional-name" /> },
           ]} />
-          <ProfileDetails title="Контакты" icon="mail" items={[
-            { label: 'Электронная почта', value: <>{user?.email}<Link className="profile-details__action" to="/app/settings?section=security">Изменить почту<span aria-hidden="true">→</span></Link></> },
-            { label: 'Телефон', value: formatRussianPhone(user?.phone ?? '') },
+          <ProfileDetails title="Контакты" icon="mail" editing={profileEditing} items={[
+            { label: 'Электронная почта', value: user?.email, editor: <input aria-label="Электронная почта" value={user?.email ?? ''} readOnly aria-readonly="true" /> },
+            { label: 'Телефон', value: formatRussianPhone(user?.phone ?? ''), editor: <input aria-label="Телефон" type="tel" inputMode="tel" value={phone} onChange={e => setPhone(formatRussianPhone(e.target.value))} maxLength={18} autoComplete="tel" /> },
           ]} />
-          <ProfileDetails title="О себе" icon="info" columns={1} prose items={[
-            { label: 'Информация для коллег', value: user?.bio },
+          <ProfileDetails title="О себе" icon="info" columns={1} prose editing={profileEditing} items={[
+            { label: 'Информация для коллег', value: user?.bio, editor: <textarea aria-label="Информация для коллег" value={bio} onChange={e => setBio(e.target.value)} maxLength={500} rows={4} /> },
           ]} />
-        </div>}
+          <Link className="profile-email-link" to="/app/settings?section=security">Изменить почту в настройках безопасности</Link>
+        </div></fieldset>
 
         {profileError && <p className="form-inline-error" role="alert">{profileError}</p>}
         {profileEditing && <ProfileEditActions editing busy={profileBusy || imageBusy} onEdit={() => editProfile(true)} onCancel={() => editProfile(false)} />}

@@ -6,7 +6,7 @@ import ActionSurface from '../../../component/ui/action-surface.tsx'
 import { requestStatusNames } from '../../../app/requests/workflow.ts'
 import type { Permission } from '../../../app/access/catalog.ts'
 import { useState, type ReactNode } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../../app/auth/auth-context.tsx'
 import type { OrganizationSummary } from '../../../app/organizations/types.ts'
 import { useDashboardRecords, useDashboardSchedule } from './dashboard-queries.ts'
@@ -40,13 +40,18 @@ export default function DashboardOverview({ organization }: { organization: Orga
   const locations = useLocations(organization.id)
   const points = (locations.data?.locations ?? []).filter(point => !point.archivedAt)
   const filterKey = `staffly:dashboard:${user?.id}:${organization.id}`
-  const [filter, setFilter] = useState(() => window.sessionStorage.getItem(filterKey) ?? 'all')
+  const [params, setParams] = useSearchParams()
+  const [savedFilter] = useState(() => window.sessionStorage.getItem(filterKey) ?? 'all')
+  const filter = params.get('dashboardPoint') ?? savedFilter
   const pointId = points.some(point => point.id === filter) ? filter : 'all'
   const selectedPoint = points.find(point => point.id === pointId)
   const visiblePoints = selectedPoint ? [selectedPoint] : points
   const anchorId = selectedPoint?.id ?? points[0]?.id
   const timezone = selectedPoint?.timezone ?? organization.organizationTimezone ?? 'Europe/Moscow'
-  function selectPoint(value: string) { window.sessionStorage.setItem(filterKey, value); setFilter(value) }
+  function selectPoint(value: string) {
+    window.sessionStorage.setItem(filterKey, value)
+    setParams(previous => { const next = new URLSearchParams(previous); next.set('dashboardPoint', value); return next }, { replace: true })
+  }
   const now = useInvitationClock()
   const localNow = zonedDateAndTime(new Date(now).toISOString(), timezone)
   const today = localNow.date
@@ -63,7 +68,7 @@ export default function DashboardOverview({ organization }: { organization: Orga
   const hasRequests = manager || can('requests.own'), hasDocuments = can('documents.view'), hasMembers = can('members.view'), hasEvents = can('events.view'), hasSchedule = calendarPoints.length > 0
   const scope = manager ? 'incoming' : 'mine'
   const { requests, pending, documents, members } = useDashboardRecords(organization.id, anchorId, pointId, manager, { requests:hasRequests, documents:hasDocuments, members:hasMembers })
-  const events = useEvents(organization.id, { pointId, pageSize: 3, tab: 'upcoming' },hasEvents)
+  const events = useEvents(organization.id, { pointId, locationId: anchorId, pageSize: 3, tab: 'upcoming' },hasEvents)
   const base = `/app/organizations/${organization.id}`
   const href = (module: string, params: Record<string, string> = {}) => `${base}/${module}?${new URLSearchParams({ location: anchorId ?? '', ...(['requests', 'documents', 'employees', 'events'].includes(module) ? { pointId } : {}), ...params })}`
   const dayHref = (day: string, locationId = anchorId ?? '') => href('schedule', { month: day.slice(0, 7), day, location: locationId })

@@ -10,7 +10,7 @@ export function useDocuments(organizationId: string, options: Record<string, str
 }
 export function useDocumentRefresh() {
   const client = useQueryClient()
-  return () => Promise.all(['documents', 'document', 'document-progress', 'personal-documents', 'member-profile', 'notifications', 'account-notifications'].map(key => client.invalidateQueries({ queryKey: [key] })))
+  return () => Promise.all(['organization-resources', 'documents', 'document', 'document-progress', 'personal-documents', 'member-profile', 'notifications', 'account-notifications'].map(key => client.invalidateQueries({ queryKey: [key] })))
 }
 
 export function useDocumentMembers(organizationId: string, enabled = true, all = false, pointId?: string | null) {

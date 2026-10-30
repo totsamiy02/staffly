@@ -1,3 +1,5 @@
+import { storage } from '../../src/server/storage/provider.ts'
+import { organizationResources } from '../../src/server/resources/quotas.ts'
 import * as documentsService from '../../src/server/documents/service.ts'
 import { listSchema as documentListSchema, assignSchema as assignmentSchema } from '../../src/server/documents/schemas.ts'
 import { reportSickness, changeAbsence, listAbsences, absenceListQuery, absencePeriodBody } from '../../src/server/schedule/absence-service.ts'
@@ -11,7 +13,8 @@ import assert from 'node:assert/strict'
 import { after, before, describe, it } from 'node:test'
 import { randomUUID } from 'node:crypto'
 import { prisma } from '../../src/server/db.ts'
-import { changeMemberRole, createOrganization, getOrganization, listAccountNotifications, listMembers, listMembersPage, listOrganizations, readAccountNotification, removeMember, updateOrganization } from '../../src/server/organizations/organization-service.ts'
+import { changeMemberRole, getOrganization, listAccountNotifications, listMembers, listMembersPage, listOrganizations, readAccountNotification, removeMember, updateOrganization } from '../../src/server/organizations/organization-service.ts'
+import { createBusinessOrganization as createOrganization } from '../support/business-organization.ts'
 import { acceptCodeInvitation, acceptEmailInvitation, createCodeInvitation, createEmailInvitation, listActiveOrganizationInvitations, listPendingInvitations, previewCodeInvitation, previewEmailInvitation, rejectEmailInvitation, revokeInvitation } from '../../src/server/organizations/invitation-service.ts'
 import { confirmOrganizationDeletion, confirmOwnershipTransfer, requestOrganizationDeletion, requestOwnershipTransfer } from '../../src/server/organizations/sensitive-action-service.ts'
 import { updateProfileBody } from '../../src/server/profile/schemas.ts'
@@ -82,7 +85,9 @@ describe('organizations and authorization', { concurrency: false }, () => {
     const organization = await createOrganization(owner.id, { name: 'Staffly Test', description: null, timezone: 'Europe/Moscow' })
     const membership = await prisma.organizationMember.findUnique({ where: { organizationId_userId: { organizationId: organization.id, userId: owner.id } } })
     assert.equal(membership?.role, 'OWNER')
-    assert.equal((await listOrganizations(owner.id)).length, 1)
+    const created = await listOrganizations(owner.id)
+    assert.equal(created.length, 1)
+    assert.equal(created[0].createdByViewer, true)
   })
 
   it('rolls back the organization if OWNER membership creation fails', async () => {
@@ -104,7 +109,9 @@ describe('organizations and authorization', { concurrency: false }, () => {
     await prisma.organizationMember.create({ data: { organizationId: first.id, userId: member.id, role: 'MEMBER' } })
     await prisma.organizationMember.create({ data: { organizationId: second.id, userId: member.id, role: 'MEMBER' } })
     await assert.rejects(() => prisma.organizationMember.create({ data: { organizationId: first.id, userId: member.id } }))
-    assert.equal((await listOrganizations(member.id)).length, 2)
+    const invited = await listOrganizations(member.id)
+    assert.equal(invited.length, 2)
+    assert.ok(invited.every(organization => organization.createdByViewer === false))
   })
 
   it('isolates organizations and prevents MEMBER administrative actions', async () => {
@@ -495,7 +502,7 @@ describe('roles and sensitive actions', { concurrency: false }, () => {
     const target = await prisma.organizationMember.findUniqueOrThrow({ where: { organizationId_userId: { organizationId: organization.id, userId: member.id } } })
     await expectCode(() => requestOwnershipTransfer(admin.id, organization.id, target.id), 'INSUFFICIENT_PERMISSIONS')
     const request = await requestOwnershipTransfer(owner.id, organization.id, target.id)
-    await expectCode(() => confirmOwnershipTransfer(owner.id, organization.id, '000000'), 'INVALID_VERIFICATION_CODE')
+    await expectCode(() => confirmOwnershipTransfer(owner.id, organization.id, request.code === '000000' ? '000001' : '000000'), 'INVALID_VERIFICATION_CODE')
     await confirmOwnershipTransfer(owner.id, organization.id, request.code)
     const roles = await prisma.organizationMember.findMany({ where: { organizationId: organization.id, role: 'OWNER' } })
     assert.equal(roles.length, 1)
@@ -514,6 +521,32 @@ describe('roles and sensitive actions', { concurrency: false }, () => {
     await expectCode(() => getOrganization(owner.id, organization.id), 'ORGANIZATION_NOT_FOUND')
     assert.equal((await listOrganizations(owner.id)).some((item) => item.id === organization.id), false)
   })
+  for (const action of ['TRANSFER_OWNERSHIP', 'DELETE_ORGANIZATION'] as const) it(`persists five invalid ${action} attempts and accepts only a fresh code afterwards`, async () => {
+    const org = await createOrganization(owner.id, { name: `Code attempts ${action}`, description: null, timezone: 'Europe/Moscow' })
+    const target = await prisma.organizationMember.create({ data: { organizationId: org.id, userId: member.id } })
+    const request = () => action === 'TRANSFER_OWNERSHIP' ? requestOwnershipTransfer(owner.id, org.id, target.id) : requestOrganizationDeletion(owner.id, org.id)
+    const confirm = (code: string) => action === 'TRANSFER_OWNERSHIP' ? confirmOwnershipTransfer(owner.id, org.id, code) : confirmOrganizationDeletion(owner.id, org.id, code)
+    try {
+      const { code } = await request(), wrong = code === '000000' ? '000001' : '000000'
+      for (let attempt = 1; attempt <= 5; attempt++) {
+        await expectCode(() => confirm(wrong), 'INVALID_VERIFICATION_CODE')
+        const token = await prisma.sensitiveActionToken.findFirstOrThrow({ where: { organizationId: org.id, action } })
+        assert.equal(token.attempts, attempt)
+        assert.equal(token.usedAt, null)
+      }
+      await expectCode(() => confirm(code), 'INVALID_VERIFICATION_CODE')
+      assert.equal((await prisma.organizationMember.findFirstOrThrow({ where: { organizationId: org.id, role: 'OWNER' } })).userId, owner.id)
+      assert.equal((await prisma.organization.findUniqueOrThrow({ where: { id: org.id } })).deletedAt, null)
+      // Advance only this fixture's resend cooldown; the exhausted token must be replaced.
+      await prisma.sensitiveActionToken.updateMany({ where: { organizationId: org.id, action }, data: { createdAt: new Date(Date.now() - 61000) } })
+      const fresh = await request()
+      await confirm(fresh.code)
+      const consumed = await prisma.sensitiveActionToken.findFirstOrThrow({ where: { organizationId: org.id, action } })
+      assert.ok(consumed.usedAt); assert.equal(consumed.attempts, 1)
+      await assert.rejects(confirm(fresh.code))
+    } finally { await prisma.organization.update({ where: { id: org.id }, data: { deletedAt: new Date() } }) }
+  })
+
 })
 
 describe('work schedule and time statistics', { concurrency: false }, () => {
@@ -1628,6 +1661,55 @@ describe('documents: privacy, immutable storage and acknowledgement lifecycle', 
     await documentsService.deleteDocument(owner.id, org, pending.id)
     assert.ok((await prisma.documentAcknowledgement.findFirstOrThrow({ where: { documentId: pending.id } })).cancelledAt)
   })
+  it('purges only archived authorized files, releases quota after deletion and retains acknowledgement history', async () => {
+    const baseline = (await organizationResources(owner.id, org)).storage.usedBytes
+    const doc = await documentsService.uploadDocument(owner.id, org, pdf, 'application/pdf', 'purge.pdf', metadata())
+    await documentsService.assignAcknowledgements(owner.id, org, doc.id, assignmentSchema.parse({ recipients: 'members', memberIds: [employee, administrator] }))
+    await documentsService.acknowledgeDocument(member.id, org, doc.id)
+    await expectCode(() => documentsService.purgeDocumentFile(owner.id, org, doc.id), 'DOCUMENT_NOT_ARCHIVED')
+    await expectCode(() => documentsService.purgeDocumentFile(owner.id, otherOrg, doc.id), 'DOCUMENT_NOT_FOUND')
+    await documentsService.deleteDocument(owner.id, org, doc.id)
+    await expectCode(() => documentsService.purgeDocumentFile(member.id, org, doc.id), 'DOCUMENT_NOT_FOUND')
+    const before = await prisma.document.findUniqueOrThrow({ where: { id: doc.id }, include: { storedFile: true, acknowledgements: true } })
+    assert.deepEqual(await readObject(before.storedFile.objectKey), pdf)
+    assert.equal((await organizationResources(owner.id, org)).storage.usedBytes, baseline + pdf.length)
+    assert.equal((await documentsService.getDocument(owner.id, org, doc.id)).canPurge, true)
+    assert.deepEqual(await documentsService.purgeDocumentFile(owner.id, org, doc.id), { removed: true, cleanupPending: false })
+    const after = await prisma.document.findUniqueOrThrow({ where: { id: doc.id }, include: { storedFile: true, acknowledgements: true } })
+    assert.ok(after.storedFile.purgedAt); assert.equal(after.storedFile.pendingDeletionAt, null)
+    assert.equal(after.storedFile.size, pdf.length); assert.equal(after.storedFile.checksumSha256, before.storedFile.checksumSha256)
+    assert.deepEqual(after.acknowledgements, before.acknowledgements)
+    await assert.rejects(readObject(after.storedFile.objectKey))
+    const detail = await documentsService.getDocument(owner.id, org, doc.id)
+    assert.ok(detail.fileRemovedAt); assert.equal(detail.canDownload, false); assert.equal(detail.previewable, false); assert.equal(detail.canPurge, false)
+    for (const action of ['preview', 'download'] as const) await expectCode(() => documentsService.deliverDocument(owner.id, org, doc.id, action), 'DOCUMENT_NOT_FOUND')
+    assert.equal((await organizationResources(owner.id, org)).storage.usedBytes, baseline)
+    await documentsService.purgeDocumentFile(owner.id, org, doc.id)
+    assert.equal((await organizationResources(owner.id, org)).storage.usedBytes, baseline)
+  })
+  it('keeps failed purge bytes charged and retries the durable cleanup without double releasing quota', async () => {
+    const baseline = (await organizationResources(owner.id, org)).storage.usedBytes
+    const doc = await documentsService.uploadDocument(owner.id, org, pdf, 'application/pdf', 'retry-purge.pdf', metadata())
+    await documentsService.deleteDocument(owner.id, org, doc.id)
+    const binding = await prisma.document.findUniqueOrThrow({ where: { id: doc.id }, include: { storedFile: true } })
+    const remove = storage.delete
+    try {
+      storage.delete = async () => { throw new Error('Synthetic storage outage') }
+      assert.deepEqual(await documentsService.purgeDocumentFile(owner.id, org, doc.id), { removed: false, cleanupPending: true })
+    } finally { storage.delete = remove }
+    const queued = await prisma.storedFile.findUniqueOrThrow({ where: { id: binding.storedFileId } })
+    assert.equal(queued.purgedAt, null); assert.ok(queued.pendingDeletionAt); assert.equal(queued.deletionAttempts, 1)
+    assert.deepEqual(await readObject(queued.objectKey), pdf)
+    assert.equal((await organizationResources(owner.id, org)).storage.usedBytes, baseline + pdf.length)
+    const detail = await documentsService.getDocument(owner.id, org, doc.id)
+    assert.equal(detail.filePurgePending, true); assert.equal(detail.canDownload, false); assert.equal(detail.previewable, false)
+    await cleanupPendingFiles({ limit: 500 })
+    assert.ok((await prisma.storedFile.findUniqueOrThrow({ where: { id: queued.id } })).purgedAt)
+    await assert.rejects(readObject(queued.objectKey))
+    assert.equal((await organizationResources(owner.id, org)).storage.usedBytes, baseline)
+    await cleanupPendingFiles({ limit: 500 })
+    assert.equal((await organizationResources(owner.id, org)).storage.usedBytes, baseline)
+  })
   it('serves protected bytes only on explicit POST, marks successful delivery and refuses anonymous, foreign and static access', async () => {
     const { default: express } = await import('express')
     const { default: router } = await import('../../src/server/documents/routes.ts')
@@ -1669,6 +1751,20 @@ describe('documents: privacy, immutable storage and acknowledgement lifecycle', 
       }
       assert.ok(opened, 'Successful streaming must eventually commit openedAt')
       assert.equal((await fetch(`${base}${path}/acknowledge`, { method: 'POST', headers })).status, 204)
+      const ownerSession = await prisma.authSession.create({ data: { userId: owner.id, refreshTokenHash: randomUUID(), idleExpiresAt: new Date(Date.now() + 60000), absoluteExpiresAt: new Date(Date.now() + 60000) } })
+      const ownerToken = await new SignJWT({ sid: ownerSession.id }).setProtectedHeader({ alg: 'HS256' }).setSubject(owner.id).setIssuedAt().setExpirationTime('5m').sign(new TextEncoder().encode(process.env.JWT_SECRET!))
+      const purgeHeaders = { Authorization: `Bearer ${ownerToken}`, 'Content-Type': 'application/json' }
+      const purge = (body: object) => fetch(`${base}${path}/content`, { method: 'DELETE', headers: purgeHeaders, body: JSON.stringify(body) })
+      assert.equal((await purge({ confirm: true })).status, 409, 'Active files cannot be purged')
+      await documentsService.deleteDocument(owner.id, org, doc.id)
+      assert.equal((await fetch(`${base}${path}/content`, { method: 'DELETE', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ confirm: true }) })).status, 404)
+      assert.equal((await purge({})).status, 400, 'Explicit permanent deletion confirmation is required')
+      assert.equal((await purge({ confirm: false })).status, 400)
+      const purged = await purge({ confirm: true })
+      assert.equal(purged.status, 200); assert.deepEqual(await purged.json(), { removed: true, cleanupPending: false })
+      assert.equal((await purge({ confirm: true })).status, 200, 'Repeated deletion is idempotent')
+      assert.equal((await fetch(`${base}${path}/content?action=preview`, { method: 'POST', headers: purgeHeaders })).status, 404)
+
     } finally { await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())) }
   })
   it('cancels unfinished requirements when a role change removes document access', async () => {

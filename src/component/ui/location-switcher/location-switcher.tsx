@@ -3,7 +3,7 @@ import { locationTone } from '../../../app/organizations/format.ts'
 import './location-switcher.scss'
 
 type Point = { id: string; name: string; address?: string | null; archivedAt?: string | null }
-export default function LocationSwitcher({ points, value, onChange, onOpen, totalPoints = points.length }: { points: Point[]; value: string; onChange: (id: string) => void; onOpen?: () => void; totalPoints?: number }) {
+export default function LocationSwitcher({ points, value, onChange, onOpen, totalPoints = points.length, compact = false }: { points: Point[]; value: string; onChange: (id: string) => void; onOpen?: () => void; totalPoints?: number; compact?: boolean }) {
   const [open, setOpen] = useState(false), [search, setSearch] = useState('')
   const host = useRef<HTMLDivElement>(null), input = useRef<HTMLInputElement>(null), id = useId()
   const selected = points.find(point => point.id === value)
@@ -17,7 +17,7 @@ export default function LocationSwitcher({ points, value, onChange, onOpen, tota
   }, [open])
   function select(point: Point) { onChange(point.id); setOpen(false); setSearch('') }
   const filtered = points.filter(point => `${point.name} ${point.address ?? ''}`.toLocaleLowerCase().includes(search.toLocaleLowerCase()))
-  if (points.length <= 4) return <div className="location-switcher location-switcher--inline" role="group" aria-label="Точки организации">{points.map(point => <button className="location-choice" type="button" key={point.id} title={point.name} aria-label={point.name} data-tone={locationTone(point.id)} aria-pressed={point.id === value} onClick={() => select(point)}><span className="location-choice__dot" /><span>{point.name}</span>{point.archivedAt && <small>Закрыта</small>}</button>)}</div>
+  if (points.length <= 4 && !compact) return <div className="location-switcher location-switcher--inline" role="group" aria-label="Точки организации">{points.map(point => <button className="location-choice" type="button" key={point.id} title={point.name} aria-label={point.name} data-tone={locationTone(point.id)} aria-pressed={point.id === value} onClick={() => select(point)}><span className="location-choice__dot" /><span>{point.name}</span>{point.archivedAt && <small>Закрыта</small>}</button>)}</div>
   return <div className="location-switcher" ref={host}>
     <button type="button" className="location-switcher__trigger" title={selected?.name} aria-haspopup="dialog" aria-expanded={open} aria-controls={id} onClick={() => { setSearch(''); setOpen(!open); if (!open) onOpen?.() }}><span className="location-choice__dot" data-tone={locationTone(value)} /><span><strong>{selected?.name ?? 'Выберите точку'}</strong><small>{totalPoints} {pointWord === 'one' ? 'точка' : pointWord === 'few' ? 'точки' : 'точек'} организации</small></span><span aria-hidden="true">⌄</span></button>
     {open && <section className="location-switcher__popover" id={id} role="dialog" aria-label="Выбор точки" onKeyDown={event => {

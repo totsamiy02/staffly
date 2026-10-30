@@ -18,7 +18,7 @@ function LegalDocument({ title, updatedAt, sections }: LegalDocumentProps) {
     <main className="legal-document">
       <div className="container legal-document__container">
         <a className="legal-document__back" href="/">
-          ← Вернуться на главную
+          Вернуться на главную
         </a>
 
         <header className="legal-document__header">

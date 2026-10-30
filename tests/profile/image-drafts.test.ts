@@ -10,7 +10,8 @@ import { ApiError } from '../../src/server/api-error.ts'
 import profileRoutes from '../../src/server/profile/routes.ts'
 import mediaRoutes from '../../src/server/storage/routes.ts'
 import { deletePendingFile, stageProfileImage } from '../../src/server/storage/image-service.ts'
-import { createOrganization, updateOrganization } from '../../src/server/organizations/organization-service.ts'
+import { updateOrganization } from '../../src/server/organizations/organization-service.ts'
+import { createBusinessOrganization as createOrganization } from '../support/business-organization.ts'
 
 let userId: string, foreignId: string, token: string, orgId: string, base: string, photo: Buffer
 const app = express().use(express.json()).use('/api', mediaRoutes, profileRoutes)

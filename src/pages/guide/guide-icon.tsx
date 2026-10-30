@@ -11,7 +11,6 @@ export default function GuideIcon({ name = 'book', className }: { name?: string;
     settings: <><path d="m9 3-1 3-3 1-2 3 2 2-1 4 3 2 3-1 2 4 3-1 1-3 3-1 2-3-2-2 1-4-3-2-3 1-2-4Z" /><circle cx="12" cy="12" r="3" /></>,
     bell: <><path d="M5 17h14l-2-3V9a5 5 0 0 0-10 0v5ZM10 21h4" /></>,
     search: <><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 5 5" /></>,
-    arrow: <><path d="M5 12h14m-5-5 5 5-5 5" /></>,
     back: <><path d="M19 12H5m5-5-5 5 5 5" /></>,
     link: <><path d="m10 13 4-4M8 16l-1 1a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0M16 8l1-1a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0" /></>,
     zoom: <><circle cx="10" cy="10" r="7" /><path d="M10 7v6m-3-3h6m2 5 6 6" /></>,

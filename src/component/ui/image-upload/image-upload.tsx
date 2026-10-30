@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useAuth } from '../../../app/auth/auth-context.tsx'
 import Avatar from '../avatar/avatar.tsx'
 import FilePicker from '../file-picker/file-picker.tsx'
@@ -17,11 +17,13 @@ type ImageUploadProps = {
   onError: (message: string) => void
   onBusyChange?: (busy: boolean) => void
   onDraftChange?: (file: File | null) => void
+  floatingControls?: boolean
 }
 
-export default function ImageUpload({ endpoint, imageUrl, name, avatarClassName, disabled = false, onChange, onMessage, onError, onBusyChange, onDraftChange }: ImageUploadProps) {
+export default function ImageUpload({ endpoint, imageUrl, name, avatarClassName, disabled = false, onChange, onMessage, onError, onBusyChange, onDraftChange, floatingControls = false }: ImageUploadProps) {
   const { apiRequest, uploadImage } = useAuth()
   const [busy, setBusy] = useState(false)
+  const picker = useRef<HTMLInputElement>(null)
 
   async function selectFile(file: File | undefined) {
     if (!file || disabled || busy) return
@@ -54,9 +56,10 @@ export default function ImageUpload({ endpoint, imageUrl, name, avatarClassName,
     } finally { setBusy(false); onBusyChange?.(false) }
   }
 
-  return <div className="image-upload">
+  return <div className={`image-upload${floatingControls ? ' image-upload--floating' : ''}`}>
     <div className="image-upload__preview"><Avatar url={imageUrl} name={name} className={avatarClassName} eager /></div>
-    {!disabled && <div className="image-upload__controls"><div className="image-upload__actions">
+    {!disabled && floatingControls && <div className="image-upload__floating-actions"><input ref={picker} type="file" hidden accept="image/jpeg,image/png,image/webp" disabled={busy} onChange={event => { void selectFile(event.target.files?.[0]); event.target.value = '' }} /><button type="button" disabled={busy} aria-label={imageUrl ? 'Заменить фото' : 'Загрузить фото'} title="Выбрать JPEG, PNG или WebP до 8 МБ" onClick={() => picker.current?.click()}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M4 7h4l2-3h4l2 3h4v13H4Z" /><circle cx="12" cy="13" r="4" /></svg></button>{imageUrl && <button type="button" disabled={busy} aria-label="Удалить фото" onClick={() => void remove()}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7m4-7v7" /></svg></button>}</div>}
+    {!disabled && !floatingControls && <div className="image-upload__controls"><div className="image-upload__actions">
       <FilePicker compact value={[]} label="Фотография" buttonLabel={busy ? 'Обрабатываем…' : imageUrl ? 'Заменить фото' : 'Загрузить фото'} accept="image/jpeg,image/png,image/webp" maxBytes={MAX_IMAGE_BYTES} disabled={busy} onChange={files => void selectFile(files[0])}/>
       {imageUrl && <button className="image-upload__remove" type="button" disabled={busy} onClick={() => void remove()}>Удалить</button>}
     </div>

@@ -1,3 +1,7 @@
+import { PlanBadge, PlanIcon } from '../subscriptions/plan-ui.tsx'
+import { isPlanId, plans, money } from '../../../app/subscriptions/plans.ts'
+import AnimatedOverlay from '../../../component/ui/modal/animated-overlay.tsx'
+import DocumentDialog from '../../../component/ui/modal/document-dialog.tsx'
 import { invitationTimeRemaining, useInvitationClock } from '../../../app/organizations/invitation-time.ts'
 import { participantLabel } from '../../../app/organizations/format.ts'
 import RoleBadge from '../../../component/ui/role-badge/role-badge.tsx'
@@ -13,14 +17,14 @@ import '../app.scss'
 
 function OrganizationGrid({ title, organizations }: { title: string; organizations: OrganizationSummary[] }) {
   if (!organizations.length) return null
+  const plural = new Intl.PluralRules('ru-RU').select(organizations.length)
   return <section className="organizations-section">
-    <header><div><h2>{title}</h2><p>{organizations.length} {organizations.length === 1 ? 'организация' : 'организации'}</p></div></header>
-    <div className={`organization-grid${organizations.length === 1 ? ' organization-grid--single' : ''}`}>
+    <header><div><h2>{title}</h2><p>{organizations.length} {plural === 'one' ? 'организация' : plural === 'few' ? 'организации' : 'организаций'}</p></div></header>
+    <div className="organization-grid">
       {organizations.map((organization) => <Link className="organization-card" to={`/app/organizations/${organization.id}`} key={organization.id}>
         <Avatar url={organization.logoUrl} name={organization.name} className="organization-card__avatar" />
-        <strong>{organization.name}</strong>
-        <span>{organization.memberCount ?? 0} {participantLabel(organization.memberCount ?? 0)}</span>
-        <RoleBadge role={organization.role} />
+        <span className="organization-card__body"><strong>{organization.name}</strong><span className="organization-card__participants">{organization.memberCount ?? 0} {participantLabel(organization.memberCount ?? 0)}</span><span className="organization-card__meta"><RoleBadge role={organization.role} />{organization.subscription && <PlanBadge plan={organization.subscription.effectivePlan} trial={organization.subscription.phase === 'trial'} />}</span>{organization.subscription?.validUntil && <small>До {new Date(organization.subscription.validUntil).toLocaleDateString('ru-RU')}</small>}</span>
+
       </Link>)}
     </div>
   </section>
@@ -80,8 +84,8 @@ export default function OrganizationsPage() {
   }, [apiRequest, emailToken, refetchInvitations, setParams])
 
   function submitCode(event: FormEvent) { event.preventDefault(); setError(''); setMessage(''); previewCode.mutate() }
-  const owned = organizations.data?.organizations.filter((item) => item.role === 'OWNER') ?? []
-  const joined = organizations.data?.organizations.filter((item) => item.role !== 'OWNER') ?? []
+  const owned = organizations.data?.organizations.filter((item) => item.createdByViewer ?? item.role === 'OWNER') ?? []
+  const joined = organizations.data?.organizations.filter((item) => !(item.createdByViewer ?? item.role === 'OWNER')) ?? []
   const busy = previewCode.isPending || acceptCode.isPending
 
   return <div className="app-page">
@@ -96,9 +100,15 @@ export default function OrganizationsPage() {
       {organizations.isLoading ? <div className="app-state"><span className="app-spinner" />Загружаем организации…</div> : organizations.isError ? <div className="app-state"><p>Не удалось загрузить организации.</p><button className="app-secondary" onClick={() => void organizations.refetch()}>Повторить</button></div> : <>
         {!owned.length && !joined.length && <div className="organizations-empty"><span className="organizations-empty__mark">S</span><h2>Создайте первое рабочее пространство</h2><p>Здесь появятся ваши организации и команды, к которым вас пригласили.</p></div>}
         <OrganizationGrid title="Созданные вами" organizations={owned} />
-        <OrganizationGrid title="Организации, где вы состоите" organizations={joined} />
+        <OrganizationGrid title="Вас пригласили" organizations={joined} />
       </>}
 
+      {isPlanId(params.get('plan')) && params.get('plan') !== 'FREE' && <AnimatedOverlay variant="modal" onClose={() => setParams(previous => { const next = new URLSearchParams(previous); next.delete('plan'); return next }, { replace: true })}>{close => <DocumentDialog title="Для какой организации?" eyebrow="Выбор тарифа" onClose={close}>
+        <div className="subscription-organization"><PlanIcon plan={params.get('plan') as 'TEAM' | 'BUSINESS'} /> {plans[params.get('plan') as 'TEAM' | 'BUSINESS'].name} · {money(plans[params.get('plan') as 'TEAM' | 'BUSINESS'].priceMinor)} / месяц</div>
+        <div className="subscription-pick-organization">{organizations.data?.organizations.filter(org => org.role === 'OWNER').map(org => <button key={org.id} onClick={() => { window.location.assign(`/app/organizations/${org.id}/settings?section=subscription&plan=${params.get('plan')}`) }}><span><strong>{org.name}</strong><small>Текущий тариф: {plans[org.subscription?.effectivePlan ?? 'FREE'].name}</small></span></button>)}</div>
+        {organizations.isLoading && <p>Загружаем организации…</p>}{organizations.error && <p className="form-inline-error" role="alert">{organizations.error.message}</p>}
+        <p>Тариф изменится только у выбранной организации. Подписками управляет её владелец.</p><footer><button className="app-secondary" onClick={close}>Назад</button><Link className="app-primary" to={`/app/organizations/new?plan=${params.get('plan')}`}>Создать организацию</Link></footer>
+      </DocumentDialog>}</AnimatedOverlay>}
       <section className="join-card" id="join-organization"><div><p className="app-eyebrow">Есть код приглашения?</p><h2>Присоединиться к организации</h2><p>Введите одноразовый код, который вам передал администратор.</p></div><form onSubmit={submitCode}><input value={code} onChange={(event) => updateInviteCode(event.target.value)} placeholder="XXXX-XXXX-XXXX" maxLength={14} pattern="[A-Z2-9]{4}(?:-[A-Z2-9]{4}){2}" autoComplete="off" required /><button className="app-primary" disabled={busy || code.length !== 14}>Проверить код</button></form>{preview && <div className="invite-preview"><Avatar url={preview.organization.logoUrl} name={preview.organization.name} className="organization-card__avatar" /><div><strong>{preview.organization.name}</strong><p>Приглашение от {preview.invitedBy}</p><small>{invitationTimeRemaining(preview.expiresAt, now)}</small></div><button className="app-primary" disabled={busy || new Date(preview.expiresAt).getTime() <= now} onClick={() => acceptCode.mutate()}>Присоединиться</button><button className="app-secondary" onClick={() => setPreview(null)}>Отмена</button></div>}</section>
     </main>
   </div>

@@ -1,3 +1,4 @@
+import subscriptionRouter, { subscriptionWritePolicy } from './subscriptions/routes.ts'
 import teamPlanningRouter from './schedule/planning/team-planning-routes.ts'
 import express from 'express'
 import { ZodError } from 'zod'
@@ -107,8 +108,9 @@ app.get('/health/ready', async (_request, response) => {
 app.use('/api/organizations/:organizationId', (request, response, next) => {
   if (!['GET', 'HEAD'].includes(request.method)) response.once('finish', () => { if (response.statusCode < 400) readCache.invalidate(String(request.params.organizationId)) })
   next()
-}, requireAuth, selectLocation)
+}, requireAuth, selectLocation, subscriptionWritePolicy)
 app.use('/api', (_q,s,next)=>{s.set('Cache-Control','no-store');next()}, accessRouter)
+app.use('/api', subscriptionRouter)
 app.use('/api', storageRouter)
 app.use('/api/auth', (_request, response, next) => { response.set('Cache-Control', 'no-store'); next() }, authRouter)
 app.use('/api', (_request, response, next) => { response.set('Cache-Control', 'no-store'); next() }, profileRouter)

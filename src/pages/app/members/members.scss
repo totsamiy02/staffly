@@ -64,3 +64,5 @@
 
 .active-invitation__actions {display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;}
 @media(max-width:460px){.active-invitation{flex-wrap:wrap;}.active-invitation__actions{width:100%;justify-content:flex-start;}}
+
+.request-modal.document-dialog.member-assignment-dialog{width:min(480px,100%);padding:24px;>header h2{font-size:21px;}form{margin-top:20px;gap:18px;}.member-positions-person{margin:0;padding:0 0 18px;gap:12px;justify-content:flex-start;.app-avatar{width:48px;height:48px;flex:0 0 48px;}>div{display:grid;justify-items:start;gap:7px;min-width:0;}strong{font-size:14px;line-height:1.45;overflow-wrap:anywhere;}.role-badge{font-size:10px;}}label{gap:7px;>span{font-size:12px;}}.member-assignment-dialog__hint{font-size:12px;line-height:1.65;margin:0;color:var(--theme-muted,#888);}footer{display:flex;justify-content:flex-end;gap:10px;margin:0;padding-top:18px;border-top:1px solid var(--theme-border,#e6e2eb);button{width:auto;flex:0 1 auto;min-width:100px;min-height:42px;font-size:12px;padding:10px 16px;}}}

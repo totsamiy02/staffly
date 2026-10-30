@@ -6,6 +6,7 @@ import { formatNotificationPeriod } from '../../app/organizations/notification-f
 import { getMembership } from './access/permissions.ts'
 import { ApiError } from '../api-error.ts'
 import { mediaUrl } from '../storage/image-service.ts'
+import { syncSubscriptionNotices } from '../subscriptions/notifications.ts'
 
 const labels = { SHIFT_ASSIGNED: 'Назначена смена', SHIFT_CHANGED: 'Смена изменена', SHIFT_CANCELLED: 'Смена отменена' } as const
 export type ShiftEventType = keyof typeof labels
@@ -31,6 +32,7 @@ export function decodeNotificationCursor(cursor: string | undefined) {
 
 export async function listNotificationHistory(userId: string, email: string, options: { limit: number; cursor?: string; unread?: boolean; organizationId?: string; locationId?: string; category?: string }) {
   if (options.organizationId) await getMembership(userId, options.organizationId)
+  await syncSubscriptionNotices(userId, options.organizationId)
   const cursor = decodeNotificationCursor(options.cursor)
   const { actors, sql: readable } = await notificationPolicy(userId, options.organizationId)
   // Both sources are existing records; invitations can predate the recipient's registration.
@@ -81,7 +83,7 @@ export async function listNotificationHistory(userId: string, email: string, opt
     const organizationPath = `/app/organizations/${row.organizationId}`
     const month = row.shiftStartAt ? new Intl.DateTimeFormat('en-CA', { timeZone: row.timezone, year: 'numeric', month: '2-digit' }).formatToParts(row.shiftStartAt) : []
     const monthText = `${month.find(part => part.type === 'year')?.value}-${month.find(part => part.type === 'month')?.value}`
-    const href = row.role ? row.vacationCampaignId ? `${organizationPath}/requests?tab=vacations&year=${row.vacationYear}&campaign=${row.vacationCampaignId}` : row.scheduleDraftId ? `${organizationPath}/schedule/drafts/${row.scheduleDraftId}` : row.shiftOfferId ? `${organizationPath}/requests?tab=offers&offer=${row.shiftOfferId}` : row.eventId ? `${organizationPath}/events?event=${row.eventId}` : row.documentId ? `${organizationPath}/documents?document=${row.documentId}` : row.absenceId ? `${organizationPath}/schedule?absences=1&absence=${row.absenceId}` : row.shiftId ? `${organizationPath}/schedule?view=mine&month=${monthText}&shift=${row.shiftId}` : row.requestId ? `${organizationPath}/requests?tab=${row.requestSystemCode === 'STAFFING' ? 'staffing' : row.type === 'REQUEST_CREATED' && !!actors.get(row.organizationId) && hasPermission(actors.get(row.organizationId)!,'requests.view',row.locationId ?? undefined) ? 'incoming' : 'mine'}&request=${row.requestId}` : organizationPath : row.source === 'invite' && row.state === 'ACTIVE' ? `/app#invitation-${row.id.split(':')[1]}` : null
+    const href = row.role ? row.type === 'SUBSCRIPTION_STATUS' ? `${organizationPath}/settings?section=subscription` : row.vacationCampaignId ? `${organizationPath}/requests?tab=vacations&year=${row.vacationYear}&campaign=${row.vacationCampaignId}` : row.scheduleDraftId ? `${organizationPath}/schedule/drafts/${row.scheduleDraftId}` : row.shiftOfferId ? `${organizationPath}/requests?tab=offers&offer=${row.shiftOfferId}` : row.eventId ? `${organizationPath}/events?event=${row.eventId}` : row.documentId ? `${organizationPath}/documents?document=${row.documentId}` : row.absenceId ? `${organizationPath}/schedule?absences=1&absence=${row.absenceId}` : row.shiftId ? `${organizationPath}/schedule?view=mine&month=${monthText}&shift=${row.shiftId}` : row.requestId ? `${organizationPath}/requests?tab=${row.requestSystemCode === 'STAFFING' ? 'staffing' : row.type === 'REQUEST_CREATED' && !!actors.get(row.organizationId) && hasPermission(actors.get(row.organizationId)!,'requests.view',row.locationId ?? undefined) ? 'incoming' : 'mine'}&request=${row.requestId}` : organizationPath : row.source === 'invite' && row.state === 'ACTIVE' ? `/app#invitation-${row.id.split(':')[1]}` : null
     return { scheduleDraftId: row.scheduleDraftId, shiftOfferId: row.shiftOfferId, eventId: row.eventId, locationId: row.locationId, locationName: row.locationName, requestId: row.requestId, actionable: row.actionable, documentId: row.documentId, id: row.id, source: row.source, type: row.type, title: row.title, message: row.message, createdAt: row.createdAt, readAt: row.readAt, state: row.state, expiresAt: row.expiresAt, inviter: row.inviter, organization: { id: row.organizationId, name: row.organizationName, logoUrl: mediaUrl(row.logoFileId) },
       href: href && row.locationId && row.role ? `${href}${href.includes('?') ? '&' : '?'}location=${row.locationId}` : href }
   })

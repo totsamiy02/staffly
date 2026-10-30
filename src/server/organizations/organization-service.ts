@@ -1,3 +1,5 @@
+import { requireCapacity, subscriptionSnapshot } from '../subscriptions/access.ts'
+import { effectiveSubscription, plans, TRIAL_DAYS } from '../../app/subscriptions/plans.ts'
 import { hasPermission, requirePermission, ensureAccessRoles, locationsFor } from './access/access.ts'
 import { locationMemberWhere, scopedLocationId } from './location-context.ts'
 import { listNotificationHistory } from './notification-service.ts'
@@ -9,16 +11,23 @@ import { assertCanChangeRole, assertCanRemoveMember, getMembership } from './acc
 import { bindProfileImage, mediaUrl } from '../storage/image-service.ts'
 import { seedSystemRequestTypes } from '../requests/service.ts'
 
-export type CreateOrganizationInput = { name: string; description: string | null; timezone: string; firstLocation?: { name: string; city: string; address: string; timezone: string; teamNames?: string[] }; locations?: Array<{ name: string; city: string; address: string; timezone: string; teamNames?: string[] }> }
+export type CreateOrganizationInput = { initialPlan?: 'FREE' | 'TRIAL'; name: string; description: string | null; timezone: string; firstLocation?: { name: string; city: string; address: string; timezone: string; teamNames?: string[] }; locations?: Array<{ name: string; city: string; address: string; timezone: string; teamNames?: string[] }> }
 export type UpdateOrganizationInput = Pick<CreateOrganizationInput, 'name' | 'description' | 'timezone'> & { contactEmail: string | null; phone: string | null; website: string | null; address: string | null; logoUploadId?: string | null }
 
 export async function createOrganization(userId: string, input: CreateOrganizationInput) {
   return prisma.$transaction(async (tx) => {
     const organization = await tx.organization.create({ data: { name: input.name, description: input.description, timezone: input.timezone, createdByUserId: userId } })
+    // Only an explicit trial request opts in; an omitted choice is always Free.
+    if (input.initialPlan === 'TRIAL') {
+      const now = new Date(), until = new Date(+now + TRIAL_DAYS * 86400000)
+      await tx.organizationSubscription.update({ where: { organizationId: organization.id }, data: { plan: 'BUSINESS', periodStart: now, periodEnd: until, trialStartedAt: now, trialEndsAt: until } })
+      await tx.organizationResourceBudget.update({ where: { organizationId: organization.id }, data: { storageLimitBytes: plans.BUSINESS.storageBytes } })
+    }
     await ensureAccessRoles(tx, organization.id)
     const owner = await tx.organizationMember.create({ data: { organizationId: organization.id, userId, role: 'OWNER' } })
     const locationInputs = [input.firstLocation ?? { name: 'Основная точка', city: '', address: '', timezone: input.timezone }, ...(input.locations ?? [])]
     const locations = []
+    await requireCapacity(tx, organization.id, 'locations', locationInputs.length)
     for (const item of locationInputs) {
       const location = await tx.organizationLocation.create({ data: { name: item.name, city: item.city, address: item.address, timezone: item.timezone, organizationId: organization.id } })
       await tx.locationMember.create({ data: { organizationId: organization.id, locationId: location.id, memberId: owner.id } })
@@ -34,11 +43,14 @@ export async function createOrganization(userId: string, input: CreateOrganizati
 export async function listOrganizations(userId: string) {
   const memberships = await prisma.organizationMember.findMany({
     where: { userId, leftAt: null, organization: { deletedAt: null } },
-    include: { organization: { include: { _count: { select: { members: { where: { leftAt: null } } } } } } },
+    include: { organization: { include: { subscription: true, _count: { select: { members: { where: { leftAt: null, user: { deletedAt: null } } } } } } } },
     orderBy: { joinedAt: 'asc' },
   })
   return memberships.map(({ organization, role, joinedAt }) => ({
+    // The organization insert trigger and backfill guarantee this record.
+    subscription: effectiveSubscription(organization.subscription!),
     id: organization.id,
+    createdByViewer: organization.createdByUserId === userId,
     name: organization.name,
     description: organization.description,
     timezone: organization.timezone,
@@ -57,6 +69,7 @@ export async function getOrganization(userId: string, organizationId: string) {
   const membership = await getMembership(userId, organizationId)
   const memberCount = await prisma.organizationMember.count({ where: { organizationId, ...locationMemberWhere(organizationId), leftAt: null, user: { deletedAt: null } } })
   return {
+    subscription: await subscriptionSnapshot(organizationId),
     id: membership.organization.id,
     name: membership.organization.name,
     description: membership.organization.description,

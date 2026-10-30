@@ -1,6 +1,6 @@
 import { reserveOrganizationExport } from '../../resources/quotas.ts'
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { tmpdir } from 'node:os'
 import { spawn, type ChildProcess } from 'node:child_process'
@@ -8,7 +8,8 @@ import { fileURLToPath } from 'node:url'
 import { prisma } from '../../db.ts'
 import { ApiError } from '../../api-error.ts'
 import { storage } from '../../storage/provider.ts'
-import { reportAccess } from './report-service.ts'
+import { serialize } from 'node:v8'
+import { buildReport, reportAccess } from './report-service.ts'
 import { reportBody } from './report-schemas.ts'
 import type { ReportInput } from '../../../app/schedule/reports/reporting.ts'
 import type { ReportExport, Prisma } from '../../../generated/prisma/client.ts'
@@ -54,11 +55,13 @@ export async function getExport(userId: string, organizationId: string, id: stri
 }
 
 async function generate(job: ReportExport, directory: string) {
-  const output = path.join(directory, 'report.xlsx')
+  const output = path.join(directory, 'report.xlsx'), source = path.join(directory, 'report.bin')
+  const report = await buildReport(job.userId, job.organizationId, reportBody.parse(job.input), new Date(), 'reports.export')
+  // V8 serialization preserves native dates without passing DB access to the renderer.
+  await writeFile(source, serialize(report), { mode: 0o600, flag: 'wx' })
   const child = spawn(process.execPath, ['--max-old-space-size=384', '--import', fileURLToPath(import.meta.resolve('tsx')),
-    fileURLToPath(new URL('./export-child.ts', import.meta.url)), job.id, output], { cwd: process.cwd(),
-    env: { PATH: process.env.PATH, TMPDIR: directory, NODE_ENV: process.env.NODE_ENV, DATABASE_URL: process.env.DATABASE_URL,
-      JWT_SECRET: process.env.JWT_SECRET, DB_POOL_MAX: '2', STORAGE_DRIVER: 'local', LOCAL_STORAGE_ROOT: directory },
+    fileURLToPath(new URL('./export-child.ts', import.meta.url)), source, output], { cwd: process.cwd(),
+    env: { PATH: process.env.PATH, TMPDIR: directory, NODE_ENV: process.env.NODE_ENV },
     stdio: ['ignore', 'ignore', 'pipe'] })
   converters.add(child)
   let diagnostic = ''

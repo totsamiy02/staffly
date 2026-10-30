@@ -1,3 +1,4 @@
+import { requireCapacity, requireLocationInPlan } from '../subscriptions/access.ts'
 import { requirePermission } from './access/access.ts'
 import { locationWhere } from './location-context.ts'
 import { createHash, createCipheriv, createDecipheriv, randomBytes, randomInt } from 'node:crypto'
@@ -45,6 +46,7 @@ function rawInviteCode() {
 export async function createEmailInvitation(actorUserId: string, organizationId: string, invitedEmail: string) {
   const actor = await getMembership(actorUserId, organizationId)
   requirePermission(actor, 'members.invite')
+  await requireLocationInPlan(prisma, organizationId, actor.locationId)
   const actorUser = await prisma.user.findUniqueOrThrow({ where: { id: actorUserId } })
   if (actorUser.email === invitedEmail) throw new ApiError(400, 'CANNOT_INVITE_SELF', 'Нельзя пригласить самого себя.')
   const existingUser = await prisma.user.findUnique({ where: { email: invitedEmail } })
@@ -82,6 +84,7 @@ export async function createEmailInvitation(actorUserId: string, organizationId:
 export async function createCodeInvitation(actorUserId: string, organizationId: string) {
   const actor = await getMembership(actorUserId, organizationId)
   requirePermission(actor, 'members.invite')
+  await requireLocationInPlan(prisma, organizationId, actor.locationId)
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const code = rawInviteCode()
     try {
@@ -176,6 +179,9 @@ function validateInvitation(invite: ValidatableInvite, type: 'EMAIL' | 'CODE'): 
 
 async function acceptInvitation(userId: string, userEmail: string, lookup: { id: string } | { tokenHash: string }, expectedType: 'EMAIL' | 'CODE') {
   return prisma.$transaction(async (tx) => {
+    const scope = await tx.organizationInvite.findUnique({ where: lookup, select: { organizationId: true } })
+    if (!scope) throw new ApiError(404, 'INVITATION_NOT_FOUND', 'Приглашение не найдено.')
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${scope.organizationId}, 1))::text`
     const invite = await tx.organizationInvite.findUnique({ where: lookup, include: { organization: true, invitedBy: { select: { email: true, firstName: true, lastName: true, middleName: true } } } })
     validateInvitation(invite, expectedType)
     if (expectedType === 'EMAIL' && invite.invitedEmail !== userEmail) throw new ApiError(403, 'INVITATION_EMAIL_MISMATCH', 'Приглашение предназначено для другого аккаунта.')
@@ -187,11 +193,13 @@ async function acceptInvitation(userId: string, userEmail: string, lookup: { id:
     })
     if (!claimed.count) throw new ApiError(409, 'INVITATION_ALREADY_USED', 'Приглашение уже использовано.')
     if (invite.locationId && !await tx.organizationLocation.findFirst({ where: { id: invite.locationId, organizationId: invite.organizationId, archivedAt: null } })) throw new ApiError(410, 'LOCATION_CLOSED', 'Точка приглашения закрыта.')
+    if (!existing || existing.leftAt) await requireCapacity(tx, invite.organizationId, 'members')
     const member = existing ? existing.leftAt ? await tx.organizationMember.update({ where: { id: existing.id }, data: { leftAt: null, role: 'MEMBER' } }) : existing : await tx.organizationMember.create({ data: { organizationId: invite.organizationId, userId, role: 'MEMBER' } })
     const locationId = invite.locationId ?? (await tx.organizationLocation.findFirstOrThrow({ where: { organizationId: invite.organizationId, archivedAt: null }, orderBy: { createdAt: 'asc' } })).id
+    await requireLocationInPlan(tx, invite.organizationId, locationId)
     await tx.locationMember.upsert({ where: { locationId_memberId: { locationId, memberId: member.id } }, create: { organizationId: invite.organizationId, locationId, memberId: member.id }, update: { leftAt: null, role: 'MEMBER' } })
     return { organizationId: invite.organizationId }
-  }, { isolationLevel: 'Serializable' })
+  }, { isolationLevel: 'ReadCommitted' })
 }
 
 export function acceptEmailInvitation(userId: string, userEmail: string, inviteId: string) {

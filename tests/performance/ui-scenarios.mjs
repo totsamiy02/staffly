@@ -78,7 +78,7 @@ export async function runUiSmoke({ prisma, owner, org, origin, port, root, tempo
     assert(controls.profileHeld,'Did not capture the old profile response')
     const saveStarted = Date.now()
     await click('Сохранить','.profile-editor button')
-    await wait("!!document.querySelector('.profile-editor .profile-details-groups')",'Photo save')
+    await wait("!!document.querySelector('.profile-editor .profile-details-groups')&&!document.querySelector('.profile-details--editing')",'Photo save')
     assert(Date.now()-saveStarted<5000,'Saving must not wait for the held GET profile response')
     const saved=(await prisma.user.findUniqueOrThrow({where:{id:owner.id}})).avatarFileId
     assert(saved&&saved!==originalAvatar)
@@ -136,11 +136,11 @@ export async function runUiSmoke({ prisma, owner, org, origin, port, root, tempo
     assert.equal((await prisma.organization.findUniqueOrThrow({where:{id:org.id}})).logoFileId,originalLogo)
     await click('Редактировать','.organization-profile-editor button');await chooseFile()
     await click('Сохранить','.organization-profile-editor button')
-    await wait("!!document.querySelector('.organization-profile-editor .profile-details-groups')",'Organization logo save')
+    await wait("!!document.querySelector('.organization-profile-editor .profile-details-groups')&&!document.querySelector('.profile-details--editing')",'Organization logo save')
     const savedLogo=(await prisma.organization.findUniqueOrThrow({where:{id:org.id}})).logoFileId
     assert(savedLogo&&savedLogo!==originalLogo)
     await wait("!!document.querySelector('.workspace-organization-card img')?.naturalWidth",'Sidebar logo updates without reload')
-    assert.equal(await evaluate("Math.round(document.querySelector('.workspace-organization-card img').getBoundingClientRect().width)"),44)
+    assert.equal(await evaluate("Math.round(document.querySelector('.workspace-organization-card img').getBoundingClientRect().width)"),72)
     await evaluate("document.querySelector('.workspace-organization-card').click()")
     await wait("!!document.querySelector('.organization-info-dialog')",'Full organization header opens details')
     await evaluate("document.querySelector('.organization-info-dialog button[aria-label=\"Закрыть\"]').click()")
@@ -152,7 +152,7 @@ export async function runUiSmoke({ prisma, owner, org, origin, port, root, tempo
     await evaluate("document.querySelector('.workspace-sidebar .location-switcher__trigger').click()")
     checks.push('organization logo follows Save/Cancel and updates in the sidebar without reload')
     await navigate(`/app/organizations/${org.id}/settings?section=requests`,'.vacation-settings')
-    await evaluate("document.querySelector('.holiday-editor summary').click()")
+    await evaluate("document.querySelector('.holiday-editor__toggle').click()")
     for(let i=0;i<2;i++){
       await evaluate("document.querySelector('.holiday-editor .staffly-date button').click()")
       await wait("!!document.querySelector('.staffly-calendar [data-date]')",'Holiday calendar')

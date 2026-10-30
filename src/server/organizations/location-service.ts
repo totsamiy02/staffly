@@ -1,3 +1,4 @@
+import { requireCapacity, requireLocationInPlan, requireSubscriptionWritable } from '../subscriptions/access.ts'
 import { enqueueEmail } from '../mail/email-outbox.ts'
 import { ensureAccessRoles, hasPermission, requirePermission } from './access/access.ts'
 import type { Permission } from '../../app/access/catalog.ts'
@@ -45,6 +46,7 @@ export async function saveLocation(userId: string, organizationId: string, locat
     const actor = await actorIn(tx, userId, organizationId)
     requirePermission(actor, locationId ? 'locations.edit' : 'locations.create', locationId ?? null)
     if (locationId && !await tx.organizationLocation.findFirst({ where: { id: locationId, organizationId, archivedAt: null } })) throw new ApiError(404, 'LOCATION_NOT_FOUND', 'Точка не найдена.')
+    if (!locationId) await requireCapacity(tx, organizationId, 'locations')
     const { teamNames, ...metadata } = input
     const location = locationId ? await tx.organizationLocation.update({ where: { id: locationId }, data: metadata }) : await tx.organizationLocation.create({ data: { ...metadata, organizationId } })
     if (!locationId && (teamNames ?? []).length) await tx.locationTeam.createMany({ data: (teamNames ?? []).map(name => ({ organizationId, locationId: location.id, name })) })
@@ -89,6 +91,8 @@ export async function assignLocationMember(userId: string, organizationId: strin
     const role = requestedRole ?? (member.role === 'ADMIN' ? 'ADMIN' : 'MEMBER')
     const old = await tx.locationMember.findUnique({ where: { locationId_memberId: { locationId, memberId } } })
     if ((member.role === 'ADMIN' || role === 'ADMIN' || old?.role === 'ADMIN' || requestedRole && requestedRole !== member.role) && actor.role !== 'OWNER') throw new ApiError(403, 'OWNER_REQUIRED', 'Администраторов назначает и снимает владелец.')
+    await requireSubscriptionWritable(tx, organizationId)
+    if (!old || old.leftAt) await requireLocationInPlan(tx, organizationId, locationId)
     if (requestedRole && member.role !== 'OWNER') {
       await tx.organizationMember.update({ where: { id: member.id }, data: { role } })
       await tx.locationMember.updateMany({ where: { memberId, organizationId, leftAt: null }, data: { role } })
@@ -145,6 +149,7 @@ export async function transferMember(userId: string, organizationId: string, inp
     const source = await tx.locationMember.findUnique({ where: { locationId_memberId: { locationId: input.fromLocationId, memberId: input.memberId } }, include: { member: true } })
     if (!source || source.leftAt || source.member.leftAt || source.organizationId !== organizationId) throw new ApiError(404, 'MEMBER_NOT_FOUND', 'Сотрудник не состоит в исходной точке.')
     if (source.member.role === 'OWNER' || (source.role === 'ADMIN' && actor.role !== 'OWNER')) throw new ApiError(403, 'OWNER_REQUIRED', 'Перевод администратора оформляет владелец.')
+    await requireLocationInPlan(tx, organizationId, input.toLocationId)
     const sourceLocation = await tx.organizationLocation.findUniqueOrThrow({ where: { id: input.fromLocationId } })
     const startAt = input.temporary ? input.startAt ? new Date(input.startAt) : zonedDateTimeToUtc(input.startDate!, input.startTime!, sourceLocation.timezone) : new Date()
     const endAt = input.temporary ? input.endAt ? new Date(input.endAt) : zonedDateTimeToUtc(input.endDate!, input.endTime!, sourceLocation.timezone) : null

@@ -12,6 +12,10 @@ export async function readJson<T>(response: Response): Promise<T> {
     error.errors = data.errors
     const retryAfter = response.headers.get('retry-after')
     if (retryAfter) error.retryAfterMs = Math.min(30000, Math.max(0, Number.isFinite(Number(retryAfter)) ? Number(retryAfter) * 1000 : Date.parse(retryAfter) - Date.now())) || undefined
+    if (typeof window !== 'undefined' && ['SUBSCRIPTION_FEATURE_REQUIRED', 'SUBSCRIPTION_LIMIT_REACHED', 'SUBSCRIPTION_EXPIRED', 'ORGANIZATION_STORAGE_QUOTA'].includes(data.code ?? '')) {
+      const organizationId = /\/organizations\/([0-9a-f-]{36})/.exec(response.url)?.[1]
+      if (organizationId) window.dispatchEvent(new CustomEvent('staffly:subscription-required', { detail: { organizationId, ...(data.errors && typeof data.errors === 'object' ? data.errors : {}), ...(data.code === 'ORGANIZATION_STORAGE_QUOTA' ? { kind: 'storage' } : {}), message: error.message } }))
+    }
     throw error
   }
   return data
