@@ -1,12 +1,11 @@
 import type { AccessAssignment, AccessRole, LocationMember, Organization, OrganizationLocation, OrganizationMember, Prisma } from '../../../generated/prisma/client.ts'
 
 type Row = Record<string, unknown>
-// Keep metadata dates compatible with the installed pg adapter's timestamptz
-// decoder (7.10.0). Do not change the timezone of an existing database here.
+// JSON timestamps contain their actual offset; calendar/answer JSON stays opaque.
 function model<T>(row: Row): T {
   return Object.fromEntries(Object.entries(row).map(([column, value]) => {
     const key = column.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase())
-    return [key, key.endsWith('At') && typeof value === 'string' ? new Date(value.replace(/[+-]\d{2}(:\d{2})?$/, '+00:00')) : value]
+    return [key, key.endsWith('At') && typeof value === 'string' ? new Date(value) : value]
   })) as T
 }
 

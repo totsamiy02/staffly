@@ -1,10 +1,8 @@
-import { requestDefinition } from '../../app/requests/workflow.ts'
 import { z } from 'zod'
+import { requestDefinition } from '../../app/requests/workflow.ts'
+import { isCalendarDate } from '../../shared/date-time.ts'
 
-const dateOnly = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Укажите дату в формате ГГГГ-ММ-ДД.').refine((value) => {
-  const date = new Date(`${value}T00:00:00.000Z`)
-  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value
-}, 'Укажите существующую календарную дату.')
+const dateOnly = z.string().refine(isCalendarDate, 'Укажите существующую календарную дату в формате ГГГГ-ММ-ДД.')
 const timeOnly = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/, 'Укажите время в формате ЧЧ:ММ.')
 
 export const organizationRequestParams = z.object({ organizationId: z.string().uuid() })

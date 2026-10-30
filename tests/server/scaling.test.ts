@@ -184,13 +184,30 @@ it('returns a temporary availability error rather than logging a valid user out 
   finally { occupied.release(); await pool.end() }
   assert.equal(isDatabaseBusy(new Error('Business operation timeout')), false)
   const database = new URL(process.env.DATABASE_URL!)
-  database.port = '1'
-  const api = await apiProcess({ DATABASE_URL: database.toString(), DB_CONNECT_TIMEOUT_MS: '500' })
+  const upstreamAddress = { host: database.hostname, port: Number(database.port || 5432) }
+  const sockets = new Set<net.Socket>()
+  const proxy = net.createServer(socket => {
+    const upstream = net.connect(upstreamAddress)
+    sockets.add(socket); sockets.add(upstream)
+    socket.on('close', () => { sockets.delete(socket); upstream.destroy() })
+    upstream.on('close', () => { sockets.delete(upstream); socket.destroy() })
+    upstream.on('error', () => socket.destroy())
+    socket.on('error', () => upstream.destroy())
+    socket.pipe(upstream).pipe(socket)
+  })
+  proxy.listen(0, '127.0.0.1'); await once(proxy, 'listening')
+  database.hostname = '127.0.0.1'; database.port = String((proxy.address() as net.AddressInfo).port)
+  let api: Awaited<ReturnType<typeof apiProcess>> | undefined
   try {
+    api = await apiProcess({ DATABASE_URL: database.toString(), DB_CONNECT_TIMEOUT_MS: '500' })
+    // Start against a valid UTC model, then lose the database. A missing/legacy
+    // model at startup is a different failure and must now prevent boot.
+    const closed = new Promise<void>(resolve => proxy.close(() => resolve()))
+    sockets.forEach(socket => socket.destroy()); await closed
     const response = await fetch(api.url + '/api/organizations', { headers: { Authorization: `Bearer ${token}` } })
     assert.equal(response.status, 503)
     assert.equal((await response.json()).code, 'DATABASE_BUSY')
-  } finally { await api.stop() }
+  } finally { sockets.forEach(socket => socket.destroy()); proxy.close(); await api?.stop() }
 })
 
 it('coalesces concurrent cache reads and does not restore invalidated in-flight data', async () => {
@@ -201,6 +218,26 @@ it('coalesces concurrent cache reads and does not restore invalidated in-flight 
   cache.invalidate('org'); complete('old')
   assert.deepEqual(await Promise.all([first, second]), ['old', 'old']); assert.equal(loads, 1)
   assert.equal(await cache.read('org', 'key', async () => 'new'), 'new')
+})
+
+it('retains calendars on unrelated hints but invalidates schedule, profile and access changes', async () => {
+  const cache = new ReadCache()
+  let reads = 0
+  const read = (org: string) => cache.read(org, `shifts:${org}`, async () => ++reads)
+  assert.equal(await read('a'), 1); assert.equal(await read('b'), 2)
+  for (const topic of ['requests', 'requests-mine', 'requests-review', 'notifications', 'exports', 'documents', 'events']) {
+    cache.invalidateForHint({ topic, organizationId: 'a' })
+    cache.invalidateForHint({ topic })
+    assert.equal(await read('a'), 1); assert.equal(await read('b'), 2)
+  }
+  for (const topic of ['schedule', 'profile', 'organization', 'access']) {
+    const before = reads
+    cache.invalidateForHint({ topic, organizationId: 'a' })
+    assert.equal(await read('a'), before + 1); assert.equal(await read('b'), 2)
+  }
+  cache.invalidateForHint({ topic: 'profile' })
+  const before = reads
+  assert.equal(await read('a'), before + 1); assert.equal(await read('b'), before + 2)
 })
 
 it('parses split SSE frames and invalidates only the changed organization', async () => {
@@ -246,15 +283,15 @@ it('keeps personal request lists quiet on review-only hints and updates the actu
   client.clear()
 })
 
-it('matches the transactional membership projection, including non-UTC metadata dates', async () => {
+it('matches UTC membership dates and preserves actual offsets in JSON projections', async () => {
+  const expected = await prisma.organizationMember.findUniqueOrThrow({ where: { id: memberId }, include: {
+    organization: true, _count: { select: { locationMemberships: true } }, accessAssignments: true,
+    locationMemberships: { where: { leftAt: null, location: { archivedAt: null } } },
+  } })
   await prisma.$transaction(async tx => {
     await tx.$executeRaw`SET LOCAL TIME ZONE 'Europe/Kiev'`
     const compact = await readMembership(tx, userId, orgId)
     assert.ok(compact)
-    const expected = await tx.organizationMember.findUniqueOrThrow({ where: { id: memberId }, include: {
-      organization: true, _count: { select: { locationMemberships: true } }, accessAssignments: true,
-      locationMemberships: { where: { leftAt: null, location: { archivedAt: null } } },
-    } })
     assert.deepEqual(compact.membership, expected)
   })
   const at = <T>(work: () => Promise<T>) => locationContext.run({ organizationId: orgId, locationId }, work)

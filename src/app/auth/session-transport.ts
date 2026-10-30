@@ -22,10 +22,11 @@ export async function postAuthJson(path: string, body: unknown): Promise<Respons
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'same-origin',
+    signal: AbortSignal.timeout(10000),
     body: JSON.stringify(body),
   })
   // Refresh cookies are shared by tabs. Serialize rotation and account changes by origin.
-  if (['refresh', 'login', 'verify-email', 'yandex/complete', 'logout', 'reset-password'].includes(path) && navigator.locks) return navigator.locks.request('staffly-auth-cookie', execute)
+  if (['refresh', 'login', 'verify-email', 'yandex/complete', 'logout', 'reset-password'].includes(path) && navigator.locks) return navigator.locks.request('staffly-auth-cookie', { signal: AbortSignal.timeout(12000) }, execute)
   return execute()
 }
 

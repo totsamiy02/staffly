@@ -1,25 +1,14 @@
 import NavigationIcon from '../../../component/ui/module-icon.tsx'
 import TimeCorrectionProvider from '../schedule/time/time-correction-provider.tsx'
 import MemberProfileProvider from '../members/profile/member-profile-provider.tsx'
-import DraftPage from '../schedule/planning/draft-page.tsx'
-import DemandPage from '../schedule/planning/demand-page.tsx'
 import { canAccess, type Permission } from '../../../app/access/catalog.ts'
 import { locationTone } from '../../../app/organizations/format.ts'
 import { useAuth } from '../../../app/auth/auth-context.tsx'
-import RoleBadge from '../../../component/ui/role-badge/role-badge.tsx'
+import LocationSwitcher from '../../../component/ui/location-switcher/location-switcher.tsx'
 import { Navigate, Link, NavLink, Route, Routes, useLocation, useParams, useNavigate, useNavigationType } from 'react-router-dom'
-import { useState, useEffect, useLayoutEffect, useRef, type ReactNode } from 'react'
+import { lazy, Suspense, useState, useEffect, useLayoutEffect, useRef, type ReactNode } from 'react'
 import { useOrganization, useLocations } from '../../../app/organizations/queries.ts'
 import AppTopbar from '../topbar/app-topbar.tsx'
-import OrganizationDashboard from '../dashboard/organization-dashboard.tsx'
-import OrganizationMembers from '../members/organization-members.tsx'
-import OrganizationSettings from '../settings/organization/organization-settings.tsx'
-import SchedulePage from '../schedule/calendar/schedule-page.tsx'
-import StatisticsPage from '../schedule/statistics/statistics-page.tsx'
-import MyWorkTimePage from '../schedule/time/my-work-time-page.tsx'
-import DocumentsPage from '../documents/documents-page.tsx'
-import RequestsPage from '../requests/requests-page.tsx'
-import EventsPage from '../events/events-page.tsx'
 import ModuleErrorBoundary from './module-error-boundary.tsx'
 import GuideIcon from '../../guide/guide-icon.tsx'
 import Avatar from '../../../component/ui/avatar/avatar.tsx'
@@ -28,11 +17,23 @@ import AnimatedOverlay from '../../../component/ui/modal/animated-overlay.tsx'
 import { useDocuments } from '../../../app/documents/queries.ts'
 import '../app.scss'
 
+const DraftPage = lazy(() => import('../schedule/planning/draft-page.tsx'))
+const DemandPage = lazy(() => import('../schedule/planning/demand-page.tsx'))
+
+const OrganizationDashboard = lazy(() => import('../dashboard/organization-dashboard.tsx'))
+const OrganizationMembers = lazy(() => import('../members/organization-members.tsx'))
+const OrganizationSettings = lazy(() => import('../settings/organization/organization-settings.tsx'))
+const SchedulePage = lazy(() => import('../schedule/calendar/schedule-page.tsx'))
+const StatisticsPage = lazy(() => import('../schedule/statistics/statistics-page.tsx'))
+const MyWorkTimePage = lazy(() => import('../schedule/time/my-work-time-page.tsx'))
+const DocumentsPage = lazy(() => import('../documents/documents-page.tsx'))
+const RequestsPage = lazy(() => import('../requests/requests-page.tsx'))
+const EventsPage = lazy(() => import('../events/events-page.tsx'))
+
 const modulePermissions:Record<string,Permission[]> = {employees:['members.view'],schedule:['coverage.view','drafts.view','schedule.own','schedule.view','statistics.own','statistics.view','reports.preview','reports.export'],requests:['offers.accept','offers.approve','offers.transfer','offers.swap','vacations.view','vacations.collect','requests.own','requests.view','staffing.respond','staffing.create'],documents:['documents.view'],events:['events.view','events.create','events.edit','events.cancel'],settings:['coverage.manage','organization.edit','schedule.settings','schedule.templates','positions.manage','offers.settings','locations.edit','locations.create','requestTypes.manage']}
 const navigation = [
   ['', 'Главная'], ['employees', 'Сотрудники'], ['schedule', 'Расписание'], ['requests', 'Заявки'], ['events', 'События'], ['documents', 'Документы'], ['settings', 'Настройки'],
 ] as const
-
 
 function CollapseIcon({ collapsed }: { collapsed: boolean }) {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d={collapsed ? 'm9 6 6 6-6 6' : 'm15 6-6 6 6 6'} /></svg>
@@ -62,7 +63,6 @@ function WorkspaceLoadError({ retry, notFound, organizationId }: { retry: () => 
   </main></div>
 }
 
-
 export default function OrganizationLayout() {
   const { organizationId } = useParams()
   const location = useLocation()
@@ -70,7 +70,7 @@ export default function OrganizationLayout() {
   useLayoutEffect(() => { if (previousPath.current !== location.pathname && navigationType !== 'POP') window.scrollTo({ top: 0, behavior: 'instant' }); previousPath.current = location.pathname }, [location.pathname, navigationType])
   const query = useOrganization(organizationId)
   const locations = useLocations(organizationId)
-  const { user } = useAuth()
+  const { user, locationId: requestedLocationId } = useAuth()
   const navigate = useNavigate()
   const selectedId = query.data?.organization.locationId
   const sectionParams = new URLSearchParams(location.search)
@@ -89,7 +89,7 @@ export default function OrganizationLayout() {
   const points = locations.data?.locations ?? (organization.location ? [organization.location] : [])
   const locationAddress = [organization.location?.city, organization.location?.address].filter(Boolean).join(' · ')
   const allowed = location.pathname.startsWith(organizationPath+'/schedule/drafts') || !currentSegment || currentSegment==='settings' && organization.owner || (modulePermissions[currentSegment]??[]).some(p=>canAccess(organization,p))
-  const module = (content: ReactNode) => !allowed ? <section className="workspace-problem"><h1>Раздел недоступен</h1><p>Владелец может изменить вашу роль и доступ к этой точке.</p><Link className="app-secondary" to={organizationPath}>На главную</Link></section> : <ModuleErrorBoundary key={location.pathname + organization.locationId} organizationPath={organizationPath}>{content}</ModuleErrorBoundary>
+  const module = (content: ReactNode) => !allowed ? <section className="workspace-problem"><h1>Раздел недоступен</h1><p>Владелец может изменить вашу роль и доступ к этой точке.</p><Link className="app-secondary" to={organizationPath}>На главную</Link></section> : <ModuleErrorBoundary key={location.pathname + organization.locationId} organizationPath={organizationPath}><Suspense fallback={<section className="route-loading" role="status">Загрузка раздела…</section>}>{content}</Suspense></ModuleErrorBoundary>
   function toggleSidebar() {
     setSidebarCollapsed((value) => {
       window.localStorage.setItem('staffly:sidebar-collapsed', String(!value))
@@ -98,25 +98,14 @@ export default function OrganizationLayout() {
   }
   return <TimeCorrectionProvider key={organization.id + organization.locationId} organization={organization}><MemberProfileProvider organization={organization}><div className="app-page"><AppTopbar key={organization.locationId} organization={organization} /><div className={`workspace-shell${sidebarCollapsed ? ' workspace-shell--collapsed' : ''}`}>
     <aside className="workspace-sidebar" aria-label="Навигация организации">
-      <div className="workspace-sidebar__organization"><button className="workspace-organization-avatar-button" type="button" onClick={() => setInfoOrganizationId(organization.id)} aria-label={`Об организации: ${organization.name}`} title="Об организации" aria-haspopup="dialog" aria-expanded={infoOrganizationId === organization.id}><Avatar url={organization.logoUrl} name={organization.name} className="workspace-sidebar__organization-avatar" eager /></button><div><strong>{organization.name}</strong><small><RoleBadge role={organization.organizationRole ?? organization.role} name={organization.roleName} /> · {currentSection}</small><button className="workspace-organization-info-trigger" type="button" aria-haspopup="dialog" aria-expanded={infoOrganizationId === organization.id} onClick={() => setInfoOrganizationId(organization.id)}><OrganizationInfoIcon /><span>Об организации</span></button></div></div>
-      <div className="workspace-points" role="radiogroup" aria-label="Точки организации">
-        {points.map((point, index) => <button type="button" role="radio" tabIndex={point.id === organization.locationId ? 0 : -1} onKeyDown={event => {
-          if (!['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
-          event.preventDefault()
-          const next = event.key === 'Home' ? 0 : event.key === 'End' ? points.length - 1 : (index + (['ArrowUp', 'ArrowLeft'].includes(event.key) ? -1 : 1) + points.length) % points.length
-          const target = event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role=radio]')[next]
-          target?.focus(); target?.click()
-        }} aria-checked={point.id === organization.locationId} aria-label={`${point.name}${point.archivedAt ? ', закрыта' : ''}`} title={`${point.name}${point.id === organization.locationId ? ' · выбрана' : ''}${point.address ? '\n' + point.address : ''}`} className="workspace-point" data-tone={locationTone(point.id)} key={point.id} onClick={() => { window.sessionStorage.setItem(`staffly:location:${user?.id}:${organization.id}`, point.id); const next = new URLSearchParams({ location: point.id }); for (const key of ['section', 'tab', 'view']) { const value = sectionParams.get(key); if (value) next.set(key, value) } navigate({ pathname: location.pathname, search: `?${next}` }) }}>
-          <span className="workspace-point__icon"><NavigationIcon section="location" /><small>{index + 1}</small></span><span className="workspace-point__name">{point.name}{point.archivedAt && <small>Закрыта</small>}</span><span className="workspace-point__selected" aria-hidden="true" />
-        </button>)}
-        {locations.isError && <button className="app-secondary" onClick={() => void locations.refetch()}>Повторить</button>}
-      </div>
-      <button className="workspace-sidebar__collapse" type="button" aria-label={sidebarCollapsed ? 'Развернуть меню' : 'Свернуть меню'} onClick={toggleSidebar}><CollapseIcon collapsed={sidebarCollapsed} /><span>{sidebarCollapsed ? 'Развернуть' : 'Свернуть'}</span></button>
+      <button className="workspace-sidebar__organization workspace-organization-card" type="button" onClick={() => setInfoOrganizationId(organization.id)} aria-label={`Об организации: ${organization.name}`} aria-haspopup="dialog" aria-expanded={infoOrganizationId === organization.id}><Avatar url={organization.logoUrl} name={organization.name} className="workspace-sidebar__organization-avatar" eager /><span><strong>{organization.name}</strong><small>{currentSection}</small><span className="workspace-organization-info-trigger"><OrganizationInfoIcon /><span>Об организации</span></span></span></button>
+      <LocationSwitcher onOpen={() => { if (sidebarCollapsed) toggleSidebar() }} points={points} value={requestedLocationId ?? organization.locationId ?? ''} onChange={pointId => { const next = new URLSearchParams({ location: pointId }); for (const key of ['section', 'tab', 'view']) { const value = sectionParams.get(key); if (value) next.set(key, value) } navigate({ pathname: location.pathname, search: `?${next}` }) }} />
+      <button className="workspace-sidebar__collapse" type="button" onClick={toggleSidebar} aria-label={sidebarCollapsed ? 'Развернуть меню' : 'Свернуть меню'}><CollapseIcon collapsed={sidebarCollapsed} /><span>{sidebarCollapsed ? '' : 'Свернуть меню'}</span></button>
       <nav aria-label="Разделы организации">{navigation.filter(([path]) => !path || path === 'settings' && organization.owner || (modulePermissions[path] ?? []).some(p => canAccess(organization,p))).map(([path, label]) => <NavLink end title={sidebarCollapsed ? label : undefined} to={`${path ? `${organizationPath}/${path}` : organizationPath}?location=${organization.locationId}`} key={label}><NavigationIcon section={path} /><span>{label}</span>{path === 'documents' && <DocumentNavBadge organizationId={organization.id} />}</NavLink>)}</nav>
       <div className="workspace-sidebar__footer"><NavLink className="workspace-sidebar__back" title={sidebarCollapsed ? 'Все организации' : undefined} to="/app"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m10 6-6 6 6 6M4 12h16" /></svg><span>Все организации</span></NavLink><Link className="workspace-sidebar__guide" to="/guide" title="Справочник" aria-label="Справочник"><GuideIcon name="book" /><span>Справочник</span></Link></div>
     </aside>
     <main className="workspace-content" key={currentSegment ? organization.locationId : organization.id}>{currentSegment && <div className="workspace-location-banner" data-tone={locationTone(organization.locationId ?? '')}><NavigationIcon section="location" /><strong title={organization.location?.name}>{organization.location?.name}</strong>{locationAddress && <span title={locationAddress}>{locationAddress}</span>}</div>}
-      <Routes>
+      {query.isPlaceholderData ? <section className="route-loading" role="status">Переключаем точку…</section> : <Routes>
         <Route index element={module(<OrganizationDashboard organization={organization} />)} />
         <Route path="employees" element={module(<OrganizationMembers organization={organization} />)} />
         <Route path="schedule" element={module(<>{!canAccess(organization,'schedule.view') && !canAccess(organization,'schedule.own') && !canAccess(organization,'coverage.view') ? <Navigate to={organizationPath + (canAccess(organization,'statistics.own') ? '/schedule/work-time' : '/schedule/statistics') + location.search} replace/> : <SchedulePage key="calendar" organization={organization}/>}</>)} />
@@ -131,7 +120,7 @@ export default function OrganizationLayout() {
         <Route path="events" element={module(<EventsPage organization={organization} />)} />
         <Route path="documents" element={module(<DocumentsPage organization={organization} />)} />
         <Route path="*" element={<ModuleNotFound organizationPath={organizationPath} />} />
-      </Routes>
+      </Routes>}
     </main>
   </div></div>{infoOrganizationId === organization.id && <AnimatedOverlay variant="modal" onClose={() => setInfoOrganizationId(null)}>{close => <OrganizationInfoDialog key={organization.id} organization={organization} onClose={close} />}</AnimatedOverlay>}</MemberProfileProvider></TimeCorrectionProvider>
 }

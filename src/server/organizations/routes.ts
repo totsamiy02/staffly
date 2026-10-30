@@ -1,3 +1,4 @@
+import { organizationResources } from '../resources/quotas.ts'
 import { previewDeparture, confirmDeparture, departureCandidates, departureBody, departureScope } from './departure-service.ts'
 import { memberProfile } from './member-profile-service.ts'
 import { requirePermission } from './access/access.ts'
@@ -275,4 +276,9 @@ router.get('/organizations/:organizationId/transfers', async (request, response)
   requirePermission(actor, 'members.assign')
   response.json({ transfers: await prisma.locationTransfer.findMany({ where: { organizationId, OR: [{ fromLocationId: actor.locationId }, { toLocationId: actor.locationId }] }, include: { member: { include: { user: { select: { firstName: true, lastName: true, email: true } } } }, fromLocation: { select: { name: true } }, toLocation: { select: { name: true } } }, orderBy: { createdAt: 'desc' }, take: 100 }) })
 })
+router.get('/organizations/:organizationId/resources', requireAuth, async (request, response) => {
+  const { organizationId } = organizationIdParams.parse(request.params)
+  response.set('Cache-Control','private, no-store').json(await organizationResources((request as AuthenticatedRequest).auth!.userId, organizationId))
+})
+
 export default router

@@ -20,23 +20,26 @@ const options = Object.fromEntries(process.argv.slice(2).map(arg => arg.replace(
 const databaseTimezone = options['db-timezone'] ?? 'UTC'
 assert(/^[A-Za-z0-9_+/-]+$/.test(databaseTimezone), 'Invalid database timezone')
 new Intl.DateTimeFormat('en', { timeZone: databaseTimezone }).format()
+const processTimezone = options['process-timezone'] ?? 'UTC'
+new Intl.DateTimeFormat('en', { timeZone: processTimezone }).format()
 const seconds = Number(options.seconds ?? 20)
 assert(Number.isInteger(seconds) && seconds >= 5 && seconds <= 120, '--seconds must be 5–120')
 const bin = options['pg-bin'] ?? '/Applications/Postgres.app/Contents/Versions/18/bin'
 await access(path.join(bin, 'initdb'))
-const output = await createArtifactDirectory(options.tests ? 'regression' : options.profile === 'scale' ? 'scale' : 'load', options.output)
+const output = await createArtifactDirectory(options.tests ? 'regression' : options.profile === 'scale' ? 'scale' : options.profile === 'frontend' ? 'frontend' : 'load', options.output)
 const temporary = await mkdtemp(path.join(os.tmpdir(), 'staffly-load-'))
 const data = path.join(temporary, 'postgres')
 const storage = path.join(temporary, 'storage')
 const secret = randomUUID() + randomUUID()
 const origin = 'http://localhost:5173'
 const env = { PATH: process.env.PATH, LANG: 'C', USER: process.env.USER, TMPDIR: temporary,
+  TZ: processTimezone,
   NODE_ENV: 'test', JWT_SECRET: secret, APP_ORIGIN: origin, LOCAL_STORAGE_ROOT: storage, ISOLATED_TEST_CLUSTER: 'true', PG_BIN: bin,
   SMTP_USER: '', SMTP_APP_PASSWORD: '', YANDEX_CLIENT_ID: '', YANDEX_CLIENT_SECRET: '', STORAGE_DRIVER: 'local', LIVE_DATABASE_URL: '', TRUST_PROXY: 'false', API_WARMUP: 'false' }
 const results = { formatVersion: 1, status: 'running', startedAt: new Date().toISOString(), environment: { node: process.version,
   platform: `${os.platform()} ${os.arch()}`, cpu: os.cpus()[0]?.model,
   logicalCpus: os.cpus().length, memoryGiB: Math.round(os.totalmem() / 1024 ** 3), seconds,
-  apiProcesses: 1, poolMax: 10, databaseTimezone, postgresConfig: 'initdb defaults plus explicit timezone; fsync and synchronous_commit enabled' },
+  apiProcesses: 1, poolMax: 10, databaseTimezone, processTimezone, postgresConfig: 'initdb defaults plus explicit timezone; fsync and synchronous_commit enabled' },
   methodology: 'Real HTTP API, pre-authenticated distinct users; no browser/TLS/SMTP/login hashing. Closed-loop clients, 0.5–1s think time unless noted. All fixtures synthetic. Service bursts separately exclude HTTP middleware.', phases: [] }
 let clusterStarted = false, prisma, admin, api, metrics = [], apiLog = '', stopping = false
 const extraCleanup = []
@@ -275,7 +278,10 @@ try {
     }))
     console.log(testLog.slice(-2500))
   }
-  if (options.profile === 'scale') {
+  if (options.profile === 'frontend') {
+    const { runFrontend } = await import('./frontend-scenarios.mjs')
+    results.frontend = await runFrontend({ prisma, env, root, temporary, output, options, startApi })
+  } else if (options.profile === 'scale') {
     results.environment.apiProcesses = Number(options.instances ?? 2)
     results.methodology = 'Scale profile: real password login and rotating sessions, 4000 SSE clients, fixed-rate actions and event-driven reads, background exports. Workload, SQL and timing profiles are included in this report.'
     const { runScale } = await import('./scale-scenarios.mjs')

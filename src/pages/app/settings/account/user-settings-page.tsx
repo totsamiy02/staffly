@@ -15,7 +15,10 @@ import { passwordRequirements, passwordValidationError } from '../../../../app/a
 import { formatRussianPhone, isCompleteRussianPhone } from '../../../../app/profile/phone.ts'
 import AppTopbar from '../../topbar/app-topbar.tsx'
 import ImageUpload from '../../../../component/ui/image-upload/image-upload.tsx'
+import { useImageDraft } from '../../../../component/ui/image-upload/use-image-draft.ts'
 import { ProfileDetails, ProfileEditActions } from '../shared/profile-settings.tsx'
+import { useOrganization } from '../../../../app/organizations/queries.ts'
+import RoleBadge from '../../../../component/ui/role-badge/role-badge.tsx'
 import '../../app.scss'
 
 type ActiveSession = { id: string; device: string; browser: string; kind: 'mobile' | 'desktop'; ipAddress: string | null; createdAt: string; lastUsedAt: string; current: boolean }
@@ -34,6 +37,8 @@ export default function UserSettingsPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const { user, apiRequest, updateUser, logout } = useAuth()
+  const avatarDraft = useImageDraft('/profile/avatar', user?.avatarUrl ?? null)
+  const resetAvatar = avatarDraft.reset
   const [firstName, setFirstName] = useState(user?.firstName ?? '')
   const [lastName, setLastName] = useState(user?.lastName ?? '')
   const [middleName, setMiddleName] = useState(user?.middleName ?? '')
@@ -54,7 +59,7 @@ export default function UserSettingsPage() {
   const selectedSection: Section = requestedSection === 'security' || requestedSection === 'documents' || requestedSection === 'notifications' ? requestedSection : 'profile'
   const [section, setSection] = useState<Section>(selectedSection)
   useEffect(() => { setSection(selectedSection) }, [selectedSection])
-  useEffect(() => { setProfileEditing(false); setProfileError('') }, [selectedSection])
+  useEffect(() => { setProfileEditing(false); setProfileError(''); resetAvatar() }, [selectedSection, resetAvatar])
   function selectSection(value: Section) { const params = new URLSearchParams(location.search); params.set('section', value); navigate({ pathname: location.pathname, search: params.toString() }, { replace: true, state: location.state }); setSection(value) }
   const loginMethods = useQuery({ queryKey: ['auth-login-methods', user?.id], queryFn: () => apiRequest<LoginMethods>('/auth/yandex/methods'), enabled: section === 'security', staleTime: 30_000 })
   const sessions = useQuery({ ...liveQueryOptions, queryKey: ['auth-sessions'], queryFn: () => apiRequest<{ sessions: ActiveSession[] }>('/auth/sessions'), enabled: section === 'security' })
@@ -80,8 +85,10 @@ export default function UserSettingsPage() {
     if (trimmed.bio.length > 500) { setProfileError('Описание должно содержать не больше 500 символов.'); return }
     setProfileBusy(true)
     try {
-      const result = await apiRequest<{ user: AuthUser }>('/profile', { method: 'PATCH', body: { ...trimmed, phone } })
+      const avatarUploadId = await avatarDraft.prepare()
+      const result = await apiRequest<{ user: AuthUser }>('/profile', { method: 'PATCH', body: { ...trimmed, phone, avatarUploadId } })
       updateUser(result.user)
+      avatarDraft.reset()
       setFirstName(result.user.firstName ?? ''); setLastName(result.user.lastName ?? ''); setMiddleName(result.user.middleName ?? ''); setPhone(formatRussianPhone(result.user.phone ?? '')); setBio(result.user.bio ?? '')
       setMessage('Профиль сохранён.')
       setProfileEditing(false)
@@ -90,6 +97,7 @@ export default function UserSettingsPage() {
   }
 
   function editProfile(editing: boolean) {
+    avatarDraft.reset()
     setFirstName(user?.firstName ?? ''); setLastName(user?.lastName ?? ''); setMiddleName(user?.middleName ?? '')
     setPhone(formatRussianPhone(user?.phone ?? '')); setBio(user?.bio ?? '')
     setProfileError(''); setMessage(''); setProfileEditing(editing)
@@ -113,6 +121,7 @@ export default function UserSettingsPage() {
   const requestedReturn = (location.state as { returnTo?: unknown } | null)?.returnTo
   const requestedOrganizationId = (location.state as { organizationId?: unknown } | null)?.organizationId ?? new URLSearchParams(location.search).get('organization')
   const organizationId = typeof requestedOrganizationId === 'string' && /^[0-9a-f-]{36}$/i.test(requestedOrganizationId) ? requestedOrganizationId : typeof requestedReturn === 'string' ? requestedReturn.match(/^\/app\/organizations\/([0-9a-f-]{36})/i)?.[1] : undefined
+  const organization = useOrganization(organizationId).data?.organization
   const returnTo = typeof requestedReturn === 'string' && requestedReturn.startsWith('/app/') && requestedReturn !== '/app/settings' ? requestedReturn : organizationId ? `/app/organizations/${organizationId}` : '/app'
   const returnLabel = returnTo.startsWith('/app/organizations/') ? 'Вернуться в организацию' : 'К организациям'
   return <div className="app-page"><AppTopbar /><main className="account-settings-page">
@@ -123,7 +132,7 @@ export default function UserSettingsPage() {
     {section === 'notifications' && <EmailNotificationSettings />}
     {section === 'documents' && <PersonalDocuments organizationId={organizationId} />}
     {section === 'profile' && <section className={`profile-editor${profileEditing ? '' : ' profile-editor--view'}`}>
-      <aside><ImageUpload endpoint="/profile/avatar" imageUrl={user?.avatarUrl ?? null} name={user?.displayName ?? initial} avatarClassName="account-profile-card__avatar" disabled={!profileEditing || profileBusy} onBusyChange={setImageBusy} onChange={(avatarUrl) => { if (user) updateUser({ ...user, avatarUrl }); void queryClient.invalidateQueries({ queryKey: ['organization-members'] }) }} onMessage={setMessage} onError={setProfileError} /><div className="profile-editor__identity"><span>Ваша учетная запись</span><h2>{user?.displayName}</h2><p>{user?.email}</p></div></aside>
+      <aside><ImageUpload endpoint="/profile/avatar" imageUrl={avatarDraft.url} onDraftChange={avatarDraft.change} name={user?.displayName ?? initial} avatarClassName="account-profile-card__avatar" disabled={!profileEditing || profileBusy} onBusyChange={setImageBusy} onChange={(avatarUrl) => { if (user) updateUser({ ...user, avatarUrl }); void queryClient.invalidateQueries({ queryKey: ['organization-members'] }) }} onMessage={setMessage} onError={setProfileError} /><div className="profile-editor__identity"><span>Ваша учетная запись</span><h2>{user?.displayName}</h2><p>{user?.email}</p>{organization && <div className="profile-editor__organization-role"><RoleBadge role={organization.organizationRole ?? organization.role} /><span>в «{organization.name}»</span></div>}</div></aside>
       <form onSubmit={saveProfile} noValidate>
         <div className="profile-settings-heading"><div><h2>Личные данные</h2><p>Имя и фамилия будут использоваться в шапке и списке сотрудников.</p></div>{!profileEditing && <ProfileEditActions editing={false} onEdit={() => editProfile(true)} onCancel={() => editProfile(false)} />}</div>
         {profileEditing ? <fieldset className="profile-edit-fields" disabled={profileBusy || imageBusy}>

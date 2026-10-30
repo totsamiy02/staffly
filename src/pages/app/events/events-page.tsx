@@ -1,3 +1,4 @@
+import PageHeading from '../../../component/ui/page-heading/page-heading.tsx'
 import AsyncPanel from '../../../component/ui/async-panel.tsx'
 import { canAccess } from '../../../app/access/catalog.ts'
 import { useEffect, useState } from 'react'
@@ -32,7 +33,7 @@ export default function EventsPage({ organization }: { organization: Organizatio
   const groups = new Map<string, StaffEvent[]>()
   for (const event of events.data?.events ?? []) { const key = eventDate(event).slice(0, 7); groups.set(key, [...groups.get(key) ?? [], event]) }
   return <section className="events-page">
-    <header className="events-heading"><div><h1>События</h1><p>Ближайшие встречи, обучение и проверки</p></div>{manager && <button className="app-primary" onClick={() => setForm('new')}><span aria-hidden="true">＋</span> Создать событие</button>}</header>
+    <PageHeading title="События" description="Ближайшие встречи, обучение и проверки." actions={manager && <button className="app-primary" onClick={() => setForm('new')}><span aria-hidden="true">＋</span> Создать событие</button>} />
     <SegmentedNav label="Период событий"><button aria-pressed={tab === 'upcoming'} className={tab === 'upcoming' ? 'active' : ''} onClick={() => { setTab('upcoming'); setPage(1); setDay(undefined) }}>Предстоящие</button><button aria-pressed={tab === 'past'} className={tab === 'past' ? 'active' : ''} onClick={() => { setTab('past'); setPage(1); setDay(undefined) }}>Прошедшие</button></SegmentedNav>
     <div className="events-layout"><div className="events-main">
       <div className="events-filters"><Select aria-label="Точка событий" value={filter} onChange={action => { setPointId(action.target.value); setPage(1); const next = new URLSearchParams(params); next.set('pointId', action.target.value); setParams(next, { replace: true }) }}><option value="all">Все точки</option>{points.map(point => <option value={point.id} key={point.id}>{point.name}{point.archivedAt ? ' · закрыта' : ''}</option>)}</Select><label className="events-search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><circle cx="10" cy="10" r="6" /><path d="m15 15 5 5" /></svg><input aria-label="Поиск событий" value={search} placeholder="Поиск событий" maxLength={160} onChange={action => setSearch(action.target.value)} /></label></div>

@@ -3,7 +3,7 @@ import { createServer, type Server } from 'node:http'
 import { it } from 'node:test'
 import { waitForApi } from '../../scripts/wait-for-api.ts'
 import { spawn } from 'node:child_process'
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { copyFile, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -55,6 +55,9 @@ it('keeps the API available on generated Prisma changes and still reloads server
   const starts: Array<{ pid: number; port: number; service: string }> = []
   try {
     await mkdir(join(fixture, 'src/server'), { recursive: true })
+    await mkdir(join(fixture, 'scripts'), { recursive: true })
+    await copyFile(join(root, 'scripts/dev-server.mjs'), join(fixture, 'scripts/dev-server.mjs'))
+    await symlink(join(root, 'node_modules'), join(fixture, 'node_modules'), 'dir')
     await mkdir(join(fixture, 'src/generated/prisma'), { recursive: true })
     await writeFile(join(fixture, 'package.json'), '{"type":"module"}')
     await writeFile(join(fixture, 'src/server/.env'), 'PORT=0\n')
@@ -98,8 +101,13 @@ it('keeps the API available on generated Prisma changes and still reloads server
         assert.equal((await response.json()).pid, first.pid)
       }
     }
-    await writeFile(join(fixture, 'src/server/service.ts'), "export const service = 'after'\n")
+    for (let i = 0; i < 5; i++) {
+      await writeFile(join(fixture, 'src/server/service.ts'), "export const service = 'after'\n")
+      await delay(40)
+    }
     const next = await waitForStart(2)
+    await delay(1000)
+    assert.equal(starts.length, 2, `One burst must produce one restart: ${log}`)
     assert.notEqual(next.pid, first.pid)
     const response = await fetch(`http://127.0.0.1:${next.port}`, { signal: AbortSignal.timeout(1000) })
     assert.equal((await response.json()).service, 'after')

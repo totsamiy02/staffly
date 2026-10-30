@@ -1,3 +1,4 @@
+import LocationSwitcher from '../../../component/ui/location-switcher/location-switcher.tsx'
 import TimeCorrectionAction from '../schedule/time/time-correction-action.tsx'
 import MemberProfileLink from '../../../component/ui/member-profile-link.tsx'
 import MemberAvatar from '../../../component/ui/member-avatar.tsx'
@@ -76,10 +77,10 @@ export default function DashboardOverview({ organization }: { organization: Orga
   const link = (to: string, label: string) => <Link className="dashboard-link" to={to}>{label}</Link>
   const scheduleLink = (day: string, label: string) => selectedPoint ? link(dayHref(day), label) : <button className="dashboard-link" onClick={() => setScheduleDay(day)}>{label}</button>
   const shiftRows = (items: typeof shifts, showDate = false) => <div className="dashboard-shifts">{items.map(shift => <ActionSurface key={shift.id} aria-label={`Открыть смену ${shift.memberName}`} onClick={() => navigate(dayHref(zonedDateAndTime(shift.scheduledStartAt, shift.timezone).date, shift.locationId))} className="dashboard-shift"><span className="dashboard-shift__time">{shiftTimeRange(shift.scheduledStartAt, shift.scheduledEndAt, shift.timezone)}{showDate && <small>{dateLabel(zonedDateAndTime(shift.scheduledStartAt, shift.timezone).date)}</small>}</span><span><strong>{shift.positionName || 'Рабочая смена'}</strong><small>{shift.memberName}</small>{!selectedPoint && <small className="dashboard-point-label">{shift.locationName}</small>}</span><TimeCorrectionAction shift={shift} locationId={shift.locationId} /></ActionSurface>)}</div>
-  return <div className="dashboard-layout">
+  return <div className="dashboard-layout"><header className="dashboard-greeting"><p>{hour < 6 ? 'Доброй ночи' : hour < 12 ? 'Доброе утро' : hour < 18 ? 'Добрый день' : 'Добрый вечер'},</p><h1>{user?.firstName || user?.displayName || 'Добро пожаловать'}</h1><span>{selectedPoint ? `Сегодня в «${selectedPoint.name}»` : 'Сегодня во всей организации'} · {dateLabel(today)}</span></header>
     <div className="dashboard-main">
-      <header className="dashboard-greeting"><p>{hour < 6 ? 'Доброй ночи' : hour < 12 ? 'Доброе утро' : hour < 18 ? 'Добрый день' : 'Добрый вечер'},</p><h1>{user?.firstName || user?.displayName || 'Добро пожаловать'}</h1><span>{selectedPoint ? `Сегодня в «${selectedPoint.name}»` : 'Сегодня во всей организации'} · {dateLabel(today)}</span></header>
-      <nav className="dashboard-scope" aria-label="Область сводки"><button aria-pressed={pointId === 'all'} onClick={() => selectPoint('all')}>Все точки</button>{points.map(point => <button key={point.id} title={[point.city, point.address].filter(Boolean).join(', ')} aria-pressed={pointId === point.id} onClick={() => selectPoint(point.id)}>{point.name}</button>)}</nav>
+
+      <div className="dashboard-scope-picker"><LocationSwitcher points={[{id:'all',name:'Вся организация'},...points]} totalPoints={points.length} value={pointId} onChange={selectPoint} /></div>
       {locations.isError && <p className="form-inline-error" role="alert">Не удалось загрузить точки. <button onClick={() => void locations.refetch()}>Повторить</button></p>}
       {!selectedPoint && <p className="dashboard-scope-note">Смены указаны по местному времени каждой точки.{manager ? ' Заявки — по точкам, которыми вы управляете.' : ''}</p>}
       <div className="dashboard-metrics">

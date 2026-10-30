@@ -51,6 +51,7 @@ const event: StaffEvent = {
 
 /** Actual presentational components, with local fictional data. No API, auth, or organization context. */
 export default function GuideExample({ example }: { example: GuideExampleId }) {
+  if (['profile-save','location-switcher','holiday-dates'].includes(example)) return <div className="guide-example guide-example--screenshot"><img src={`/guide/examples/${example}.webp`} alt={guideExampleLabels[example]} loading="lazy" decoding="async" /></div>
   return <div className="guide-example" role="img" aria-label={`${guideExampleLabels[example]}. Пример интерфейса с вымышленными данными.`}><div inert>
     {example === 'schedule' && <ScheduleAgenda days={['2026-10-19']} shifts={[shift, { ...shift, id: 'example-shift-two', memberName: 'Дмитрий Волков', positionName: 'Бариста', scheduledStartAt: '2026-10-19T09:00:00Z', scheduledEndAt: '2026-10-19T18:00:00Z' }]} timezone="Europe/Moscow" onShift={noop} />}
     {example === 'transfer' && <OfferShiftCard shift={offerShift} locationName="Центральная" />}

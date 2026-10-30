@@ -1,4 +1,4 @@
-import { hasPermission, requirePermission, permissionRecipients } from '../organizations/access/access.ts'
+import { hasPermission, requirePermission, loadPermissionMembers, permissionRecipientsFromContext } from '../organizations/access/access.ts'
 import { locationMemberWhere, scopedLocationId } from '../organizations/location-context.ts'
 import { createRequest, listRequestTypes } from '../requests/service.ts'
 import { mediaUrl } from '../storage/image-service.ts'
@@ -46,7 +46,8 @@ export async function notifyAbsence(tx: Prisma.TransactionClient, organizationId
   const absence = await tx.employeeAbsence.findUniqueOrThrow({ where: { id: absenceId }, select: { sourceRequestId: true } })
   const employee = await tx.organizationMember.findUniqueOrThrow({ where: { id: memberId }, include: { user: true } })
   const memberships=await tx.locationMember.findMany({where:{memberId,organizationId,leftAt:null},select:{locationId:true}})
-  const reviewers = memberships.length ? (await Promise.all(memberships.map(l=>permissionRecipients(tx,organizationId,'absences.view',l.locationId)))).flat() : await permissionRecipients(tx,organizationId,'absences.view')
+  const audience = await loadPermissionMembers(tx, organizationId)
+  const reviewers = memberships.length ? memberships.flatMap(l=>permissionRecipientsFromContext(audience,'absences.view',l.locationId)) : permissionRecipientsFromContext(audience,'absences.view')
   const recipients = [...new Set([...reviewers.map(item => item.userId), ...(type !== 'ABSENCE_REPORTED' ? [employee.userId] : [])])]
   if (recipients.length) await tx.accountNotification.createMany({ data: recipients.map(userId => ({ userId, organizationId, absenceId, requestId: absence.sourceRequestId, type, title: type === 'ABSENCE_REPORTED' ? 'Сотрудник сообщил об отсутствии' : type === 'ABSENCE_CHANGED' ? 'Период отсутствия изменён' : 'Отсутствие отменено', message: `${displayName(employee.user)} · ${dateText(startDate)}–${dateText(endDate)}` })) })
 }

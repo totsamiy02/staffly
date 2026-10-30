@@ -1,11 +1,9 @@
+import { isCalendarDate } from '../../shared/date-time.ts'
 import { z } from 'zod'
 
 export const uuid = z.string().uuid()
-export const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
-  const [year, month, day] = value.split('-').map(Number)
-  const parsed = new Date(Date.UTC(year, month - 1, day))
-  return parsed.getUTCFullYear() === year && parsed.getUTCMonth() === month - 1 && parsed.getUTCDate() === day
-}, 'Некорректная дата.')
+export const date = z.string().refine(isCalendarDate, 'Некорректная дата.')
+
 const time = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/, 'Некорректное время.')
 const breakMinutes = z.coerce.number().int().min(0).max(10_080)
 const description = z.union([z.string().trim().min(1).max(500), z.literal(''), z.null()]).transform((value) => value || null)

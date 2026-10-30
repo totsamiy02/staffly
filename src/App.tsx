@@ -1,39 +1,30 @@
 import { lazy, Suspense } from 'react'
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import Header from './component/header/header.tsx'
-import Hero from './component/hero/hero.tsx'
-import Benefits from './component/benefits/benefits.tsx'
-import Pricing from './component/pricing/pricing.tsx'
 import Footer from './component/footer/footer.tsx'
 import CookieConsent from './component/cookie-consent/cookie-consent.tsx'
-import PrivacyPolicy from './pages/legal/privacy-policy.tsx'
-import PersonalDataConsent from './pages/legal/personal-data-consent.tsx'
-import Terms from './pages/legal/terms.tsx'
-import Offer from './pages/legal/offer.tsx'
-import AuthPage from './pages/auth/auth.tsx'
-import YandexCompletePage from './pages/auth/yandex-complete.tsx'
-import VerifyEmailPage from './pages/auth/verify-email.tsx'
-import ResetPasswordPage from './pages/auth/reset-password.tsx'
-import ForgotPasswordPage from './pages/auth/forgot-password.tsx'
 import ProtectedRoute from './pages/app/shell/protected-route.tsx'
-import OrganizationsPage from './pages/app/organizations/organizations-page.tsx'
-import CreateOrganizationPage from './pages/app/organizations/create-organization-page.tsx'
-import OrganizationLayout from './pages/app/shell/organization-layout.tsx'
-import UserSettingsPage from './pages/app/settings/account/user-settings-page.tsx'
 import StatusPage from './pages/error/status-page.tsx'
 import ThemeToggle from './component/ui/theme-toggle/theme-toggle.tsx'
 
+const PrivacyPolicy = lazy(() => import('./pages/legal/privacy-policy.tsx'))
+const PersonalDataConsent = lazy(() => import('./pages/legal/personal-data-consent.tsx'))
+const Terms = lazy(() => import('./pages/legal/terms.tsx'))
+const Offer = lazy(() => import('./pages/legal/offer.tsx'))
+const AuthPage = lazy(() => import('./pages/auth/auth.tsx'))
+const YandexCompletePage = lazy(() => import('./pages/auth/yandex-complete.tsx'))
+const VerifyEmailPage = lazy(() => import('./pages/auth/verify-email.tsx'))
+const ResetPasswordPage = lazy(() => import('./pages/auth/reset-password.tsx'))
+const ForgotPasswordPage = lazy(() => import('./pages/auth/forgot-password.tsx'))
+
+const OrganizationsPage = lazy(() => import('./pages/app/organizations/organizations-page.tsx'))
+const CreateOrganizationPage = lazy(() => import('./pages/app/organizations/create-organization-page.tsx'))
+const OrganizationLayout = lazy(() => import('./pages/app/shell/organization-layout.tsx'))
+const UserSettingsPage = lazy(() => import('./pages/app/settings/account/user-settings-page.tsx'))
+
 const GuidePage = lazy(() => import('./pages/guide/guide-page.tsx'))
 
-function HomePage() {
-  return (
-    <main>
-      <Hero />
-      <Benefits />
-      <Pricing />
-    </main>
-  )
-}
+const HomePage = lazy(() => import('./pages/home/home-page.tsx'))
 
 function App() {
   const pathname = useLocation().pathname
@@ -47,6 +38,7 @@ function App() {
       {!hidePublicFrame && <Header />}
       {isAuthPage && <div className="auth-theme-control"><ThemeToggle /></div>}
 
+      <Suspense fallback={<main className="route-loading" role="status">Загрузка…</main>}>
       <Routes>
         <Route path="/" element={<HomePage />} />
         <Route path="/guide" element={<Suspense fallback={<main className="app-loading" aria-label="Загрузка справочника"><span /></main>}><GuidePage /></Suspense>} />
@@ -71,6 +63,7 @@ function App() {
         <Route path="/cookie-policy" element={<Navigate to="/privacy-policy#cookies" replace />} />
         <Route path="*" element={<StatusPage status={404} />} />
       </Routes>
+      </Suspense>
 
       {!hidePublicFrame && <Footer />}
       {!hidePublicFrame && <CookieConsent />}

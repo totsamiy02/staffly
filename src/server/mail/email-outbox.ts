@@ -34,21 +34,38 @@ export async function queueAccountSecurityEvent(tx: Prisma.TransactionClient, us
   for (const recipientEmail of recipients) await enqueueEmail(tx, { userId, sourceKind: 'MANDATORY', sourceKey: `security:${event}:${randomUUID()}`, recipientEmail, content: { ...messages[event], eyebrow: 'Безопасность', ...(details ? { fields: [['Прежняя почта', details.oldEmail], ['Новая почта', details.newEmail]] } : {}), action: { label: 'Проверить способы входа', path: '/app/settings?section=security' }, footer: 'Если это сделали не вы, проверьте способы входа и завершите чужие сеансы в настройках безопасности.' } })
 }
 
+export async function claimEmailDelivery(now = new Date()) {
+  return prisma.$transaction(async tx => {
+    await tx.$executeRaw`SET LOCAL TIME ZONE 'UTC'`
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(781234568::bigint)::text`
+    const rows = await tx.$queryRaw<Array<{id:string;organizationId:string|null;category:string|null}>>`
+      SELECT e.id,e.organization_id AS "organizationId",e.category FROM email_deliveries e
+      LEFT JOIN organization_resource_budgets b ON b.organization_id=e.organization_id
+      WHERE e.status='PENDING' AND e.available_at<=${now}::timestamptz AND (e.locked_until IS NULL OR e.locked_until<=${now}::timestamptz)
+      AND (e.category IS NULL OR e.organization_id IS NULL OR
+        b.organization_id IS NOT NULL AND (b.email_window_start<=${now}::timestamptz-interval '1 minute' OR b.email_window_count<b.email_minute_limit)
+        AND NOT EXISTS(SELECT 1 FROM email_deliveries active WHERE active.organization_id=e.organization_id AND active.category IS NOT NULL AND active.status='PENDING' AND active.locked_until>${now}::timestamptz))
+      ORDER BY (e.category IS NULL) DESC,b.last_email_at ASC NULLS FIRST,e.available_at,e.event_order
+      LIMIT 1 FOR UPDATE OF e SKIP LOCKED`
+    const row=rows[0]
+    if (!row) return null
+    if (row.organizationId && row.category) await tx.$executeRaw`
+      UPDATE organization_resource_budgets SET last_email_at=${now}::timestamptz,
+        email_window_count=CASE WHEN email_window_start<=${now}::timestamptz-interval '1 minute' THEN 1 ELSE email_window_count+1 END,
+        email_window_start=CASE WHEN email_window_start<=${now}::timestamptz-interval '1 minute' THEN ${now}::timestamptz ELSE email_window_start END
+      WHERE organization_id=${row.organizationId}::uuid`
+    return tx.emailDelivery.update({where:{id:row.id},data:{lockedUntil:new Date(+now+180000),attempts:{increment:1}}})
+  })
+}
+
 export async function processEmailDeliveries(options: { now?: Date; send?: typeof sendPreparedMail; limit?: number; shouldContinue?: () => boolean } = {}) {
   const send = options.send ?? sendPreparedMail
   // Reclaim leases after a worker crash; SKIP LOCKED prevents simultaneous workers claiming a row.
   let processed = 0
-  while (processed < (options.limit ?? Infinity) && (options.shouldContinue?.() ?? true)) {
+  while (processed < (options.limit ?? 100) && (options.shouldContinue?.() ?? true)) {
     const now = options.now ?? new Date()
-    const jobs = await prisma.$transaction(async tx => {
-      // The pg adapter expects UTC timestamps. Scope UTC to this queue transaction;
-      // do not change the connection timezone of callers' business transactions.
-      await tx.$executeRaw`SET LOCAL TIME ZONE 'UTC'`
-      const rows = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM email_deliveries WHERE status='PENDING' AND available_at<=${now.toISOString()}::timestamptz AND (locked_until IS NULL OR locked_until<=${now.toISOString()}::timestamptz) ORDER BY (category IS NULL) DESC,available_at,event_order FOR UPDATE SKIP LOCKED LIMIT 1`
-      if (!rows.length) return []
-      await tx.emailDelivery.updateMany({ where: { id: { in: rows.map(r => r.id) } }, data: { lockedUntil: new Date(+now + 180_000), attempts: { increment: 1 } } })
-      return tx.emailDelivery.findMany({ where: { id: { in: rows.map(r => r.id) } } })
-    })
+    const job = await claimEmailDelivery(now)
+    const jobs = job ? [job] : []
     if (!jobs.length) break
     processed += jobs.length
     for (const job of jobs) {

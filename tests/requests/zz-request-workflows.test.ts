@@ -1,3 +1,5 @@
+import { readRequestPage, requestInclude } from '../../src/server/requests/request-read.ts'
+import { performanceSnapshot } from '../../src/server/performance.ts'
 import { calculateCoverage } from '../../src/server/schedule/planning/coverage.ts'
 import { locationContext } from '../../src/server/organizations/location-context.ts'
 import { respondToStaffing,cancelRequest } from '../../src/server/requests/service.ts'
@@ -109,7 +111,7 @@ describe('request refactor: processes, roles, files and accounting',()=>{
     const u=await prisma.user.findUniqueOrThrow({where:{id:employee}});const history=await listNotificationHistory(employee,u.email,{limit:50,organizationId:org});assert.ok(history.notifications.some(n=>n.type==='REQUEST_VACATION_COLLECTION'&&n.href?.includes('tab=vacations&year=2070')));
     const r=await answerCampaign(employee,org,c.id,input);assert.equal(r.length,2);assert.deepEqual((await answerCampaign(employee,org,c.id,input)).map(r=>r.id),r.map(r=>r.id))
     await resolveRequest(owner,org,r[0].id,'APPROVED',null);assert.equal((await prisma.organizationRequest.findUniqueOrThrow({where:{id:r[1].id}})).status,'PENDING')
-    const view=await listVacationPlanning(employee,org,2070);assert.equal(view.campaigns.find(x=>x.id===c.id)!.members.length,1);assert.ok(view.requests.every(x=>x.memberId===employeeMember))
+    const view=await listVacationPlanning(employee,org,2070);assert.equal(view.campaigns.find(x=>x.id===c.id)!.members.length,1);assert.equal(view.campaigns.find(x=>x.id===c.id)!.timezone,'Europe/Moscow');assert.ok(view.requests.every(x=>x.memberId===employeeMember))
   })
   it('keeps original vacation dates and approved amendments update the effective absence',async()=>{
     const r=await createRequest(employee,org,{requestTypeId:vacation,startDate:'2071-04-01',endDate:'2071-04-14'});await resolveRequest(owner,org,r.id,'APPROVED',null)
@@ -167,4 +169,33 @@ describe('request refactor: processes, roles, files and accounting',()=>{
     const behalf=await createRequest(admin,org,{requestTypeId:vacation,subjectMemberId:employeeMember,startDate:'2077-09-01',endDate:'2077-09-14'});assert.equal(behalf.createdByMemberId,employeeMember);assert.equal(behalf.authorMemberId,adminMember)
     const mine=await listRequests(admin,org,'mine',{page:1,pageSize:50});assert.ok(mine.requests.some(r=>r.id===behalf.id))
   })
+  it('projects paged request graphs without per-relation SQL and preserves all workflow data', async () => {
+    // Reuse the real workflow cases above: files, reads, resolutions, absence
+    // amendments, staffing responses, custom answers and event audit history.
+    const where = { organizationId: org }
+    const expected = await prisma.organizationRequest.findMany({ where, include: requestInclude, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] })
+    assert.ok(expected.length > 10)
+    assert.ok(expected.some(row => row.attachments.length > 0))
+    assert.ok(expected.some(row => row.absence))
+    assert.ok(expected.some(row => row._count.staffingResponses > 0))
+    const actual: typeof expected = []
+    for (let page = 1; page <= Math.ceil(expected.length / 7); page++) {
+      const before = performanceSnapshot().measurements.sql!.count
+      const result = await prisma.$transaction(tx => readRequestPage(tx, org, where, page, 7), { isolationLevel: 'RepeatableRead' })
+      const queries = performanceSnapshot().measurements.sql!.count - before
+      assert.ok(queries <= 7, `A populated page used ${queries} SQL operations including transaction control`)
+      assert.equal(result.total, expected.length)
+      actual.push(...result.rows)
+    }
+    // Unordered assignment/membership relations have no orderBy in either reader.
+    const normalize = (rows: typeof actual) => rows.map(row => ({ ...row, creator: { ...row.creator,
+      accessAssignments: row.creator.accessAssignments.toSorted((a, b) => a.locationId.localeCompare(b.locationId)),
+      locationMemberships: row.creator.locationMemberships.toSorted((a, b) => a.locationId.localeCompare(b.locationId)) } }))
+    assert.deepEqual(normalize(actual), normalize(expected))
+    const empty = await prisma.$transaction(tx => readRequestPage(tx, org, where, 1000, 7))
+    assert.equal(empty.total, expected.length); assert.deepEqual(empty.rows, [])
+    const foreign = await prisma.$transaction(tx => readRequestPage(tx, randomUUID(), where, 1, 7))
+    assert.deepEqual(foreign, { total: 0, rows: [] })
+  })
+
 })

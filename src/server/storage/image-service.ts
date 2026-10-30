@@ -1,3 +1,5 @@
+import { storageQuotaError } from '../resources/quotas.ts'
+import type { Prisma } from '../../generated/prisma/client.ts'
 import { requirePermission } from '../organizations/access/access.ts'
 import { createHash, randomUUID } from 'node:crypto'
 import sharp from 'sharp'
@@ -13,7 +15,7 @@ const MAX_INPUT_PIXELS = 25_000_000
 const allowedFormats = new Set(['jpeg', 'png', 'webp'])
 
 export function mediaUrl(fileId: string | null | undefined) {
-  return fileId ? `/api/media/${fileId}` : null
+  return fileId ? `/api/media/v2/${fileId}` : null
 }
 
 async function normalizeImage(input: unknown) {
@@ -74,7 +76,8 @@ export async function cleanupPendingFiles(options: { limit?: number; removeObjec
 // Register an upload intent before disk writes. A crashed process leaves a durable
 // cleanup record; successful binding clears it atomically with the owning object.
 export async function stageStoredFile(data: { objectKey: string; mimeType: string; size: number; checksumSha256: string; purpose: StoredFilePurpose; uploadedByUserId: string; organizationId?: string }, contents: Buffer) {
-  const file = await prisma.storedFile.create({ data: { ...data, pendingDeletionAt: new Date(Date.now() + 60 * 60 * 1000) } })
+  if (!Number.isSafeInteger(data.size) || data.size !== contents.length) throw new Error('Stored file size must match its bytes')
+  const file = await prisma.storedFile.create({ data: { ...data, pendingDeletionAt: new Date(Date.now() + 60 * 60 * 1000) } }).catch(storageQuotaError)
   try { await storage.put(file.objectKey, contents); return file }
   catch (error) {
     if (error && typeof error === 'object' && 'code' in error && error.code === 'EEXIST') await prisma.storedFile.delete({ where: { id: file.id } })
@@ -85,6 +88,26 @@ export async function stageStoredFile(data: { objectKey: string; mimeType: strin
 
 export function startStorageCleanup() {
   return startBackgroundTask({ name: 'Pending image cleanup', intervalMs: 10 * 60_000, run: () => cleanupPendingFiles() })
+}
+
+export async function stageProfileImage(userId: string, input: unknown, organizationId?: string) {
+  if (organizationId) await requireOrganizationEditor(userId, organizationId)
+  const image = await normalizeImage(input)
+  const purpose = organizationId ? 'ORGANIZATION_LOGO' : 'USER_AVATAR'
+  const objectKey = organizationId ? `organizations/${organizationId}/logos/${randomUUID()}.webp` : `users/${userId}/avatars/${randomUUID()}.webp`
+  return stageStoredFile({ objectKey, mimeType: 'image/webp', size: image.buffer.length, checksumSha256: image.checksum, purpose, uploadedByUserId: userId, organizationId }, image.buffer)
+}
+
+// The owning profile row must be locked by the caller. Binding and profile fields
+// commit together; an abandoned upload retains the existing cleanup deadline.
+export async function bindProfileImage(tx: Prisma.TransactionClient, userId: string, previousId: string | null, uploadId: string | null, organizationId?: string) {
+  if (uploadId) {
+    const changed = await tx.storedFile.updateMany({ where: { id: uploadId, uploadedByUserId: userId, organizationId: organizationId ?? null,
+      purpose: organizationId ? 'ORGANIZATION_LOGO' : 'USER_AVATAR', pendingDeletionAt: { gt: new Date() } }, data: { pendingDeletionAt: null } })
+    if (!changed.count) throw new ApiError(409, 'IMAGE_UPLOAD_UNAVAILABLE', 'Выбранное фото больше недоступно. Выберите его заново.')
+  }
+  if (previousId && previousId !== uploadId) await tx.storedFile.updateMany({ where: { id: previousId }, data: { pendingDeletionAt: new Date(), lastDeletionError: null } })
+  return uploadId
 }
 
 export async function replaceUserAvatar(userId: string, input: unknown) {

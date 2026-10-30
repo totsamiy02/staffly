@@ -1,3 +1,4 @@
+import { reserveOrganizationExport } from '../../resources/quotas.ts'
 import { createHash, randomUUID } from 'node:crypto'
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
@@ -15,7 +16,7 @@ import { startBackgroundTask } from '../../background-task.ts'
 import { stageStoredFile, deletePendingFile } from '../../storage/image-service.ts'
 
 const publicJob = (job: ReportExport) => ({ id: job.id, status: job.status,
-  message: job.status === 'FAILED' ? 'Не удалось подготовить отчёт. Проверьте доступ и повторите попытку.' : undefined,
+  message: job.status === 'FAILED' ? job.errorCode === 'ORGANIZATION_STORAGE_QUOTA' ? 'Хранилище организации заполнено. Освободите место и повторите экспорт.' : 'Не удалось подготовить отчёт. Проверьте доступ и повторите попытку.' : undefined,
   statusUrl: `/organizations/${job.organizationId}/statistics/reports/exports/${job.id}` })
 const converters = new Set<ChildProcess>()
 const interrupted = new WeakSet<ChildProcess>()
@@ -38,6 +39,7 @@ export async function enqueueExport(userId: string, organizationId: string, inpu
     if (existing) return publicJob(existing)
     if (await tx.reportExport.count({ where: active }) >= 2) throw new ApiError(429, 'EXPORT_BUSY', 'Дождитесь подготовки предыдущих отчётов.')
     if (await tx.reportExport.count({ where: { status: { in: ['PENDING', 'RUNNING'] }, expiresAt: { gt: new Date() } } }) >= 200) throw new ApiError(503, 'EXPORT_BUSY', 'Очередь отчётов занята. Повторите попытку позже.')
+    await reserveOrganizationExport(tx, organizationId)
     return publicJob(await tx.reportExport.create({ data: { userId, organizationId, input: frozen as unknown as Prisma.InputJsonValue, inputHash, expiresAt: new Date(Date.now() + 3600000) } }))
   })
 }
@@ -72,17 +74,27 @@ async function generate(job: ReportExport, directory: string) {
   } finally { clearTimeout(timer); converters.delete(child) }
 }
 
+export async function claimReportExport(token: string) {
+  return prisma.$transaction(async tx => {
+    await tx.$executeRaw`SET LOCAL TIME ZONE 'UTC'`
+    // Serialize only the short claim, not report generation. This enforces one
+    // converter per tenant across every worker, including expired-lease recovery.
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(781234567::bigint)::text`
+    const rows = await tx.$queryRaw<Array<{ id: string; organizationId:string }>>`
+      SELECT j.id, j.organization_id AS "organizationId" FROM report_exports j
+      JOIN organization_resource_budgets b ON b.organization_id=j.organization_id
+      WHERE j.expires_at>now() AND j.attempts<3
+      AND (j.status='PENDING' OR j.status='RUNNING' AND j.lease_until<now())
+      AND NOT EXISTS(SELECT 1 FROM report_exports active WHERE active.organization_id=j.organization_id AND active.id<>j.id AND active.status='RUNNING' AND active.lease_until>=now())
+      ORDER BY b.last_export_at ASC NULLS FIRST,j.created_at,j.id LIMIT 1 FOR UPDATE OF j SKIP LOCKED`
+    if (!rows[0]) return null
+    await tx.organizationResourceBudget.update({where:{organizationId:rows[0].organizationId},data:{lastExportAt:new Date()}})
+    return tx.reportExport.update({where:{id:rows[0].id},data:{status:'RUNNING',attempts:{increment:1},leaseToken:token,leaseUntil:new Date(Date.now()+180000)}})
+  })
+}
 export async function processReportExport() {
   const token = randomUUID()
-  const claimed = await prisma.$transaction(async tx => {
-    await tx.$executeRaw`SET LOCAL TIME ZONE 'UTC'`
-    const rows = await tx.$queryRaw<Array<{ id: string }>>`
-      SELECT id FROM report_exports WHERE expires_at > now() AND attempts < 3
-      AND (status = 'PENDING' OR (status = 'RUNNING' AND lease_until < now()))
-      ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED`
-    if (!rows[0]) return null
-    return tx.reportExport.update({ where: { id: rows[0].id }, data: { status: 'RUNNING', attempts: { increment: 1 }, leaseToken: token, leaseUntil: new Date(Date.now() + 180000) } })
-  })
+  const claimed = await claimReportExport(token)
   if (!claimed) return false
   const directory = await mkdtemp(path.join(tmpdir(), 'staffly-export-'))
   let stagedId: string | undefined
@@ -100,7 +112,7 @@ export async function processReportExport() {
   } catch (error) {
     if (stagedId) await deletePendingFile(stagedId).catch(() => undefined)
     const retry = error && typeof error === 'object' && 'code' in error && error.code === 'EXPORT_INTERRUPTED' && claimed.attempts < 3
-    await prisma.reportExport.updateMany({ where: { id: claimed.id, leaseToken: token }, data: { status: retry ? 'PENDING' : 'FAILED', leaseUntil: null, errorCode: retry ? null : 'EXPORT_FAILED' } })
+    await prisma.reportExport.updateMany({ where: { id: claimed.id, leaseToken: token }, data: { status: retry ? 'PENDING' : 'FAILED', leaseUntil: null, errorCode: retry ? null : error instanceof ApiError && error.code === 'ORGANIZATION_STORAGE_QUOTA' ? error.code : 'EXPORT_FAILED' } })
     console.error('Report export failed:', claimed.id, error instanceof ApiError ? error.code : 'EXPORT_FAILED')
   } finally { await rm(directory, { recursive: true, force: true }) }
   return true

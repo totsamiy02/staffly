@@ -1,15 +1,12 @@
 .schedule-section-header {
  container:schedule-header / inline-size;display:grid;gap:18px;min-width:0;width:100%;margin-bottom:20px;grid-template-columns:minmax(0,1fr);
- >.staffly-segmented {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,160px),1fr));width:100%;min-width:0;margin:0;overflow:visible;gap:3px;
-  >a {min-width:0;min-height:40px;white-space:normal;overflow-wrap:anywhere;padding:8px 10px;text-align:center;}
- }
+ >.staffly-segmented {margin:0;}
 }
 .schedule-section-heading {display:flex;align-items:center;justify-content:space-between;gap:20px;min-width:0;>div:first-child{display:grid;gap:7px;min-width:0;}h1{margin:0;font-size:30px;font-weight:700;line-height:1.2;letter-spacing:-.8px;}p{margin:0;font-size:13px;line-height:1.6;color:var(--theme-muted,#737b89);}}
 .schedule-section-actions {display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0;>button,>a,.schedule-header-actions>button{min-height:38px;padding:8px 13px;border-radius:7px;font-size:12px;font-weight:550;line-height:1.4;}}
 .team-planning>.schedule-section-header {margin-bottom:0;}
+.schedule-section-header>.workspace-page-heading {margin-bottom:0;}
 @container schedule-header (max-width:1040px) {
- .schedule-section-header>.staffly-segmented {grid-template-columns:repeat(3,minmax(0,1fr));}
- .schedule-section-header>.staffly-segmented:has(>a:nth-of-type(4):last-child) {grid-template-columns:repeat(2,minmax(0,1fr));}
  .schedule-section-heading {flex-wrap:wrap;gap:14px;}
 }
 @container schedule-header (max-width:620px) {
@@ -17,12 +14,6 @@
  .schedule-section-actions {width:100%;display:block;>button,>a{min-height:44px;font-size:12px;}}
  .schedule-section-header .schedule-section-heading .schedule-section-actions .schedule-header-actions {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));width:100%;gap:6px;>button{display:flex;align-items:center;justify-content:center;gap:4px;min-width:0;min-height:46px;height:auto;padding:8px 6px;font-size:12px;font-weight:550;line-height:1.3;white-space:normal;overflow-wrap:normal;border-radius:8px;}>.app-primary{grid-column:auto;}}
 }
-@container schedule-header (max-width:520px) {
- .schedule-section-header>.staffly-segmented {grid-template-columns:repeat(3,minmax(0,1fr));gap:3px;padding:3px;border-radius:10px;background:var(--theme-surface-muted,#f0f0f3);>a{min-height:46px;font-size:12px;line-height:1.3;padding:7px 5px;color:var(--theme-muted,#646a76);overflow-wrap:normal;&.active{color:var(--theme-text-strong,#191b20);}}.staffly-segmented__indicator{border-radius:7px;}}
-}
-
-.schedule-section-header>.staffly-segmented:has(>a:nth-of-type(2):last-child) {grid-template-columns:repeat(2,minmax(0,1fr));}
-.schedule-section-header>.staffly-segmented:has(>a:only-of-type) {grid-template-columns:minmax(0,1fr);}
 
 @container schedule-header (max-width:620px) {
  .schedule-section-header .schedule-section-actions .schedule-header-actions:has(>button:nth-child(2):last-child) {grid-template-columns:repeat(2,minmax(0,1fr));}

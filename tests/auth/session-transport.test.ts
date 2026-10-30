@@ -7,7 +7,7 @@ it('serializes cookie rotations from two tabs instead of sending the same refres
   const descriptor = Object.getOwnPropertyDescriptor(navigator, 'locks')
   let tail = Promise.resolve()
   const names: string[] = []
-  Object.defineProperty(navigator, 'locks', { configurable: true, value: { request(name: string, execute: () => Promise<Response>) { names.push(name); const result = tail.then(execute); tail = result.then(() => undefined); return result } } })
+  Object.defineProperty(navigator, 'locks', { configurable: true, value: { request(name: string, options: { signal: AbortSignal }, execute: () => Promise<Response>) { assert.ok(options.signal instanceof AbortSignal); names.push(name); const result = tail.then(execute); tail = result.then(() => undefined); return result } } })
   let cookieVersion = 1
   const sent: number[] = []
   globalThis.fetch = async (_url, options) => {

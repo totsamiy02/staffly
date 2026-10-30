@@ -1,3 +1,5 @@
+import PageHeading from '../../../../component/ui/page-heading/page-heading.tsx'
+import { useImageDraft } from '../../../../component/ui/image-upload/use-image-draft.ts'
 import AccessSettings from '../access/access-settings.tsx'
 import { canAccess } from '../../../../app/access/catalog.ts'
 import SegmentedNav from '../../../../component/ui/segmented-nav/segmented-nav.tsx'
@@ -22,6 +24,8 @@ import RequestTypesSettings from '../../requests/types/request-types-settings.ts
 export default function OrganizationSettings({ organization }: { organization: OrganizationSummary }) {
   const { apiRequest } = useAuth()
   const queryClient = useQueryClient()
+  const logoDraft = useImageDraft(`/organizations/${organization.id}/logo`, organization.logoUrl)
+  const resetLogo = logoDraft.reset
   const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
   const section =  ['profile', 'locations', 'schedule', 'requests', 'roles', 'access'].includes(params.get('section') ?? '') ? params.get('section')! : 'profile'
@@ -47,9 +51,10 @@ export default function OrganizationSettings({ organization }: { organization: O
   const planningAllowed = organization.organizationPermissions?.includes('schedule.settings') || ['coverage.manage','schedule.settings','schedule.templates','positions.manage','offers.settings'].some(key=>organization.owner || organization.permissions?.includes(key))
   const canEditProfile = canAccess(organization, 'organization.edit')
   const editing = profileEditing && canEditProfile
-  useEffect(() => { setProfileEditing(false) }, [section, organization.id, canEditProfile])
+  useEffect(() => { setProfileEditing(false); resetLogo() }, [section, organization.id, canEditProfile, resetLogo])
 
   function editProfile(value: boolean) {
+    logoDraft.reset()
     setName(organization.name); setDescription(organization.description ?? '')
     setTimezone(organization.organizationTimezone ?? organization.timezone)
     setContactEmail(organization.contactEmail ?? ''); setPhone(formatRussianPhone(organization.phone ?? ''))
@@ -102,8 +107,10 @@ export default function OrganizationSettings({ organization }: { organization: O
       if (contactEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)) throw new Error('Укажите корректную рабочую почту.')
       if (!isCompleteRussianPhone(phone)) throw new Error('Введите российский номер полностью: +7 (999) 123-45-67.')
       if (website && !/^https?:\/\/[^\s]+$/i.test(website)) throw new Error('Адрес сайта должен начинаться с http:// или https://.')
-      await apiRequest(`/organizations/${organization.id}`, { method: 'PATCH', body: { name, description, timezone, contactEmail, phone, website, address } })
+      const logoUploadId = await logoDraft.prepare()
+      await apiRequest(`/organizations/${organization.id}`, { method: 'PATCH', body: { name, description, timezone, contactEmail, phone, website, address, logoUploadId } })
       await Promise.all([queryClient.invalidateQueries({ queryKey: ['organization', organization.id] }), queryClient.invalidateQueries({ queryKey: ['organizations'] })])
+      logoDraft.reset()
       setMessage('Профиль организации сохранён.')
       setProfileEditing(false)
     })
@@ -111,13 +118,13 @@ export default function OrganizationSettings({ organization }: { organization: O
 
   const candidates = members.data?.members.filter((member) => member.role !== 'OWNER') ?? []
 
-  return <section className="settings-page"><header><h1>Настройки</h1><p>{canEditProfile ? 'Профиль организации и управление настройками.' : 'Публичная информация вашей организации.'}</p></header>
+  return <section className="settings-page"><PageHeading title="Настройки" description={canEditProfile ? 'Профиль организации и управление настройками.' : 'Публичная информация вашей организации.'}/>
     <SegmentedNav label="Разделы настроек">{[['profile', 'Профиль организации'], ['locations', 'Точки'], ...(planningAllowed ? [['schedule','Расписание']] : []), ...(canAccess(organization,'requestTypes.manage') ? [['requests','Типы заявок']] : []), ...(organization.owner ? [['roles','Роли и доступ'],['access','Владение']] : [])].map(([key, label]) => <button key={key} type="button" aria-pressed={section === key} onClick={() => changeSection(key)}>{label}</button>)}</SegmentedNav>
     {section !== 'schedule' && error && <p className="app-alert app-alert--error">{error}</p>}
     {section === 'roles' && organization.role === 'OWNER' && <AccessSettings organization={organization} />}
     {section === 'profile' && <article className="organization-profile-editor">
       <div className="profile-settings-heading"><div><p className="app-eyebrow">Публичная информация</p><h2>Профиль организации</h2><p>Эти данные доступны всем участникам организации.</p></div>{canEditProfile && !editing && <ProfileEditActions editing={false} onEdit={() => editProfile(true)} onCancel={() => editProfile(false)} />}</div>
-      <div className="organization-logo-editor"><ImageUpload endpoint={`/organizations/${organization.id}/logo`} imageUrl={organization.logoUrl} name={organization.name} avatarClassName="organization-logo-editor__preview" disabled={!editing || busy} onBusyChange={setImageBusy} onChange={async () => { await Promise.all([queryClient.invalidateQueries({ queryKey: ['organization', organization.id] }), queryClient.invalidateQueries({ queryKey: ['organizations'] })]) }} onMessage={setMessage} onError={setError} /></div>
+      <div className="organization-logo-editor"><ImageUpload endpoint={`/organizations/${organization.id}/logo`} imageUrl={logoDraft.url} onDraftChange={logoDraft.change} name={organization.name} avatarClassName="organization-logo-editor__preview" disabled={!editing || busy} onBusyChange={setImageBusy} onChange={async () => { await Promise.all([queryClient.invalidateQueries({ queryKey: ['organization', organization.id] }), queryClient.invalidateQueries({ queryKey: ['organizations'] })]) }} onMessage={setMessage} onError={setError} /></div>
       {editing ? <form onSubmit={saveOrganization}>
         <fieldset className="profile-edit-fields" disabled={busy || imageBusy}><div className="organization-profile-fields">
           <label><span>Название</span><input autoFocus value={name} onChange={event => setName(event.target.value)} minLength={2} maxLength={120} required /></label>

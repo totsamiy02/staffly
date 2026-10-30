@@ -45,7 +45,7 @@ export default function StatisticsPage({ organization }: { organization: Organiz
   const detail = useMemberWorkTime(organization.id, selectedMember, { ...params, page: historyPage })
   const shiftDetail = useShiftDetails(organization.id, selectedShift, auditPage)
   const [year, monthNumber] = month.split('-').map(Number)
-  const years = Array.from({ length: 8 }, (_, index) => new Date().getFullYear() - 4 + index)
+  const years = Array.from({ length: 8 }, (_, index) => Number(initialMonth.slice(0, 4)) - 4 + index)
 
   function changeSort(key: typeof sort) {
     if (sort === key) setDirection((value) => value === 'asc' ? 'desc' : 'asc')

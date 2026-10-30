@@ -20,7 +20,7 @@ export function usePendingInvitations() {
 
 export function useOrganization(organizationId: string | undefined) {
   const { locationId, apiRequest, user } = useAuth()
-  return useQuery({ ...liveQueryOptions, queryKey: ['organization', organizationId, locationId], queryFn: () => apiRequest<{ organization: OrganizationSummary }>(`/organizations/${organizationId}`), enabled: Boolean(user && organizationId) })
+  return useQuery({ ...liveQueryOptions, queryKey: ['organization', organizationId, locationId], queryFn: ({ signal }) => apiRequest<{ organization: OrganizationSummary }>(`/organizations/${organizationId}`, { signal }), enabled: Boolean(user && organizationId), placeholderData: (previous, previousQuery) => previousQuery?.queryKey[1] === organizationId ? previous : undefined })
 }
 
 export function useOrganizationMembers(organizationId: string | undefined, options?: { page: number; pageSize: number; search?: string; role?: OrganizationRole; accessRoleId?:string; positionId?: string; directory?: boolean; pointId?: string }) {
@@ -70,7 +70,7 @@ export function useNotificationActions(organizationId?: string) {
 
 export function useLocations(organizationId: string | undefined) {
   const { apiRequest } = useAuth()
-  return useQuery({ ...liveQueryOptions, queryKey: ['locations', organizationId], queryFn: () => apiRequest<{ locations: import('./types.ts').OrganizationLocation[] }>(`/organizations/${organizationId}/locations`), enabled: Boolean(organizationId) })
+  return useQuery({ ...liveQueryOptions, queryKey: ['locations', organizationId], queryFn: ({ signal }) => apiRequest<{ locations: import('./types.ts').OrganizationLocation[] }>(`/organizations/${organizationId}/locations`, { signal }), enabled: Boolean(organizationId) })
 }
 export function useLocationTeams(organizationId: string) {
   const { apiRequest, locationId } = useAuth()

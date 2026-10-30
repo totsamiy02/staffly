@@ -5,6 +5,7 @@ import type { AuthenticatedRequest } from '../auth.ts'
 import { positiveInteger } from '../runtime.ts'
 import { readCache, setReadCacheLive } from '../read-cache.ts'
 import { checkDatabasePolicy } from '../database-policy.ts'
+import { utcDatabaseUrl, checkTimeModel } from '../database-time.ts'
 
 export type LiveHint = { topic: string; organizationId?: string; userId?: string }
 type Peer = { response: Response; userId: string; sessionId: string; organizations: Set<string>; expires: number; dirty: Map<string, LiveHint> }
@@ -30,7 +31,7 @@ export function createLiveHub(options: { validationIntervalMs?: number } = {}) {
   const disconnectAll = () => { for (const peer of peers) peer.response.end() }
   async function listen() {
     if (stopped) return
-    const client = new Client({ connectionString: process.env.LIVE_DATABASE_URL || databaseUrl, application_name: 'staffly-live', connectionTimeoutMillis: 3000, keepAlive: true })
+    const client = new Client({ connectionString: utcDatabaseUrl(process.env.LIVE_DATABASE_URL || databaseUrl), application_name: 'staffly-live', connectionTimeoutMillis: 3000, keepAlive: true })
     listener = client
     let failed = false
     const fail = () => {
@@ -45,7 +46,7 @@ export function createLiveHub(options: { validationIntervalMs?: number } = {}) {
     client.on('notification', notification => {
       const hint = parseHint(notification.payload ?? '')
       if (!hint) return
-      readCache.invalidate(hint.organizationId)
+      readCache.invalidateForHint(hint)
       for (const peer of peers) {
         if (hint.userId ? hint.userId !== peer.userId : !hint.organizationId || !peer.organizations.has(hint.organizationId)) continue
         // A role/membership/session change forces a fresh authorization and resync.
@@ -56,6 +57,7 @@ export function createLiveHub(options: { validationIntervalMs?: number } = {}) {
     })
     try {
       await client.connect()
+      await checkTimeModel(client)
       if (process.env.NODE_ENV === 'production') await checkDatabasePolicy(client)
       await client.query('LISTEN staffly_live')
       if (!failed && !stopped) { connected = true; setReadCacheLive(true) }

@@ -6,7 +6,7 @@
   "scripts": {
     "predev:server": "prisma generate",
     "dev": "vite",
-    "dev:server": "NODE_ENV=development tsx watch --exclude \"./src/generated/prisma/**\" --env-file=src/server/.env src/server/index.ts",
+    "dev:server": "node scripts/dev-server.mjs",
     "dev:all": "concurrently -k \"npm run dev:server\" \"tsx scripts/wait-for-api.ts && npm run dev\"",
     "start:server": "NODE_ENV=production tsx --env-file=src/server/.env src/server/index.ts",
     "prestart:server": "prisma generate",
@@ -25,7 +25,10 @@
     "test:scale": "node --import tsx tests/performance/load-test.mjs --profile=scale --instances=4 --pool-budget=40 --heap-budget-mib=3072 --soak-seconds=180 --rate=200 --rotate-sessions=true --assert-slo=true",
     "test:edge": "node tests/security/check-edge.mjs",
     "test:db": "NODE_ENV=test node --env-file=src/server/.env.test scripts/run-tests.mjs",
-    "db:backup": "node --import tsx scripts/database-backup.ts"
+    "db:backup": "node --import tsx scripts/database-backup.ts",
+    "db:time:plan": "node --env-file=src/server/.env --import tsx scripts/database-time-migration.ts",
+    "db:time:apply": "node --env-file=src/server/.env --import tsx scripts/database-time-migration.ts --apply=true",
+    "test:frontend": "node --import tsx tests/performance/load-test.mjs --profile=frontend"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1158.0",

@@ -48,7 +48,7 @@ export function admissionControl(): RequestHandler {
     if (!health && active >= maximum) {
       response.set('Retry-After', '2').status(503).json({ code: 'SERVER_BUSY', message: 'Сервис занят. Повторите попытку немного позже.' }); return
     }
-    const upload = request.method === 'PUT' && /\/(?:avatar|logo|documents|attachments)$/.test(request.path)
+    const upload = request.method === 'PUT' && /\/(?:(?:avatar|logo)(?:\/stage)?|documents|attachments)$/.test(request.path)
     const expensive = /\/statistics\/reports\/(?:preview|members)$/.test(request.path)
       || request.method === 'POST' && /\/documents\/[0-9a-f-]+\/content$/.test(request.path) && request.query.action === 'preview'
     if (upload && uploads >= maximumUploads || expensive && heavy >= maximumHeavy) {

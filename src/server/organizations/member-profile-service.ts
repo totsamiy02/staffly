@@ -1,3 +1,4 @@
+import { memberIdentityWhere } from '../access/member-policy.ts'
 import { prisma } from '../db.ts'
 import { ApiError } from '../api-error.ts'
 import { getMembership } from './access/permissions.ts'
@@ -13,7 +14,8 @@ import { listRequests } from '../requests/service.ts'
 export type MemberProfileOptions = { month: string; page: number; section: 'overview' | 'time' | 'documents' | 'requests'; kind: 'personal' | 'acknowledgements'; requestState: 'all' | 'pending' }
 export async function memberProfile(userId: string, organizationId: string, memberId: string, options: MemberProfileOptions) {
   const actor = await getMembership(userId, organizationId)
-  const target = await prisma.organizationMember.findFirst({ where: { organizationId, id: memberId, user: { deletedAt: null } }, include: {
+  if (actor.id !== memberId) requirePermission(actor, 'members.view', actor.locationId)
+  const target = await prisma.organizationMember.findFirst({ where: { AND: [memberIdentityWhere(actor, hasPermission(actor,'members.view',actor.locationId) ? [actor.locationId] : []), { id: memberId }] }, include: {
     user: { select: { email: true, firstName: true, lastName: true, middleName: true, phone: true, bio: true, avatarFileId: true, lastSeenAt: true, sessions: { where: onlineSessions(), select: { id: true }, take: 1 } } },
     locationTransfers: { where: { toLocationId: actor.locationId, temporary: true, revokedAt: null, endAt: { gt: new Date() } }, select: { id: true }, take: 1 },
     accessRole: { select: { name: true } }, accessAssignments: { include: { role: { select: { name: true } } } },
@@ -24,11 +26,6 @@ export async function memberProfile(userId: string, organizationId: string, memb
   const own = actor.id === target.id
   const workingInPoint = target.locationMemberships.some(item => item.locationId === actor.locationId) || target.locationTransfers.length > 0
   const targetInPoint = target.role === 'OWNER' || !!target.accessRoleId || workingInPoint || target.accessAssignments.some(item => item.locationId === actor.locationId)
-  const historical = !targetInPoint && await prisma.workShift.count({ where: { organizationId, memberId, locationId: actor.locationId } }) > 0
-  if (!own) {
-    requirePermission(actor, 'members.view')
-    if (!targetInPoint && !historical) throw new ApiError(404, 'MEMBER_NOT_FOUND', 'Сотрудник недоступен в этой точке.')
-  }
   const capabilities = {
     time: hasPermission(actor, own ? 'statistics.own' : 'statistics.view'),
     schedule: hasPermission(actor, own ? 'schedule.own' : 'schedule.view'),

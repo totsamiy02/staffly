@@ -7,12 +7,41 @@ datasource db {
   provider = "postgresql"
 }
 
+model DatabaseTimeModel {
+  id Int @id
+  version String @db.VarChar(16)
+  sourceTimezone String? @map("source_timezone")
+  convertedAt DateTime? @map("converted_at") @db.Timestamptz(3)
+  @@map("app_time_model")
+}
+
 model ApiRateLimit {
   key String @id @db.VarChar(64)
   hits Int
   resetAt DateTime @map("reset_at") @db.Timestamptz(3)
   @@index([resetAt])
   @@map("api_rate_limits")
+}
+
+model OrganizationResourceBudget {
+  organizationId String @id @map("organization_id") @db.Uuid
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  storageBytes BigInt @default(0) @map("storage_bytes")
+  storageLimitBytes BigInt @default(5368709120) @map("storage_limit_bytes")
+  exportQueueLimit Int @default(5) @map("export_queue_limit")
+  exportHourLimit Int @default(20) @map("export_hour_limit")
+  exportWindowStart DateTime @default(now()) @map("export_window_start") @db.Timestamptz(3)
+  exportWindowCount Int @default(0) @map("export_window_count")
+  lastExportAt DateTime? @map("last_export_at") @db.Timestamptz(3)
+  pendingEmails Int @default(0) @map("pending_emails")
+  emailQueueLimit Int @default(2000) @map("email_queue_limit")
+  emailMinuteLimit Int @default(60) @map("email_minute_limit")
+  emailWindowStart DateTime @default(now()) @map("email_window_start") @db.Timestamptz(3)
+  emailWindowCount Int @default(0) @map("email_window_count")
+  lastEmailAt DateTime? @map("last_email_at") @db.Timestamptz(3)
+  offerCheckCursor String? @map("offer_check_cursor") @db.Uuid
+  requestCheckCursor String? @map("request_check_cursor") @db.Uuid
+  @@map("organization_resource_budgets")
 }
 
 model ReportExport {
@@ -31,6 +60,7 @@ model ReportExport {
   expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  @@index([organizationId, status, leaseUntil], map: "report_exports_org_active_idx")
   @@index([status, leaseUntil, createdAt])
   @@index([userId, createdAt])
   @@index([expiresAt])
@@ -148,6 +178,7 @@ model EmailChangeToken {
 }
 
 model EmailDelivery {
+  skipReason String? @map("skip_reason") @db.VarChar(40)
   eventOrder BigInt @default(autoincrement()) @map("event_order")
   id String @id @default(uuid()) @db.Uuid
   userId String @map("user_id") @db.Uuid
@@ -165,6 +196,7 @@ model EmailDelivery {
   lockedUntil DateTime? @map("locked_until") @db.Timestamptz(3)
   deliveredAt DateTime? @map("delivered_at") @db.Timestamptz(3)
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  @@index([organizationId, status, lockedUntil], map: "email_deliveries_org_active_idx")
   @@index([status, availableAt])
   @@index([userId, category])
   @@map("email_deliveries")
@@ -263,6 +295,7 @@ enum RequestEventType {
 }
 
 model Organization {
+  resourceBudget OrganizationResourceBudget?
   reportExports ReportExport[]
   vacationStandardDays Int @default(28) @map("vacation_standard_days")
   vacationHolidays String[] @default([]) @map("vacation_holidays")

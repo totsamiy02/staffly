@@ -10,10 +10,12 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, us
 export type AuthUser = { id: string; email: string; displayName: string; firstName: string | null; lastName: string | null; middleName: string | null; phone: string | null; bio: string | null; avatarUrl: string | null }
 type VerifyEmailBody = { email: string; code: string; password: string; confirmPassword: string; consentData: boolean; consentTerms: boolean }
 type AuthResult = { user: AuthUser; accessToken: string }
-type ApiOptions = { method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'; body?: unknown }
+type ApiOptions = { method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'; body?: unknown; signal?: AbortSignal }
 type AuthContextValue = {
   user: AuthUser | null
   loading: boolean
+  startupError: string | null
+  retryStartup: () => void
   login: (email: string, password: string) => Promise<void>
   verifyEmail: (body: VerifyEmailBody) => Promise<void>
   completeYandex: (body: { currentPassword?: string; consentData?: boolean; consentTerms?: boolean }) => Promise<{ returnTo: string }>
@@ -23,7 +25,7 @@ type AuthContextValue = {
   uploadImage: <T>(path: string, file: File) => Promise<T>
   uploadFile: <T>(path: string, file: File) => Promise<T>
   downloadFile: (path: string, fileName: string, method?: 'GET' | 'POST', body?: unknown) => Promise<void>
-  previewFile: (path: string, method?: 'GET' | 'POST') => Promise<Blob>
+  previewFile: (path: string, method?: 'GET' | 'POST', signal?: AbortSignal) => Promise<Blob>
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -45,6 +47,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const userIdRef = useRef<string | null>(null)
   const [user, setUser] = useState<AuthUser | null>(null)
   const [loading, setLoading] = useState(true)
+  const [startupError, setStartupError] = useState<string | null>(null)
+  const [startupAttempt, setStartupAttempt] = useState(0)
+  const profileRevision = useRef(0)
+  const currentUser = useRef<AuthUser | null>(null)
+  const retryStartup = useCallback(() => { setStartupError(null); setLoading(true); setStartupAttempt(n => n + 1) }, [])
   const tokenRef = useRef<string | null>(null)
   const authVersion = useRef(0)
   const refreshRef = useRef<Promise<AuthResult | null> | null>(null)
@@ -55,7 +62,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     authVersion.current += 1
     tokenRef.current = result.accessToken
     setUser(result.user)
+    currentUser.current = result.user
     setLoading(false)
+    setStartupError(null)
   }, [queryClient])
 
   const clear = useCallback(() => {
@@ -64,16 +73,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     userIdRef.current = null
     queryClient.clear()
     setUser(null)
+    currentUser.current = null
     setLoading(false)
+    setStartupError(null)
   }, [queryClient])
 
   const refresh = useCallback(async () => {
     const startedAt = authVersion.current
+    const startedProfile = profileRevision.current
     refreshRef.current ??= refreshSession<AuthResult>()
       .finally(() => { refreshRef.current = null; bootstrapRequest = null })
     const result = await refreshRef.current
     if (authVersion.current !== startedAt) return tokenRef.current && userIdRef.current === result?.user.id ? result : null
-    if (result) accept(result)
+    if (result) accept(startedProfile !== profileRevision.current && currentUser.current?.id === result.user.id ? { ...result, user: currentUser.current } : result)
     else clear()
     return result
   }, [accept, clear])
@@ -91,13 +103,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (result) accept(result)
         else clear()
       }).catch((error: Error & { retryAfterMs?: number }) => {
-        if (active && authVersion.current === startedAt) retry = setTimeout(bootstrap,
-          Math.min(30000, Math.max(error.retryAfterMs ?? 0, 1000 * 2 ** Math.min(attempts++, 5))) + Math.random() * 500)
+        if (active && authVersion.current === startedAt) {
+          setStartupError('Не удалось подключиться к сервису. Соединение восстановится автоматически.')
+          retry = setTimeout(bootstrap, Math.max(error.retryAfterMs ?? 0, Math.min(5000, 1000 * 2 ** attempts++)) + Math.random() * 300)
+        }
       })
     }
     bootstrap()
     return () => { active = false; clearTimeout(retry) }
-  }, [accept, clear])
+  }, [accept, clear, startupAttempt])
 
   async function login(email: string, password: string) { accept(await authPost<AuthResult>('login', { email, password })) }
 
@@ -119,6 +133,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const execute = (token: string | null) => fetch(`/api${path}`, {
       method: options.method ?? 'GET',
       credentials: 'same-origin',
+      cache: 'no-store',
+      signal: options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
       headers: { ...(options.body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}),
     })
@@ -159,15 +175,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await new Promise(resolve => setTimeout(resolve, 1500))
       }
       if (!ready) throw new Error('Подготовка отчёта заняла слишком много времени. Попробуйте позже.')
-      response = await requestWithSession(token => fetch(`/api${statusPath}/content`, { credentials: 'same-origin', headers: token ? { Authorization: `Bearer ${token}` } : {} }), () => tokenRef.current, refresh)
+      response = await requestWithSession(token => fetch(`/api${statusPath}/content`, { credentials: 'same-origin', cache: 'no-store', headers: token ? { Authorization: `Bearer ${token}` } : {} }), () => tokenRef.current, refresh)
     }
     if (!response.ok) { await readJson(response); return }
     const url = URL.createObjectURL(await response.blob())
     const anchor = document.createElement('a'); anchor.href = url; anchor.download = fileName; anchor.click(); URL.revokeObjectURL(url)
   }, [refresh, apiRequest])
 
-  const previewFile = useCallback(async (path: string, method: 'GET' | 'POST' = 'GET') => {
-    const execute = (token: string | null) => fetch(`/api${path}`, { method, credentials: 'same-origin', headers: token ? { Authorization: `Bearer ${token}` } : {} })
+  const previewFile = useCallback(async (path: string, method: 'GET' | 'POST' = 'GET', signal?: AbortSignal) => {
+    const execute = (token: string | null) => fetch(`/api${path}`, { method, signal, credentials: 'same-origin', cache: 'no-store', headers: token ? { Authorization: `Bearer ${token}` } : {} })
     const response = await requestWithSession(execute, () => tokenRef.current, refresh)
     if (!response.ok) { await readJson(response); throw new Error('Не удалось открыть файл.') }
     return response.blob()
@@ -188,8 +204,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         void applyLiveHints(queryClient, hints)
         if (hints.some(hint => hint.topic === 'profile' && !hint.organizationId)) {
           const version = authVersion.current
+          const revision = profileRevision.current
           void apiRequest<{ user: AuthUser }>('/profile').then(result => {
-            if (version === authVersion.current && userIdRef.current === result.user.id) setUser(result.user)
+            if (version === authVersion.current && revision === profileRevision.current && userIdRef.current === result.user.id) { currentUser.current = result.user; setUser(result.user) }
           }).catch(() => undefined)
         }
       },
@@ -206,9 +223,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', heartbeat) }
   }, [presenceUserId, apiRequest])
 
-  const updateUser = useCallback((nextUser: AuthUser) => setUser(nextUser), [])
+  const updateUser = useCallback((nextUser: AuthUser) => {
+    if (userIdRef.current !== nextUser.id) return
+    profileRevision.current += 1
+    currentUser.current = nextUser
+    setUser(nextUser)
+    void queryClient.invalidateQueries({ predicate: query => ['private-media', 'organization-members', 'member-profile', 'location-directory'].includes(String(query.queryKey[0])) })
+  }, [queryClient])
 
-  return <AuthContext.Provider value={{ user, loading, login, verifyEmail, completeYandex, logout, updateUser, apiRequest, uploadImage, uploadFile, downloadFile, previewFile }}>{children}</AuthContext.Provider>
+  return <AuthContext.Provider value={{ user, loading, startupError, retryStartup, login, verifyEmail, completeYandex, logout, updateUser, apiRequest, uploadImage, uploadFile, downloadFile, previewFile }}>{children}</AuthContext.Provider>
 }
 
 export function useAuth() {
@@ -229,7 +252,9 @@ export function useAuth() {
     uploadFile: <T,>(path: string, file: File) => context.uploadFile<T>(scopePath(path), file),
     uploadImage: <T,>(path: string, file: File) => context.uploadImage<T>(scopePath(path), file),
     downloadFile: (path: string, name: string, method?: 'GET' | 'POST', body?: unknown) => context.downloadFile(scopePath(path), name, method, body),
-    previewFile: (path: string, method?: 'GET' | 'POST') => context.previewFile(scopePath(path), method),
+    previewFile: (path: string, method?: 'GET' | 'POST', signal?: AbortSignal) => context.previewFile(scopePath(path), method, signal),
   }
   }, [context, locationId, organizationId])
 }
+
+export function useMediaSession() { return useContext(AuthContext) }

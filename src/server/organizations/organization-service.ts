@@ -6,11 +6,11 @@ import type { OrganizationRole, Prisma } from '../../generated/prisma/client.ts'
 import { prisma } from '../db.ts'
 import { ApiError } from '../api-error.ts'
 import { assertCanChangeRole, assertCanRemoveMember, getMembership } from './access/permissions.ts'
-import { mediaUrl } from '../storage/image-service.ts'
+import { bindProfileImage, mediaUrl } from '../storage/image-service.ts'
 import { seedSystemRequestTypes } from '../requests/service.ts'
 
 export type CreateOrganizationInput = { name: string; description: string | null; timezone: string; firstLocation?: { name: string; city: string; address: string; timezone: string; teamNames?: string[] }; locations?: Array<{ name: string; city: string; address: string; timezone: string; teamNames?: string[] }> }
-export type UpdateOrganizationInput = Pick<CreateOrganizationInput, 'name' | 'description' | 'timezone'> & { contactEmail: string | null; phone: string | null; website: string | null; address: string | null }
+export type UpdateOrganizationInput = Pick<CreateOrganizationInput, 'name' | 'description' | 'timezone'> & { contactEmail: string | null; phone: string | null; website: string | null; address: string | null; logoUploadId?: string | null }
 
 export async function createOrganization(userId: string, input: CreateOrganizationInput) {
   return prisma.$transaction(async (tx) => {
@@ -81,7 +81,15 @@ export async function getOrganization(userId: string, organizationId: string) {
 export async function updateOrganization(userId: string, organizationId: string, input: UpdateOrganizationInput) {
   const membership = await getMembership(userId, organizationId)
   requirePermission(membership, 'organization.edit', null)
-  return prisma.organization.update({ where: { id: organizationId }, data: input })
+  const { logoUploadId, ...fields } = input
+  return prisma.$transaction(async tx => {
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId},1))::text`
+    requirePermission(await getMembership(userId, organizationId, tx), 'organization.edit', null)
+    await tx.$queryRaw`SELECT id FROM organizations WHERE id=${organizationId}::uuid FOR UPDATE`
+    const current = await tx.organization.findUniqueOrThrow({ where: { id: organizationId }, select: { logoFileId: true } })
+    const logoFileId = logoUploadId === undefined ? current.logoFileId : await bindProfileImage(tx, userId, current.logoFileId, logoUploadId, organizationId)
+    return tx.organization.update({ where: { id: organizationId }, data: { ...fields, logoFileId } })
+  })
 }
 
 export function memberFieldVisible(viewer: Awaited<ReturnType<typeof getMembership>>, member: { role: string; accessConfigured: boolean; accessRoleId: string | null; accessAssignments: Array<{locationId:string}>; locationMemberships:Array<{locationId:string}> }, key: 'members.contacts') {

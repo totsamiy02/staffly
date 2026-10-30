@@ -7,7 +7,7 @@ export const projectRoot = fileURLToPath(new URL('../../', import.meta.url))
 
 /** Generated reports belong outside test sources and never overwrite another run. */
 export async function createArtifactDirectory(kind, override) {
-  if (!['regression', 'load', 'scale', 'edge', 'audit'].includes(kind)) throw new Error('Unknown test artifact kind')
+  if (!['regression', 'load', 'scale', 'edge', 'audit', 'frontend'].includes(kind)) throw new Error('Unknown test artifact kind')
   const now = new Date().toISOString()
   const directory = override ? path.resolve(projectRoot, override)
     : path.join(projectRoot, 'artifacts/tests', now.slice(0, 10), `${kind}-${now.slice(11, 23).replaceAll(':', '-').replace('.', '-')}-${randomUUID().slice(0, 8)}`)

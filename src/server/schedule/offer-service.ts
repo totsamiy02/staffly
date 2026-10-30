@@ -317,4 +317,18 @@ export async function actOnOffer(userId: string, organizationId: string, offerId
   return publicOffer(await prisma.shiftOffer.findUniqueOrThrow({ where: { id: result.id }, include }), actor)
 }
 
-export async function maintainShiftOffers(shouldContinue=()=>true){const locations=await prisma.organizationLocation.findMany({where:{archivedAt:null,organization:{deletedAt:null}},select:{id:true,organizationId:true}});for(const l of locations){if(!shouldContinue())return;await transaction(l.organizationId,tx=>reconcile(tx,l.organizationId,l.id))}}
+export async function maintainShiftOffers(shouldContinue=()=>true) {
+  const organizations=await prisma.organization.findMany({where:{deletedAt:null},select:{id:true}})
+  for(const organization of organizations) {
+    if(!shouldContinue())return
+    await transaction(organization.id,async tx=>{
+      const budget=await tx.organizationResourceBudget.findUniqueOrThrow({where:{organizationId:organization.id}})
+      const pending=await tx.shiftOffer.findMany({where:{organizationId:organization.id,location:{archivedAt:null},status:{in:[...active]},...(budget.offerCheckCursor?{id:{gt:budget.offerCheckCursor}}:{})},orderBy:{id:'asc'},take:100})
+      for(const offer of pending) {
+        try { await validateOffer(tx,offer) }
+        catch(error) { if(!(error instanceof ApiError))throw error;await closeOffer(tx,offer,error.code==='SHIFT_STARTED'?'EXPIRED':'INVALID',error.message) }
+      }
+      await tx.organizationResourceBudget.update({where:{organizationId:organization.id},data:{offerCheckCursor:pending.length===100?pending.at(-1)!.id:null}})
+    })
+  }
+}

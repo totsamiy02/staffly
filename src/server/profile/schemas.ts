@@ -22,6 +22,7 @@ export const russianPhone = z.union([z.string(), z.null()]).transform((value, co
 })
 
 export const updateProfileBody = z.object({
+  avatarUploadId: z.uuid().nullable().optional(),
   firstName: optionalText(personalName),
   lastName: optionalText(personalName),
   middleName: optionalText(personalName),

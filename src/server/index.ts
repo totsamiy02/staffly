@@ -64,7 +64,7 @@ app.use('/api', (request, response, next) => {
     }
     const contentLength = Number(request.get('content-length') ?? 0)
     const hasBody = contentLength > 0 || Boolean(request.get('transfer-encoding'))
-    const imageUpload = request.method === 'PUT' && (/^\/profile\/avatar$/.test(request.path) || /^\/organizations\/[0-9a-f-]+\/logo$/.test(request.path))
+    const imageUpload = request.method === 'PUT' && (/^\/profile\/avatar(?:\/stage)?$/.test(request.path) || /^\/organizations\/[0-9a-f-]+\/logo(?:\/stage)?$/.test(request.path))
     const requestAttachment = request.method === 'PUT' && /^\/organizations\/[0-9a-f-]+\/requests\/[0-9a-f-]+\/attachments$/.test(request.path)
     const documentUpload = request.method === 'PUT' && /^\/organizations\/[0-9a-f-]+\/documents$/.test(request.path)
     const acceptedDocument = documentUpload && Boolean(request.is(Object.values(documentMimeTypes)))

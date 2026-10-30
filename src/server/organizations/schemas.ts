@@ -27,6 +27,7 @@ export const createOrganizationBody = z.object({
   timezone: z.enum(RUSSIAN_TIMEZONE_VALUES, { error: 'Выберите российский часовой пояс.' }),
 })
 export const updateOrganizationBody = z.object({
+  logoUploadId: z.uuid().nullable().optional(),
   name: z.string().trim().min(2).max(120),
   description: z.union([z.string().trim().max(1000), z.null()]).transform((value) => value || null),
   timezone: z.enum(RUSSIAN_TIMEZONE_VALUES, { error: 'Выберите российский часовой пояс.' }),

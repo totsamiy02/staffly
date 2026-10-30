@@ -14,7 +14,7 @@ import { useOffers, useOfferSettings } from '../../../../app/schedule/offers.ts'
 import Select from '../../../../component/ui/select/select.tsx'
 import ScheduleAgenda from './schedule-agenda.tsx'
 import ScheduleHistory from './schedule-history.tsx'
-import { RequestForm } from '../../requests/requests-page.tsx'
+import { lazy, Suspense } from 'react'
 import { useToast } from '../../../../component/ui/toast/toast-context.ts'
 import { absenceNames } from '../../../../app/schedule/absence-format.ts'
 import AbsencePanel from '../absences/absence-panel.tsx'
@@ -36,10 +36,11 @@ import ModuleIcon from '../../../../component/ui/module-icon.tsx'
 import '../schedule.scss'
 import '../schedule-redesign.scss'
 
+const RequestForm = lazy(() => import('../../requests/requests-page.tsx').then(module => ({ default: module.RequestForm })))
+
 const weekDays = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
 const shiftPlural = new Intl.PluralRules('ru')
 const shiftWords = { one: 'смена', few: 'смены', many: 'смен', other: 'смен', zero: 'смен', two: 'смены' }
-
 
 export default function SchedulePage({ organization, historyMode = false }: { organization: OrganizationSummary; historyMode?: boolean }) {
   const [previewTab,setPreviewTab] = useState<'staff'|'demand'>('staff')
@@ -121,7 +122,6 @@ export default function SchedulePage({ organization, historyMode = false }: { or
     setSearchParams((current) => { const next = new URLSearchParams(current); next.delete('shift'); return next }, { replace: true })
   }, [organization.timezone, schedule.data, schedule.isPlaceholderData, searchParams, setSearchParams, linkedDetails.data])
 
-
   useLayoutEffect(() => {
     const nextMonth = searchParams.get('month')
     if (nextMonth && /^\d{4}-(?:0[1-9]|1[0-2])$/.test(nextMonth)) setMonth(nextMonth)
@@ -135,7 +135,6 @@ export default function SchedulePage({ organization, historyMode = false }: { or
     }, 60_000)
     return () => window.clearInterval(timer)
   }, [currentMonth, month, organization.timezone])
-
 
   function moveCalendarFocus(event: KeyboardEvent<HTMLButtonElement>, index: number) {
     const delta = event.key === 'ArrowLeft' ? -1 : event.key === 'ArrowRight' ? 1 : event.key === 'ArrowUp' ? -7 : event.key === 'ArrowDown' ? 7 : null
@@ -198,7 +197,6 @@ export default function SchedulePage({ organization, historyMode = false }: { or
         {coverageEnabled && <section className="schedule-display-coverage"><label className="schedule-display-row"><span><strong>Показывать потребность</strong><small>Отметки покрытия на календаре</small></span><button type="button" className="planning-toggle" role="switch" aria-checked={showCoverage} aria-label="Показывать потребность" onClick={() => setShowCoverage(value => !value)}><i /></button></label><div className="schedule-display-key"><span><i className="demand-dot is-short" />Не хватает сотрудников</span><span><i className="demand-dot is-covered" />Потребность закрыта</span><span><i className="demand-dot is-extra" />Работают сверх потребности</span></div><p>Нажмите дату и откройте «Потребность», чтобы посмотреть должности и время.</p>{canAccess(organization, 'coverage.manage') && <Link to={`/app/organizations/${organization.id}/schedule/demand?location=${organization.locationId}`}>Изменить потребность</Link>}</section>}
       </DocumentActionsMenu></div>
 
-
     <AsyncPanel pending={schedule.isLoading || schedule.isPlaceholderData} identity={`${month}:${calendarView}`} minHeight={630} label="Загружаем расписание" pendingContent={calendarView === 'month' || calendarView === 'week' ? <div className="schedule-calendar-skeleton" aria-hidden="true">{weekDays.map(day => <span key={day}>{day}</span>)}{displayedDays.map(day => <div key={day}><i /><i /><i /></div>)}</div> : undefined}>{schedule.isLoading ? <div className="schedule-state"><span className="app-spinner" />Загружаем расписание…</div> : schedule.isError ? <div className="schedule-state"><strong>Не удалось загрузить расписание</strong><p>{schedule.error instanceof Error ? schedule.error.message : 'Попробуйте ещё раз.'}</p><button className="app-secondary" onClick={() => void schedule.refetch()}>Повторить</button></div> : <>
       <div className="schedule-workspace"><div className="schedule-workspace__main" data-view={calendarView}>{calendarView === 'day' || calendarView === 'list' ? <ScheduleAgenda days={calendarView === 'day' ? [previewDate] : range.days.filter(day => day.startsWith(month))} shifts={visibleShifts} timezone={organization.timezone} timeline={calendarView === 'day'} onShift={(day, shift) => { setPreviewDate(day); chooseDay(day); setFocusedShiftId(shift.id) }} /> : <div className={`schedule-calendar-wrap${schedule.isPlaceholderData ? ' is-updating' : ''}`} ref={calendarRef} style={{ '--calendar-weeks': displayedDays.length / 7 } as CSSProperties} aria-busy={schedule.isPlaceholderData}>
         <div className={`schedule-calendar${coverageEnabled && showCoverage ? ' schedule-calendar--coverage' : ''}`} role="group" aria-label={`Календарь: ${formatMonth(month)}`}>
@@ -228,7 +226,7 @@ export default function SchedulePage({ organization, historyMode = false }: { or
         </div><span className="schedule-calendar-loading">Обновляем месяц…</span>
       </div>}</div><aside className="schedule-day-preview" aria-label="Смены выбранного дня"><header><h2>{displayDate(previewDate)}</h2><span>Смен: {previewShifts.length} · {organization.location?.name}</span></header>{schedule.isPlaceholderData ? <p className="schedule-preview-empty">Обновляем смены…</p> : <>{coverageEnabled&&showCoverage&&<div className="schedule-preview-tabs"><button aria-pressed={previewTab==='staff'} onClick={()=>setPreviewTab('staff')}>Смены · {previewShifts.length}</button><button aria-pressed={previewTab==='demand'} onClick={()=>setPreviewTab('demand')}>Потребность</button></div>}<div className="schedule-preview-body">{coverageEnabled&&showCoverage&&previewTab==='demand'?<CoveragePanel day={coverage.data?.days.find(d=>d.date===previewDate)} timezone={organization.timezone} loading={coverage.isLoading} error={coverage.error?.message}/>:<div className="schedule-preview-list">{previewShifts.map(shift => { const state = shiftState(shift); return <ActionSurface aria-label={`Открыть смену ${shift.memberName}`} className={`schedule-preview-shift schedule-preview-shift--${state.key}`} key={shift.id} onClick={() => openPreview(shift)}><strong>{shiftTimeRange(shift.scheduledStartAt, shift.scheduledEndAt, organization.timezone)}</strong><span className="schedule-preview-person"><MemberAvatar memberId={shift.memberId} url={shift.memberAvatarUrl} name={shift.memberName} className="app-avatar" /><span><MemberProfileLink memberId={shift.memberId}><strong>{shift.memberName}</strong></MemberProfileLink><small>{shift.positionName ?? 'Без должности'} · {formatDuration(shift.effectiveMinutes)}</small></span></span><small>{state.label}{shift.memberId === ownMemberId ? ' · ваша смена' : ''}</small>{(shift.actualStartAt || shift.actualEndAt || shift.attendance === 'NO_SHOW') && <small>Учтено: {accountedTimeLabel(shift, organization.timezone)}</small>}<TimeCorrectionAction shift={shift} />{shift.activeOffer && <small className="offer-calendar-badge">{shift.activeOffer.status === 'AWAITING_APPROVAL' ? 'На согласовании' : shift.activeOffer.kind === 'SWAP' ? 'Предложен обмен' : 'Предложена передача'}</small>}</ActionSurface> })}{previewAbsences.map(absence => <ActionSurface aria-label={`Открыть отсутствие ${absence.memberName}`} key={absence.id} className="schedule-preview-absence" onClick={() => openPreview()}><MemberProfileLink memberId={absence.memberId}><strong>{absence.memberName}</strong></MemberProfileLink><span>{absenceNames[absence.type]}</span></ActionSurface>)}{!previewShifts.length && !previewAbsences.length && <p className="schedule-preview-empty">На этот день смен и отсутствий нет.</p>}</div>}</div><footer><button className="app-secondary" onClick={() => openPreview()}>Подробнее о дне </button></footer></>}</aside></div>
       <p className="schedule-mobile-hint">Нажмите дату, чтобы увидеть сотрудников и потребность. Ваши смены выделены фоном.</p>
-      <div className="schedule-legend"><span><i className="future" />Запланирована</span><span><i className="active" />Идёт сейчас</span><span><i className="completed" />Завершена</span><span className="schedule-legend__mine"><i />Мои смены · светлый фон</span><small>Часовой пояс: {organization.timezone}</small></div>
+      <div className="schedule-legend"><span><i className="future" />Запланирована</span><span><i className="active" />Идёт сейчас</span><span><i className="completed" />Завершена</span><span className="schedule-legend__mine"><i />Мои смены</span><small>Часовой пояс: {organization.timezone}</small></div>
       {!monthHasShifts && <div className="schedule-empty"><h3>{shiftView === 'mine' ? 'У вас нет смен в этом месяце' : historyMode ? 'За этот месяц истории смен нет' : 'На этот месяц смен пока нет'}</h3><p>{shiftView === 'mine' ? 'Переключитесь на все смены или выберите другой месяц.' : historyMode ? 'Выберите другой месяц, чтобы посмотреть отменённые смены.' : canManage ? 'Выберите день и нажмите «Добавить смену», чтобы составить график.' : 'Когда администратор составит график, смены появятся здесь.'}</p></div>}
     </>}</AsyncPanel>
 
@@ -236,7 +234,7 @@ export default function SchedulePage({ organization, historyMode = false }: { or
 
     {offersOpen && <ShiftOffersPanel organization={organization} offerId={searchParams.get('offer')} onOffer={id => openOffer(id)} onClose={closeOffers} />}
     {offeringShift && <ShiftOfferForm organization={organization} shift={offeringShift} onClose={() => setOfferingShift(null)} onCreated={id => openOffer(id)} />}
-    {dayOffShift && <AnimatedOverlay variant="modal" onClose={() => setDayOffShift(null)}>{close => <RequestForm organization={organization} initialSystemCode="DAY_OFF" initialShiftId={dayOffShift.id} onClose={close} />}</AnimatedOverlay>}
+    {dayOffShift && <AnimatedOverlay variant="modal" onClose={() => setDayOffShift(null)}>{close => <Suspense fallback={<div className="route-loading" role="status">Загрузка формы…</div>}><RequestForm organization={organization} initialSystemCode="DAY_OFF" initialShiftId={dayOffShift.id} onClose={close} /></Suspense>}</AnimatedOverlay>}
     {selectedDate && !adding && !editing && !offersOpen && !offeringShift && !searchParams.has('absences') && <AnimatedOverlay variant="modal" className="day-schedule-overlay" onClose={() => { setSelectedDate(null); setFocusedShiftId(null); setLinkedShift(null); if (returnToRequest) navigate(returnToRequest, { replace: true }) }}>{close => <DaySchedulePanel
       key={selectedDate}
       date={selectedDate}
@@ -272,7 +270,6 @@ export default function SchedulePage({ organization, historyMode = false }: { or
         </>
       }}
     />}</AnimatedOverlay>}
-
 
     {(adding || editing) && selectedDate && <ShiftFormModal organization={organization} members={members.data?.members ?? []} date={selectedDate} shift={editing} onClose={() => { setAdding(false); setEditing(null); setSelectedDate(null); if (returnToRequest) navigate(returnToRequest, { replace: true }) }} />}
     {cancelling && <AnimatedOverlay variant="modal" onClose={() => { setCancelling(null); setCancelReason('') }}>{(close) => <div className="cancel-shift-modal"><p className="app-eyebrow">Отмена смены</p><h2>Отменить смену {cancelling.memberName}?</h2><p>Смена останется в истории и перестанет учитываться в рабочем времени.</p><label><span>Причина отмены</span><textarea value={cancelReason} onChange={(event) => setCancelReason(event.target.value)} maxLength={500} rows={3} autoFocus /></label>{actionError && <p className="form-inline-error">{actionError}</p>}<footer><button className="app-secondary" disabled={busy} onClick={close}>Назад</button><button className="app-danger" disabled={busy || cancelReason.trim().length < 3} onClick={() => void cancel(close)}>{busy ? 'Отменяем…' : 'Отменить смену'}</button></footer></div>}</AnimatedOverlay>}

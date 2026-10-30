@@ -1,19 +1,18 @@
+import { calendarKey as iso, parseCalendarDate as parse, calendarDate, browserToday } from './calendar-date.ts'
 import { createPortal } from 'react-dom'
 import { formatTimeEntry } from './time-format'
 import { useEffect, useLayoutEffect, useId, useRef, useState, type InputHTMLAttributes, type CSSProperties, type ChangeEvent, type KeyboardEvent } from 'react'
 
 type Props = InputHTMLAttributes<HTMLInputElement>
-const iso = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
-const parse = (value: string) => new Date(`${value}T12:00:00`)
-const firstOfMonth = (date: Date) => new Date(date.getFullYear(), date.getMonth(), 1)
+const firstOfMonth = (date: Date) => calendarDate(date.getUTCFullYear(), date.getUTCMonth(), 1)
 
 export default function DatePicker({ value, onChange, min, max, disabled, readOnly, required, id, ...props }: Props) {
   const text = String(value ?? '')
-  const [month, setMonth] = useState(firstOfMonth(text ? parse(text) : new Date()))
+  const [month, setMonth] = useState(firstOfMonth(parse(text || browserToday())))
   const [open, setOpen] = useState(false)
   const [label, setLabel] = useState('')
   const [invalid, setInvalid] = useState(false)
-  const [focusedDay, setFocusedDay] = useState(text || iso(new Date()))
+  const [focusedDay, setFocusedDay] = useState(text || browserToday())
   const pendingFocus = useRef<string | null>(null)
   const host = useRef<HTMLDivElement>(null)
   const popup = useRef<HTMLDivElement>(null)
@@ -59,7 +58,7 @@ export default function DatePicker({ value, onChange, min, max, disabled, readOn
   function openCalendar() {
     if (readOnly || disabled) return
     document.dispatchEvent(new CustomEvent('staffly:popover-open', { detail: panelId }))
-    let day = text || iso(new Date())
+    let day = text || browserToday()
     if (min && day < String(min)) day = String(min)
     if (max && day > String(max)) day = String(max)
     setFocusedDay(day)
@@ -77,46 +76,46 @@ export default function DatePicker({ value, onChange, min, max, disabled, readOn
   }
   function moveFocus(event: KeyboardEvent, day: string) {
     const date = parse(day)
-    const weekday = (date.getDay() + 6) % 7
+    const weekday = (date.getUTCDay() + 6) % 7
     const delta = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7, Home: -weekday, End: 6 - weekday }[event.key]
     if (delta === undefined && !['PageUp', 'PageDown'].includes(event.key)) return
     event.preventDefault()
-    if (delta !== undefined) date.setDate(date.getDate() + delta)
+    if (delta !== undefined) date.setUTCDate(date.getUTCDate() + delta)
     else {
-      const originalDay = date.getDate()
-      date.setDate(1)
-      date.setMonth(date.getMonth() + (event.key === 'PageUp' ? -1 : 1))
-      date.setDate(Math.min(originalDay, new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate()))
+      const originalDay = date.getUTCDate()
+      date.setUTCDate(1)
+      date.setUTCMonth(date.getUTCMonth() + (event.key === 'PageUp' ? -1 : 1))
+      date.setUTCDate(Math.min(originalDay, calendarDate(date.getUTCFullYear(), date.getUTCMonth() + 1, 0).getUTCDate()))
     }
     const next = iso(date)
     if (!allowed(next)) return
     setFocusedDay(next)
-    if (date.getMonth() !== month.getMonth() || date.getFullYear() !== month.getFullYear()) {
+    if (date.getUTCMonth() !== month.getUTCMonth() || date.getUTCFullYear() !== month.getUTCFullYear()) {
       pendingFocus.current = next
       setMonth(firstOfMonth(date))
-    } else host.current?.querySelector<HTMLButtonElement>(`[data-date="${next}"]`)?.focus()
+    } else popup.current?.querySelector<HTMLButtonElement>(`[data-date="${next}"]`)?.focus()
   }
   function moveMonth(delta: number) {
-    const next = new Date(month.getFullYear(), month.getMonth() + delta, 1)
+    const next = calendarDate(month.getUTCFullYear(), month.getUTCMonth() + delta, 1)
     setMonth(next)
     const day = min && iso(next) < String(min) ? String(min) : iso(next)
     setFocusedDay(day)
   }
-  const offset = (month.getDay() + 6) % 7
-  const count = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate()
+  const offset = (month.getUTCDay() + 6) % 7
+  const count = calendarDate(month.getUTCFullYear(), month.getUTCMonth() + 1, 0).getUTCDate()
   return <div className="staffly-date" ref={host} onBlur={event => { if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget) && !popup.current?.contains(event.relatedTarget)) setOpen(false) }} onKeyDown={event => {
     if (event.key === 'Tab' && open && popup.current?.contains(event.target as Node)) { event.preventDefault(); event.stopPropagation(); setOpen(false); trigger.current?.focus() }
     if (event.key === 'Escape' && open) { event.stopPropagation(); setOpen(false); trigger.current?.focus() }
   }}>
     <input {...props} type="text" value={text} onChange={() => undefined} disabled={disabled} required={required && !readOnly} tabIndex={-1} aria-hidden="true" onFocus={() => trigger.current?.focus()} className="staffly-select__validation" onInvalid={event => { event.preventDefault(); setInvalid(true); openCalendar() }} />
     <button id={id} ref={trigger} type="button" className={`staffly-control${text ? '' : ' is-placeholder'}`} disabled={disabled} aria-label={props['aria-label'] ?? (label || 'Дата')} aria-labelledby={props['aria-labelledby']} aria-describedby={props['aria-describedby']} aria-haspopup="dialog" aria-expanded={open} aria-controls={panelId} aria-required={required} aria-invalid={props['aria-invalid'] ?? invalid} aria-readonly={readOnly} onClick={event => { event.preventDefault(); event.stopPropagation(); if (open) setOpen(false); else openCalendar() }}>
-      {text ? parse(text).toLocaleDateString('ru-RU') : 'Выберите дату'}<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 5h12v12H4zM7 3v4m6-4v4M4 9h12" /></svg>
+      {text ? parse(text).toLocaleDateString('ru-RU', { timeZone: 'UTC' }) : 'Выберите дату'}<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 5h12v12H4zM7 3v4m6-4v4M4 9h12" /></svg>
     </button>
     {open && createPortal(<div ref={popup} style={popupStyle} id={panelId} role="dialog" aria-label="Выбор даты" className="staffly-calendar staffly-calendar--floating">
-      <header><button type="button" aria-label="Предыдущий месяц" disabled={!!min && iso(new Date(month.getFullYear(), month.getMonth(), 0)) < String(min)} onClick={() => moveMonth(-1)}>‹</button><strong aria-live="polite">{month.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })}</strong><button type="button" aria-label="Следующий месяц" disabled={!!max && iso(new Date(month.getFullYear(), month.getMonth() + 1, 1)) > String(max)} onClick={() => moveMonth(1)}>›</button></header>
+      <header><button type="button" aria-label="Предыдущий месяц" disabled={!!min && iso(calendarDate(month.getUTCFullYear(), month.getUTCMonth(), 0)) < String(min)} onClick={() => moveMonth(-1)}>‹</button><strong aria-live="polite">{month.toLocaleDateString('ru-RU', { timeZone: 'UTC', month: 'long', year: 'numeric' })}</strong><button type="button" aria-label="Следующий месяц" disabled={!!max && iso(calendarDate(month.getUTCFullYear(), month.getUTCMonth() + 1, 1)) > String(max)} onClick={() => moveMonth(1)}>›</button></header>
       <div className="staffly-calendar__days">{['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map(day => <span key={day}>{day}</span>)}{Array.from({ length: offset }, (_, index) => <span key={`empty-${index}`} />)}{Array.from({ length: count }, (_, index) => {
-        const day = iso(new Date(month.getFullYear(), month.getMonth(), index + 1))
-        return <button type="button" key={day} disabled={!allowed(day)} tabIndex={focusedDay === day ? 0 : -1} aria-label={parse(day).toLocaleDateString('ru-RU', { dateStyle: 'full' })} aria-pressed={text === day} onFocus={() => setFocusedDay(day)} onClick={() => choose(day)} onKeyDown={event => moveFocus(event, day)} data-date={day}>{index + 1}</button>
+        const day = iso(calendarDate(month.getUTCFullYear(), month.getUTCMonth(), index + 1))
+        return <button type="button" key={day} disabled={!allowed(day)} tabIndex={focusedDay === day ? 0 : -1} aria-label={parse(day).toLocaleDateString('ru-RU', { timeZone: 'UTC', dateStyle: 'full' })} aria-pressed={text === day} onFocus={() => setFocusedDay(day)} onClick={() => choose(day)} onKeyDown={event => moveFocus(event, day)} data-date={day}>{index + 1}</button>
       })}</div>
       {!required && text && <button type="button" className="staffly-calendar__clear" onClick={() => choose('')}>Очистить дату</button>}
     </div>, document.body)}

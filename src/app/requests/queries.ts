@@ -1,12 +1,12 @@
 import { liveQueryOptions } from '../live-query.ts'
 import { useQuery } from '@tanstack/react-query'
 import { useAuth } from '../auth/auth-context.tsx'
-import type { RequestDetail, RequestList, RequestStatus, RequestType } from './types.ts'
+import type { RequestDetail, RequestList, RequestStatus, RequestTypesResponse } from './types.ts'
 import type { OrganizationRole } from '../organizations/types.ts'
 
 export function useRequestTypes(organizationId: string, includeInactive = false) {
   const { locationId, apiRequest } = useAuth()
-  return useQuery({ ...liveQueryOptions, queryKey: ['request-types', organizationId, includeInactive, locationId], queryFn: () => apiRequest<{ types: RequestType[] }>(`/organizations/${organizationId}/request-types${includeInactive ? '?includeInactive=true' : ''}`) })
+  return useQuery({ ...liveQueryOptions, queryKey: ['request-types', organizationId, includeInactive, locationId], queryFn: () => apiRequest<RequestTypesResponse>(`/organizations/${organizationId}/request-types${includeInactive ? '?includeInactive=true' : ''}`) })
 }
 
 export function useRequests(organizationId: string, scope: 'mine' | 'incoming' | 'history' | 'staffing', filters: { pointId?: string; page: number; status?: RequestStatus; typeId?: string; memberId?: string; role?: OrganizationRole; roleId?:string; from?: string; to?: string; search?: string }) {

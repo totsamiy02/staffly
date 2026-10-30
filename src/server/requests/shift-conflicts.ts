@@ -1,6 +1,7 @@
-import { locationWhere } from '../organizations/location-context.ts'
 import type { Prisma } from '../../generated/prisma/client.ts'
 import { prisma } from '../db.ts'
+import { locationWhere } from '../organizations/location-context.ts'
+import { markRequestNoticesRead,publishRequestNotices } from './request-notifications.ts'
 
 export async function lockShift(tx: Prisma.TransactionClient, shiftId: string) {
   await tx.$queryRaw`SELECT id FROM work_shifts WHERE id = ${shiftId}::uuid FOR UPDATE`
@@ -12,9 +13,9 @@ async function cancelProposal(tx: Prisma.TransactionClient, request: { id: strin
   const changed = await tx.organizationRequest.updateMany({ where: { id: request.id, status: 'PENDING', updatedAt: request.updatedAt }, data: { status, cancelledAt: now, resolutionComment: reason } })
   if (!changed.count) return
   await tx.requestEvent.create({ data: { requestId: request.id, actorMemberId: actorMemberId ?? request.createdByMemberId, type: status, comment: reason,changes:{automatic:true,before:{status:'PENDING'},after:{status}} } })
-  await tx.accountNotification.updateMany({ where: { requestId: request.id, type: 'REQUEST_CREATED', readAt: null }, data: { readAt: now } })
+  await markRequestNoticesRead(tx, { requestId: request.id, type: 'REQUEST_CREATED', readAt: null }, now)
   const creator = await tx.organizationMember.findUniqueOrThrow({ where: { id: request.createdByMemberId }, select: { userId: true } })
-  await tx.accountNotification.create({ data: { userId: creator.userId, organizationId: request.organizationId, requestId: request.id, type: 'REQUEST_CANCELLED', title: 'Заявка автоматически отменена', message: reason } })
+  await publishRequestNotices(tx, [{ userId: creator.userId, organizationId: request.organizationId, requestId: request.id, type: 'REQUEST_CANCELLED', title: 'Заявка автоматически отменена', message: reason }])
 }
 
 // Same transaction as the schedule mutation: snapshots and event history remain intact.
@@ -35,19 +36,22 @@ function invalidReason(request: Proposal) {
 }
 
 // Catch expiry/legacy changes on reads. Valid proposals need neither row locks nor N+1 queries.
-export async function reconcileShiftRequests(organizationId: string) {
+export async function reconcileShiftRequests(organizationId: string, bounded = false) {
   const where = { organizationId, ...locationWhere(organizationId), status: 'PENDING' as const, systemCodeSnapshot: 'SHIFT_CHANGE' as const }
-  const pending = await prisma.organizationRequest.findMany({ where, include: { relatedShift: true } })
+  const budget = bounded ? await prisma.organizationResourceBudget.findUniqueOrThrow({where:{organizationId}}) : null
+  const pending = await prisma.organizationRequest.findMany({ where: {...where,...(budget?.requestCheckCursor?{id:{gt:budget.requestCheckCursor}}:{})}, include: { relatedShift: true }, ...(bounded?{orderBy:{id:'asc' as const},take:100}:{}) })
+  const advance = () => bounded ? prisma.organizationResourceBudget.update({where:{organizationId},data:{requestCheckCursor:pending.length===100?pending.at(-1)!.id:null}}) : Promise.resolve()
   const shiftIds = [...new Set(pending.filter(request => invalidReason(request)).map(request => request.relatedShiftId))].sort()
-  if (!shiftIds.length) return
+  if (!shiftIds.length) { await advance(); return }
   await prisma.$transaction(async tx => {
     for (const shiftId of shiftIds) {
       if (shiftId) await lockShift(tx, shiftId)
-      const requests = await tx.organizationRequest.findMany({ where: { ...where, relatedShiftId: shiftId }, include: { relatedShift: true } })
+      const requests = await tx.organizationRequest.findMany({ where: { ...where, relatedShiftId: shiftId, ...(bounded?{id:{in:pending.map(r=>r.id)}}:{}) }, include: { relatedShift: true } })
       for (const request of requests) {
         const reason = invalidReason(request)
         if (reason) await cancelProposal(tx, request, null, reason)
       }
     }
   })
+  await advance()
 }

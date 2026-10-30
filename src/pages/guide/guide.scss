@@ -87,7 +87,7 @@
   > span:first-child { color: var(--theme-accent,#075ed8); padding: 6px 9px; background: var(--theme-accent-bg,#eaf3ff); border-radius: 6px; font-weight: 500; }
   button { display: flex; align-items: center; gap: 5px; margin-left: auto; min-height: 32px; font-size: 10px; color: var(--theme-accent,#3266ad); svg { width: 13px; height: 13px; } &:hover { color: var(--guide-blue); } }
 }
-.guide-article-section { margin-top: 30px; padding-top: 30px; border-top: 1px solid var(--theme-accent-border,#e9eef6); scroll-margin-top: 24px;
+.guide-article-section { margin-top: 30px; padding-top: 30px; border-top: 1px solid var(--theme-accent-border,#e9eef6); scroll-margin-top: calc(var(--guide-header-height,92px) + 24px);
   &:first-of-type { border-top: 0; padding-top: 0; }
   > h2 { display: flex; align-items: center; gap: 13px; margin-bottom: 20px; color: var(--theme-accent,#13233d); font-size: 22px; font-weight: 650; letter-spacing: -.03em; line-height: 1.35; a:hover { color: var(--theme-accent,#0866ff); } }
   > p { color: var(--theme-accent,#445a78); font-size: 14px; line-height: 1.9; overflow-wrap: anywhere; } > p + p { margin-top: 15px; }
@@ -155,3 +155,10 @@
 }
 @media (pointer: coarse) { .guide-page:is(button, summary) { min-height: 44px; } .guide-audience summary { margin-block: -10px; } }
 @media (prefers-reduced-motion: reduce) { .guide-page *, .guide-page *::before, .guide-page *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; } }
+
+@media(max-width:600px) {
+  .guide-page .site-header__inner {width:100%;gap:12px;}
+  .guide-page .site-header__brand img {width:100px;}
+  .guide-page .site-header__actions {gap:8px;}
+  .guide-page .site-header__actions>.app-secondary {min-height:42px;padding:8px 10px;gap:6px;font-size:12px;}
+}

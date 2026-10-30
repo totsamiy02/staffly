@@ -16,6 +16,7 @@
   >header {display:flex;align-items:flex-start;justify-content:space-between;gap:16px;>div{min-width:0;}h2{font-size:20px;line-height:1.35;overflow-wrap:anywhere;}>button{display:grid;place-items:center;flex:0 0 40px;width:40px;height:40px;border-radius:9px;color:var(--theme-muted,#777);cursor:pointer;font-size:24px;&:hover{background:var(--theme-surface-muted,#f3f4f6);color:var(--theme-text-strong,#111);}}}
 }
 .document-dialog__description {margin-top:7px;color:var(--theme-muted,#777b85);font-size:12px;line-height:1.5;}
+.request-modal.document-dialog > footer > :is(.app-primary,.app-secondary,.app-danger) {min-height:44px;padding:10px 18px;border-radius:9px;font-size:13px;line-height:1.4;}
 .request-modal.document-dialog--scroll {
   display:flex;flex-direction:column;padding:0;overflow:hidden;
   >header {flex:none;margin:0;padding:24px;border-bottom:1px solid var(--theme-border,#e8e9ec);}

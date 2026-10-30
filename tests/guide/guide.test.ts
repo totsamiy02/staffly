@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { guideChapters } from '../../src/pages/guide/content/chapters.ts'
 import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
@@ -57,6 +58,17 @@ test('five public themes cover every source topic once and preserve valid shortc
       const article = guideArticleBySlug.get(slug)
       assert.ok(article && collection.categories.includes(article.category), `${collection.id}: ${slug}`)
     }
+  }
+})
+
+test('module chapters cover every instruction exactly once and keep navigation targets valid', () => {
+  for (const collection of guideCollections) {
+    const articles = guideArticles.filter(article => collection.categories.includes(article.category))
+    const chapters = guideChapters(collection.id, articles), slugs = chapters.flatMap(chapter => chapter.slugs)
+    assert.ok(chapters.length >= 2 && chapters.length <= 4)
+    assert.equal(new Set(slugs).size, slugs.length)
+    assert.deepEqual(slugs.toSorted(), articles.map(article => article.slug).toSorted())
+    for (const slug of slugs) assert.ok(guideArticleBySlug.has(slug))
   }
 })
 

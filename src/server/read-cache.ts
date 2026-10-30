@@ -8,6 +8,13 @@ export class ReadCache {
   invalidate(organizationId?: string) {
     for (const [key, entry] of this.entries) if (!organizationId || entry.organizationId === organizationId) this.remove(key, entry)
   }
+  invalidateForHint(hint: { topic: string; organizationId?: string }) {
+    // Only calendar source data is cached. Request approval changes shifts or
+    // absences in the same transaction and emits its own schedule hint. Personal
+    // notifications and export completion must not evict every calendar.
+    if (['requests', 'requests-mine', 'requests-review', 'notifications', 'exports', 'documents', 'events'].includes(hint.topic)) return
+    this.invalidate(hint.organizationId)
+  }
   private remove(key: string, entry: Entry) { if (this.entries.delete(key)) this.bytes -= entry.bytes }
   async read<T>(organizationId: string, key: string, load: () => Promise<T>): Promise<T> {
     const cached = this.entries.get(key)

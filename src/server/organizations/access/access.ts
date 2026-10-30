@@ -47,9 +47,16 @@ export function resolveAccess(member: { role: 'OWNER'|'ADMIN'|'MEMBER'; accessCo
 export async function auditAccess(db: DB, actor: { id: string; organizationId: string }, action: string, details: Prisma.InputJsonValue) {
   await db.accessAudit.create({ data: { organizationId: actor.organizationId, actorMemberId: actor.id, action, details } })
 }
-export async function permissionRecipients(db: DB, organizationId: string, key: Permission, locationId?: string) {
-  const members = await db.organizationMember.findMany({ where: { organizationId, leftAt: null, user: { deletedAt: null } }, include: { _count: {select:{locationMemberships:true}}, locationMemberships: { where: { leftAt: null } }, accessAssignments: true } })
+export async function loadPermissionMembers(db: DB, organizationId: string) {
+  const members = await db.organizationMember.findMany({ where: { organizationId, leftAt: null, user: { deletedAt: null }, organization: { deletedAt: null } }, include: { _count: {select:{locationMemberships:true}}, locationMemberships: { where: { leftAt: null } }, accessAssignments: true } })
   const roles = await ensureAccessRoles(db, organizationId), locations = await db.organizationLocation.findMany({ where: { organizationId, archivedAt: null }, select: { id: true } })
-  return members.filter(m => { const access = resolveAccess(m, roles, locations.map(l => l.id)); return locationId ? access.permissionLocations[key]?.includes(locationId) : access.permissions.includes(key) }).map(m => ({ userId: m.userId, id: m.id }))
+  const locationIds = locations.map(l => l.id)
+  return { organizationId, roles, members: members.map(member => ({ ...member, ...resolveAccess(member, roles, locationIds) })) }
+}
+export async function permissionRecipients(db: DB, organizationId: string, key: Permission, locationId?: string) {
+  return permissionRecipientsFromContext(await loadPermissionMembers(db, organizationId), key, locationId)
+}
+export function permissionRecipientsFromContext({ members }: Awaited<ReturnType<typeof loadPermissionMembers>>, key: Permission, locationId?: string) {
+  return members.filter(m => locationId ? m.permissionLocations[key]?.includes(locationId) : m.permissions.includes(key)).map(m => ({ userId: m.userId, id: m.id }))
 }
 export { permissionCatalog, permissionKeys, recommendedPermissions }

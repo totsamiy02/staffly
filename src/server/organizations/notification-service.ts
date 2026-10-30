@@ -1,4 +1,4 @@
-import { canReadDraftNotification } from '../schedule/planning/team-planning-service.ts'
+import { notificationPolicy, readableNotificationIds } from '../access/notification-policy.ts'
 import { hasPermission } from './access/access.ts'
 import { Prisma } from '../../generated/prisma/client.ts'
 import { prisma } from '../db.ts'
@@ -32,29 +32,7 @@ export function decodeNotificationCursor(cursor: string | undefined) {
 export async function listNotificationHistory(userId: string, email: string, options: { limit: number; cursor?: string; unread?: boolean; organizationId?: string; locationId?: string; category?: string }) {
   if (options.organizationId) await getMembership(userId, options.organizationId)
   const cursor = decodeNotificationCursor(options.cursor)
-  // Recheck stored notifications against current permissions before pagination AND counts.
-  const candidates = await prisma.accountNotification.findMany({ where: { userId, hiddenAt: null, ...(options.organizationId ? { organizationId: options.organizationId } : {}), organization: { deletedAt: null, members: { some: { userId, leftAt: null } } } }, include: { vacationCampaign:true, request: true, shift: true, absence: { include: { member: { include: { locationMemberships: { where: { leftAt: null } } } } } }, shiftOffer: true } })
-  const actors = new Map<string, Awaited<ReturnType<typeof getMembership>>>()
-  const denied: string[] = []
-  for (const row of candidates) {
-    let actor = actors.get(row.organizationId)
-    if (!actor) { actor = await getMembership(userId, row.organizationId); actors.set(row.organizationId, actor) }
-    let allowed = true
-    if(row.vacationCampaign)allowed=row.vacationCampaign.memberIds.includes(actor.id)&&hasPermission(actor,'requests.own')||hasPermission(actor,'vacations.collect',row.vacationCampaign.locationId)
-    else if (row.scheduleDraftId) allowed = await canReadDraftNotification(userId, row.organizationId, row.scheduleDraftId)
-    else if (row.documentId) {
-      const { getDocument } = await import('../documents/service.ts')
-      try { await getDocument(userId, row.organizationId, row.documentId) } catch (error) { if (!(error instanceof ApiError) || ![403,404].includes(error.status)) throw error; allowed = false }
-    } else if (row.eventId) {
-      const { getEvent } = await import('../events/service.ts')
-      try { await getEvent(userId, row.organizationId, row.eventId) } catch (error) { if (!(error instanceof ApiError) || ![403,404].includes(error.status)) throw error; allowed = false }
-    } else if (row.shiftOffer) allowed = [row.shiftOffer.initiatorMemberId,row.shiftOffer.recipientMemberId,row.shiftOffer.acceptedByMemberId].includes(actor.id) || hasPermission(actor,'offers.approve',row.shiftOffer.locationId) || row.shiftOffer.recipientMemberId === null && hasPermission(actor,'offers.accept',row.shiftOffer.locationId)
-    else if (row.absence) allowed = actor.owner || (row.absence.memberId === actor.id ? actor.permissions.includes('absences.own') : row.absence.member.locationMemberships.length ? row.absence.member.locationMemberships.some(l => hasPermission(actor,'absences.view',l.locationId)) : hasPermission(actor,'absences.view'))
-    else if (row.request && !row.request.systemCodeSnapshot) {const {canReadCustom}=await import('../requests/workflow.ts');allowed=await canReadCustom(prisma,actor,row.request)}
-    else if (row.request) allowed = row.request.createdByMemberId === actor.id ? hasPermission(actor,'requests.own',row.request.locationId) : row.request.systemCodeSnapshot === 'STAFFING' ? hasPermission(actor,'staffing.respond',row.request.locationId) || hasPermission(actor,'staffing.create',row.request.locationId) : hasPermission(actor,'requests.view',row.request.locationId)
-    else if (row.shift) allowed = row.shift.memberId === actor.id ? hasPermission(actor,'schedule.own',row.shift.locationId) : hasPermission(actor,'schedule.view',row.shift.locationId)
-    if (!allowed) denied.push(row.id)
-  }
+  const { actors, sql: readable } = await notificationPolicy(userId, options.organizationId)
   // Both sources are existing records; invitations can predate the recipient's registration.
   const historySource = Prisma.sql`
     WITH history AS (
@@ -65,20 +43,20 @@ export async function listNotificationHistory(userId: string, email: string, opt
         r.system_code_snapshot::text AS "requestSystemCode", NULL::timestamptz AS "expiresAt", NULL::text AS inviter, l.id AS "locationId", CASE WHEN e.shared THEN 'Вся организация' WHEN e.id IS NOT NULL THEN (SELECT string_agg(eloc.name, ', ' ORDER BY eloc.created_at) FROM event_locations el JOIN organization_locations eloc ON eloc.id = el.location_id WHERE el.event_id = e.id) ELSE l.name END AS "locationName", n.vacation_campaign_id AS "vacationCampaignId", vc.year AS "vacationYear"
       FROM account_notifications n JOIN organizations o ON o.id = n.organization_id AND o.deleted_at IS NULL
       LEFT JOIN organization_members m ON m.organization_id = o.id AND m.user_id = ${userId}::uuid AND m.left_at IS NULL
-      LEFT JOIN documents d ON d.id = n.document_id LEFT JOIN document_acknowledgements da ON da.document_id = d.id AND da.member_id = m.id
+      LEFT JOIN documents d ON d.id = n.document_id AND d.organization_id = o.id LEFT JOIN document_acknowledgements da ON da.document_id = d.id AND da.member_id = m.id
       LEFT JOIN vacation_campaigns vc ON vc.id=n.vacation_campaign_id AND vc.organization_id=o.id
-      LEFT JOIN requests r ON r.id = n.request_id LEFT JOIN work_shifts s ON s.id = n.shift_id
+      LEFT JOIN requests r ON r.id = n.request_id AND r.organization_id = o.id LEFT JOIN work_shifts s ON s.id = n.shift_id AND s.organization_id = o.id
       LEFT JOIN schedule_drafts sd ON sd.id = n.schedule_draft_id AND sd.organization_id = o.id
       LEFT JOIN shift_offers so ON so.id = n.shift_offer_id AND so.organization_id = o.id
       LEFT JOIN organization_events e ON e.id = n.event_id AND e.organization_id = o.id
-      LEFT JOIN employee_absences a ON a.id = n.absence_id
+      LEFT JOIN employee_absences a ON a.id = n.absence_id AND a.organization_id = o.id
       LEFT JOIN organization_locations l ON l.id = COALESCE(CASE WHEN e.id IS NOT NULL AND NOT e.shared THEN (SELECT el.location_id FROM event_locations el JOIN organization_locations eloc ON eloc.id = el.location_id WHERE el.event_id = e.id AND (eloc.archived_at IS NULL OR m.role = 'OWNER') ORDER BY (el.location_id = ${options.locationId ?? null}::uuid) DESC NULLS LAST, eloc.created_at LIMIT 1) END, CASE WHEN a.id IS NOT NULL AND m.role <> 'OWNER' THEN
         (SELECT alm.location_id FROM location_members alm JOIN location_members emp ON emp.location_id = alm.location_id AND emp.member_id = a.member_id AND emp.left_at IS NULL JOIN organization_locations al ON al.id = alm.location_id AND al.archived_at IS NULL
          WHERE alm.member_id = m.id AND alm.left_at IS NULL AND alm.role = 'ADMIN' ORDER BY (alm.location_id = ${options.locationId ?? null}::uuid) DESC NULLS LAST, alm.joined_at ASC LIMIT 1)
         END, vc.location_id, sd.location_id, so.location_id, d.location_id, r.location_id, s.location_id)
       LEFT JOIN location_members lm ON lm.member_id = m.id AND lm.location_id = l.id AND lm.left_at IS NULL
       WHERE n.user_id = ${userId}::uuid AND m.id IS NOT NULL AND n.hidden_at IS NULL
-      AND NOT (n.id = ANY(${denied}::uuid[]))
+      AND ${readable}
       ${options.unread ? Prisma.sql`AND n.read_at IS NULL` : Prisma.empty}
       UNION ALL
       SELECT 'invite:' || i.id, 'invite', 'ORGANIZATION_INVITATION', 'Приглашение в организацию', o.name,
@@ -122,7 +100,7 @@ export async function readHistoryNotification(userId: string, email: string, id:
   const [source, recordId] = id.split(':')
   const data = { readAt: unread ? null : new Date() }
   const result = source === 'event'
-    ? await prisma.accountNotification.updateMany({ where: { id: recordId, userId, organizationId, hiddenAt: null, organization: { deletedAt: null, members: { some: { userId, leftAt: null } } } }, data })
+    ? { count: await prisma.$executeRaw(Prisma.sql`UPDATE account_notifications SET read_at = ${data.readAt} WHERE id = ${recordId}::uuid AND id IN (${await readableNotificationIds(userId,organizationId)})`) }
     : await prisma.organizationInvite.updateMany({ where: { id: recordId, organizationId, notificationHiddenAt: null, organization: { deletedAt: null }, OR: [{ type: 'EMAIL', invitedEmail: email }, { type: 'CODE', acceptedByUserId: userId }] }, data })
   if (!result.count) throw new ApiError(404, 'NOTIFICATION_NOT_FOUND', 'Уведомление не найдено.')
 }
@@ -132,13 +110,16 @@ export async function updateAllNotifications(userId: string, email: string, opti
   const [source, recordId] = removeId?.split(':') ?? []
   const organizationId = options.organizationId
   const now = new Date()
+  const readable = await readableNotificationIds(userId, organizationId)
+  if (removeId && source === 'event' && !(await prisma.$queryRaw<Array<{id:string}>>(Prisma.sql`SELECT id FROM account_notifications WHERE id = ${recordId}::uuid AND id IN (${readable})`)).length) throw new ApiError(404, 'NOTIFICATION_NOT_FOUND', 'Уведомление не найдено.')
   if (removeId && source === 'event') {
     const active = await prisma.accountNotification.findFirst({ where: { id: recordId, userId, organizationId, document: { deletedAt: null, acknowledgements: { some: { member: { userId, leftAt: null }, acknowledgedAt: null, cancelledAt: null } } } } })
     if (active) throw new ApiError(409, 'ACTION_REQUIRED', 'Сначала ознакомьтесь с документом или дождитесь отмены требования.')
   }
   const results = await prisma.$transaction([
-    prisma.accountNotification.updateMany({ where: { userId, organizationId, hiddenAt: null, ...(removeId ? { id: source === 'event' ? recordId : '00000000-0000-0000-0000-000000000000' } : { readAt: null }), organization: { deletedAt: null, members: { some: { userId, leftAt: null } } } }, data: removeId ? { hiddenAt: now } : { readAt: now } }),
+    prisma.$executeRaw(Prisma.sql`UPDATE account_notifications SET ${removeId ? Prisma.sql`hidden_at = ${now}` : Prisma.sql`read_at = ${now}`}
+      WHERE id IN (${readable}) AND ${removeId ? Prisma.sql`id = ${source === 'event' ? recordId : '00000000-0000-0000-0000-000000000000'}::uuid` : Prisma.sql`read_at IS NULL`}`),
     prisma.organizationInvite.updateMany({ where: { organizationId, notificationHiddenAt: null, ...(removeId ? { id: source === 'invite' ? recordId : '00000000-0000-0000-0000-000000000000' } : { readAt: null }), OR: [{ type: 'EMAIL', invitedEmail: email }, { type: 'CODE', acceptedByUserId: userId }], organization: { deletedAt: null } }, data: removeId ? { notificationHiddenAt: now } : { readAt: now } }),
   ])
-  if (removeId && !results.some(result => result.count)) throw new ApiError(404, 'NOTIFICATION_NOT_FOUND', 'Уведомление не найдено.')
+  if (removeId && !results.some(result => typeof result === 'number' ? result > 0 : result.count > 0)) throw new ApiError(404, 'NOTIFICATION_NOT_FOUND', 'Уведомление не найдено.')
 }

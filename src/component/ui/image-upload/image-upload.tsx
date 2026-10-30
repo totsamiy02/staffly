@@ -16,9 +16,10 @@ type ImageUploadProps = {
   onMessage: (message: string) => void
   onError: (message: string) => void
   onBusyChange?: (busy: boolean) => void
+  onDraftChange?: (file: File | null) => void
 }
 
-export default function ImageUpload({ endpoint, imageUrl, name, avatarClassName, disabled = false, onChange, onMessage, onError, onBusyChange }: ImageUploadProps) {
+export default function ImageUpload({ endpoint, imageUrl, name, avatarClassName, disabled = false, onChange, onMessage, onError, onBusyChange, onDraftChange }: ImageUploadProps) {
   const { apiRequest, uploadImage } = useAuth()
   const [busy, setBusy] = useState(false)
 
@@ -27,6 +28,7 @@ export default function ImageUpload({ endpoint, imageUrl, name, avatarClassName,
     onError(''); onMessage('')
     if (!acceptedTypes.has(file.type)) { onError('Выберите изображение JPEG, PNG или WebP.'); return }
     if (file.size > MAX_IMAGE_BYTES) { onError('Изображение должно весить не больше 8 МБ.'); return }
+    if (onDraftChange) { onDraftChange(file); return }
     setBusy(true); onBusyChange?.(true)
     try {
       const result = await uploadImage<{ avatarUrl?: string; logoUrl?: string }>(endpoint, file)
@@ -41,6 +43,7 @@ export default function ImageUpload({ endpoint, imageUrl, name, avatarClassName,
 
   async function remove() {
     if (disabled || busy) return
+    if (onDraftChange) { onDraftChange(null); return }
     onError(''); onMessage(''); setBusy(true); onBusyChange?.(true)
     try {
       await apiRequest(endpoint, { method: 'DELETE' })
@@ -57,6 +60,6 @@ export default function ImageUpload({ endpoint, imageUrl, name, avatarClassName,
       <FilePicker compact value={[]} label="Фотография" buttonLabel={busy ? 'Обрабатываем…' : imageUrl ? 'Заменить фото' : 'Загрузить фото'} accept="image/jpeg,image/png,image/webp" maxBytes={MAX_IMAGE_BYTES} disabled={busy} onChange={files => void selectFile(files[0])}/>
       {imageUrl && <button className="image-upload__remove" type="button" disabled={busy} onClick={() => void remove()}>Удалить</button>}
     </div>
-    <p className="image-upload__hint">JPG, PNG, WebP · до 8 МБ</p></div>}
+    <p className="image-upload__hint">JPG, PNG, WebP · до 8 МБ{onDraftChange && <><br />Фото изменится после сохранения профиля.</>}</p></div>}
   </div>
 }

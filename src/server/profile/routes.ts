@@ -5,11 +5,12 @@ import { prisma } from '../db.ts'
 import { ApiError } from '../api-error.ts'
 import { requireAuth, type AuthenticatedRequest } from '../auth.ts'
 import { updateProfileBody } from './schemas.ts'
-import { mediaUrl } from '../storage/image-service.ts'
+import { bindProfileImage, mediaUrl } from '../storage/image-service.ts'
 import { emailPreferencesBody, getEmailPreferences, saveEmailPreferences } from '../mail/email-preferences.ts'
 
 const router = Router()
 router.use(requireAuth)
+router.use((_request, response, next) => { response.set('Cache-Control', 'private, no-store'); next() })
 
 function auth(request: Request) { return (request as AuthenticatedRequest).auth! }
 
@@ -44,7 +45,14 @@ router.patch('/profile/email-preferences', async (request, response) => {
 router.patch('/profile', async (request, response) => {
   const parsed = updateProfileBody.safeParse(request.body)
   if (!parsed.success) throw new ApiError(400, 'VALIDATION_ERROR', 'Проверьте данные профиля.', z.flattenError(parsed.error).fieldErrors)
-  const user = await prisma.user.update({ where: { id: auth(request).userId }, data: parsed.data })
+  const { avatarUploadId, ...fields } = parsed.data
+  const userId = auth(request).userId
+  const user = await prisma.$transaction(async tx => {
+    await tx.$queryRaw`SELECT id FROM users WHERE id=${userId}::uuid FOR UPDATE`
+    const current = await tx.user.findUniqueOrThrow({ where: { id: userId }, select: { avatarFileId: true } })
+    const avatarFileId = avatarUploadId === undefined ? current.avatarFileId : await bindProfileImage(tx, userId, current.avatarFileId, avatarUploadId)
+    return tx.user.update({ where: { id: userId }, data: { ...fields, avatarFileId } })
+  })
   response.json({ user: profileUser(user) })
 })
 

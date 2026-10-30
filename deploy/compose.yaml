@@ -56,7 +56,7 @@ x-app: &app
 services:
   postgres:
     image: postgres:18
-    command: [postgres, -c, 'timezone=${DB_TIMEZONE:?Set DB_TIMEZONE to the source database timezone}']
+    command: [postgres, -c, 'timezone=${DB_TIMEZONE:?Set DB_TIMEZONE to UTC}']
     environment:
       POSTGRES_DB: staffly
       POSTGRES_USER: staffly_admin

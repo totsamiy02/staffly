@@ -185,7 +185,12 @@ export async function cancelEvent(userId: string, organizationId: string, eventI
 // Row locks serialize delivery with edits/cancellation. Claim and notification records commit together.
 export async function deliverEventStarts(now = new Date()) {
   return prisma.$transaction(async tx => {
-    const rows = await tx.$queryRaw<Array<{ id: string }>>`SELECT e.id FROM organization_events e JOIN organizations o ON o.id = e.organization_id WHERE o.deleted_at IS NULL AND e.cancelled_at IS NULL AND e.start_notified_at IS NULL AND e.start_at <= ${now} ORDER BY e.start_at LIMIT 100 FOR UPDATE OF e SKIP LOCKED`
+    const rows = await tx.$queryRaw<Array<{ id: string }>>`WITH candidates AS (
+      SELECT e.id, row_number() OVER(PARTITION BY e.organization_id ORDER BY e.start_at,e.id) AS turn
+      FROM organization_events e JOIN organizations o ON o.id=e.organization_id
+      WHERE o.deleted_at IS NULL AND e.cancelled_at IS NULL AND e.start_notified_at IS NULL AND e.start_at<=${now}
+    ) SELECT e.id FROM organization_events e JOIN candidates c ON c.id=e.id WHERE c.turn<=10
+      ORDER BY c.turn,e.start_at,e.id LIMIT 100 FOR UPDATE OF e SKIP LOCKED`
     let delivered = 0
     for (const row of rows) {
       const event = await tx.organizationEvent.findUniqueOrThrow({ where: { id: row.id }, include: { recipients: { where: { removedAt: null } } } })

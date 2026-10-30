@@ -1,3 +1,5 @@
+import { documentReadSql, docPermission, canReadDocument, folderReadable, type DocumentActor } from '../access/document-policy.ts'
+export { canReadDocument } from '../access/document-policy.ts'
 import { hasPermission, requirePermission, locationsFor, ensureAccessRoles, auditAccess, type PermissionActor } from '../organizations/access/access.ts'
 import type { Permission } from '../../app/access/catalog.ts'
 import { scopedLocationId, locationMemberWhere } from '../organizations/location-context.ts'
@@ -13,18 +15,10 @@ import { MAX_DOCUMENT_BYTES, supportsPreview, validateDocumentFile } from './fil
 import type { Assignment, ListOptions, Metadata } from './schemas.ts'
 
 const missing = () => new ApiError(404, 'DOCUMENT_NOT_FOUND', 'Документ не найден или недоступен.')
-type DocumentActor = OrganizationMember & Partial<PermissionActor> & { readableLocationIds?: string[]; managedLocationIds?: string[] }
 export const isManager = (actor: Pick<OrganizationMember, 'role'> & Partial<PermissionActor>) => actor.permissions ? actor.role === 'OWNER' || ['documents.upload','documents.edit','documents.delete','documents.assign','documents.control','documents.folders','documents.access'].some(key => (actor.permissions!.includes(key) || !!actor.permissionLocations?.[key]?.length)) : actor.role === 'OWNER' || actor.role === 'ADMIN'
 async function documentActor(userId: string, organizationId: string) { return getMembership(userId, organizationId) }
 function documentManager(actor: DocumentActor, locationId: string | null | undefined) {
   return actor.permissions ? ['documents.upload','documents.edit','documents.delete','documents.assign','documents.control','documents.folders','documents.access'].some(key => docPermission(actor, key as Permission, locationId)) : actor.role === 'OWNER' || actor.role === 'ADMIN' && !!locationId && !!actor.managedLocationIds?.includes(locationId)
-}
-function docPermission(actor: DocumentActor, key: Permission, locationId: string | null | undefined) {
-  if (actor.role === 'OWNER') return true
-  if (!scopedLocationId(actor.organizationId) && !actor.accessConfigured && actor.role === 'ADMIN' && '_count' in actor && (actor._count as {locationMemberships:number}).locationMemberships === 0) return true
-  if (locationId && !actor.accessConfigured && !actor.readableLocationIds?.includes(locationId)) return false
-  if (locationId == null) return key === 'documents.view' || key === 'documents.download' ? !!actor.permissions?.includes(key) || !!actor.permissionLocations?.[key]?.length : hasPermission(actor, 'documents.shared', null) && !!actor.organizationPermissions?.includes(key)
-  return hasPermission(actor, key, locationId)
 }
 function assertDocumentManager(actor: DocumentActor, locationId: string | null | undefined, key: Permission = 'documents.edit') {
   if (!docPermission(actor, key, locationId)) throw new ApiError(403, 'INSUFFICIENT_PERMISSIONS', 'Недостаточно прав для действия с документом в этой области.')
@@ -32,28 +26,6 @@ function assertDocumentManager(actor: DocumentActor, locationId: string | null |
 function libraryWhere(actor: DocumentActor) {
   if (actor.role === 'OWNER') return {}
   return { OR: [{ locationId: { in: actor.permissionLocations ? locationsFor(actor, 'documents.view').filter(id => actor.accessConfigured || actor.readableLocationIds?.includes(id)) : actor.readableLocationIds ?? [] } }, ...((actor.permissions?.includes('documents.view') || locationsFor(actor,'documents.view').length) ? [{ locationId: null }] : [])] }
-}
-function audienceReadable(actor: DocumentActor, doc: { locationId?: string | null; visibility: string; audienceRoleIds?: string[]; audienceMemberIds?: string[]; inheritAccess?: boolean }) {
-  if (actor.role === 'OWNER') return true
-  if (doc.inheritAccess) return true
-  if (doc.visibility === 'SELECTED') return !!doc.audienceMemberIds?.includes(actor.id) || !!doc.audienceRoleIds?.some(id => actor.accessRoleId === id || !!doc.locationId && actor.accessAssignments?.some(a => a.locationId === doc.locationId && a.roleId === id))
-  if (doc.visibility === 'ADMINS') return doc.locationId ? !!actor.managedLocationIds?.includes(doc.locationId) : actor.accessSystemCode === 'ADMIN' || !actor.accessConfigured && actor.organizationRole === 'ADMIN'
-  return doc.visibility === 'ORGANIZATION'
-}
-export function canReadDocument(actor: DocumentActor, doc: Pick<Document, 'organizationId' | 'visibility' | 'targetMemberId' | 'deletedAt'> & { locationId?: string | null; audienceRoleIds?: string[]; audienceMemberIds?: string[]; inheritAccess?: boolean }) {
-  if (actor.organizationId !== doc.organizationId) return false
-  if (actor.role === 'OWNER') return true
-  if (doc.deletedAt && !docPermission(actor, 'documents.delete', doc.locationId)) return false
-  if (!actor.permissions) { // Legacy pure callers; server paths hydrate current access first.
-    if (doc.locationId && actor.readableLocationIds && !actor.readableLocationIds.includes(doc.locationId)) return false
-    return doc.visibility === 'PRIVATE_MEMBER' ? doc.targetMemberId === actor.id || actor.role === 'ADMIN' && (!doc.locationId || !!actor.managedLocationIds?.includes(doc.locationId)) : audienceReadable(actor, doc)
-  }
-  if (!docPermission(actor, 'documents.view', doc.locationId)) return false
-  if (doc.visibility === 'PRIVATE_MEMBER') return doc.targetMemberId === actor.id || docPermission(actor, 'documents.personal.view', doc.locationId)
-  return audienceReadable(actor, doc)
-}
-function folderReadable(actor: DocumentActor, folder: { locationId: string | null; visibility: string; audienceRoleIds?: string[]; audienceMemberIds?: string[]; inheritAccess?: boolean }) {
-  return actor.role === 'OWNER' || docPermission(actor, 'documents.view', folder.locationId) && audienceReadable(actor, folder)
 }
 async function allowedFolders(tx: Prisma.TransactionClient | typeof prisma, actor: DocumentActor) {
   const folders = await tx.documentFolder.findMany({ where: { organizationId: actor.organizationId, ...libraryWhere(actor) }, orderBy: { name: 'asc' }, include: { location: { select: { name: true } } } })
@@ -106,8 +78,7 @@ async function transaction<T>(userId: string, organizationId: string, run: (tx: 
 }
 async function accessible(tx: Prisma.TransactionClient, actor: DocumentActor, documentId: string) {
   const doc = await tx.document.findFirst({ where: { id: documentId, organizationId: actor.organizationId } })
-  if (!doc || !canReadDocument(actor, doc)) throw missing()
-  if (doc.folderId && !(await allowedFolders(tx, actor)).some(folder => folder.id === doc.folderId)) throw missing()
+  if (!doc || !(await tx.$queryRaw<Array<{id:string}>>(Prisma.sql`SELECT d.id FROM documents d WHERE d.id = ${documentId}::uuid AND ${documentReadSql(actor)}`)).length) throw missing()
   return doc
 }
 async function folderAncestorsReadable(tx: Prisma.TransactionClient | typeof prisma, actor: DocumentActor, folderId: string) {
