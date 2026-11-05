@@ -18,6 +18,9 @@ import { accountRateLimit, PostgresRateLimitStore } from './security/rate-limit.
 export { verifyLoginPassword } from './auth/passwords.ts'
 import { sessionTransaction } from './auth/session-transaction.ts'
 import { recordTiming } from './performance.ts'
+import { ApiError } from './api-error.ts'
+import { rotateRefreshToken, revokeRefreshToken } from './auth/refresh-tokens.ts'
+import { securityContext, bindSecuritySession, recordSecurityEvent } from './security/journal.ts'
 
 const jwtSecret = process.env.JWT_SECRET
 if (!jwtSecret || jwtSecret.length < 32) throw new Error('JWT_SECRET must contain at least 32 characters')
@@ -126,6 +129,10 @@ export async function createSession(user: User, request: Request, response: Resp
     await tx.authSession.updateMany({ where: { browserTokenHash, revokedAt: null, ...(current ? { id: { not: current.id } } : {}) }, data: { revokedAt: new Date(now), lastActiveAt: null } })
     if (previous && previous.id !== current?.id && !previous.revokedAt) await tx.authSession.update({ where: { id: previous.id }, data: { revokedAt: new Date(now), lastActiveAt: null } })
     const session = current ? await tx.authSession.update({ where: { id: current.id }, data: { ...data, idleExpiresAt: new Date(Math.min(now + IDLE_MS, current.absoluteExpiresAt.getTime())) } }) : await tx.authSession.create({ data: { ...data, userId: user.id, absoluteExpiresAt: new Date(now + ABSOLUTE_MS) } })
+    // Password/provider authentication starts a new grant even when preserving the
+    // browser's session row. An old grant cannot revoke this newly authenticated one.
+    if (current) await tx.refreshTokenUse.deleteMany({ where: { sessionId: session.id } })
+    await recordSecurityEvent(tx, { action: 'LOGIN', userId: account.id, sessionId: session.id, resourceType: 'SESSION', resourceId: session.id })
     return { session, account }
   }, { isolationLevel: 'ReadCommitted' }))
   setRefreshCookie(response, rawToken)
@@ -134,6 +141,10 @@ export async function createSession(user: User, request: Request, response: Resp
 }
 
 export type AuthenticatedRequest = Request & { auth?: { userId: string; sessionId: string; email: string; accessExpiresAt?: number } }
+export async function assertActiveSession(auth: { userId: string; sessionId: string }) {
+  const now = new Date()
+  if (!await prisma.authSession.count({ where: { id: auth.sessionId, userId: auth.userId, revokedAt: null, idleExpiresAt: { gt: now }, absoluteExpiresAt: { gt: now }, user: { deletedAt: null, emailVerifiedAt: { not: null } } } })) throw new ApiError(401, 'SESSION_EXPIRED', 'Сессия завершена.')
+}
 // Only this middleware can populate the cache. It lives for one Request, never across requests.
 const authenticatedRequests = new WeakSet<Request>()
 const accountTraffic = accountRateLimit('api-account', 600)
@@ -158,6 +169,7 @@ export async function requireAuth(request: AuthenticatedRequest, response: Respo
       response.status(401).json({ message: 'Сессия завершена.' }); return
     }
     request.auth = { userId: session.userId, sessionId: session.id, email: session.email, accessExpiresAt: typeof payload.exp === 'number' ? payload.exp * 1000 : undefined }
+    bindSecuritySession(session.id)
     authenticatedRequests.add(request)
     if (session.lastUsedAt.getTime() < now.getTime() - 60_000) await prisma.authSession.updateMany({ where: { id: session.id, revokedAt: null }, data: { lastUsedAt: now } })
     accountTraffic(request, response, next)
@@ -168,12 +180,12 @@ export async function requireAuth(request: AuthenticatedRequest, response: Respo
 }
 
 const sentMessage = process.env.NODE_ENV === 'development' && (!process.env.SMTP_USER || !process.env.SMTP_APP_PASSWORD)
-  ? 'Если адрес подходит для этого действия, код появится в терминале сервера. Настройте SMTP для отправки на почту.'
+  ? 'Для получения кода настройте SMTP. Секретные данные не выводятся в журнал сервера.'
   : 'Если адрес подходит для этого действия, код отправлен. Проверьте почту.'
 
 export function createAuthRouter({ sendCode = deliverSecurityCode }: { sendCode?: typeof deliverSecurityCode } = {}) {
   const router = Router()
-  router.use(authLimiter, (_request, response, next) => { response.set('Cache-Control', 'no-store'); next() })
+  router.use(securityContext, authLimiter, (_request, response, next) => { response.set('Cache-Control', 'no-store'); next() })
 
   router.post('/register', accountLimiter, async (request, response) => {
     const parsed = registerBody.safeParse(request.body)
@@ -254,7 +266,7 @@ export function createAuthRouter({ sendCode = deliverSecurityCode }: { sendCode?
     if (!parsed.success) { response.status(400).json({ message: invalidCredentials }); return }
     const user = await prisma.user.findUnique({ where: { email: parsed.data.email } })
     const valid = await verifyLoginPassword(user?.passwordHash ?? null, parsed.data.password, parsed.data.email)
-    if (!user || !valid || user.deletedAt) { response.status(401).json({ message: invalidCredentials }); return }
+    if (!user || !valid || user.deletedAt) { await recordSecurityEvent(prisma, { action: 'LOGIN_FAILED', userId: user?.id, outcome: 'DENIED', reasonCode: 'INVALID_CREDENTIALS' }); response.status(401).json({ message: invalidCredentials }); return }
     if (!user.emailVerifiedAt) { response.status(403).json({ code: 'EMAIL_NOT_VERIFIED', message: 'Подтвердите email перед входом.' }); return }
     response.json(await createSession(user, request, response))
   })
@@ -262,30 +274,23 @@ export function createAuthRouter({ sendCode = deliverSecurityCode }: { sendCode?
   router.post('/refresh', refreshLimiter, async (request, response) => {
     const rawToken = request.cookies?.[COOKIE_NAME]
     if (typeof rawToken !== 'string' || rawToken.length > 256) { response.status(401).json({ message: 'Сессия завершена.' }); return }
-    const session = await prisma.authSession.findUnique({ where: { refreshTokenHash: digest(rawToken) }, include: { user: true } })
-    const now = new Date()
-    if (!session || session.revokedAt || session.idleExpiresAt <= now || session.absoluteExpiresAt <= now || session.user.deletedAt || !session.user.emailVerifiedAt) {
+    const rotated = await rotateRefreshToken(rawToken, request.cookies?.[BROWSER_COOKIE_NAME])
+    if (!rotated) {
       response.status(401).json({ message: 'Сессия завершена.' }); return
     }
-    const nextToken = newToken()
-    const updated = await prisma.authSession.updateMany({
-      where: { id: session.id, refreshTokenHash: digest(rawToken), revokedAt: null, idleExpiresAt: { gt: now }, absoluteExpiresAt: { gt: now } },
-      data: { refreshTokenHash: digest(nextToken), lastUsedAt: now, idleExpiresAt: new Date(Math.min(now.getTime() + IDLE_MS, session.absoluteExpiresAt.getTime())) },
-    })
-    if (!updated.count) { response.status(401).json({ message: 'Сессия завершена.' }); return }
-    setRefreshCookie(response, nextToken)
+    const { session, token } = rotated
+    setRefreshCookie(response, token)
     response.json({ user: publicUser(session.user), accessToken: await accessToken(session.userId, session.id) })
   })
 
   router.post('/logout', async (request, response) => {
     const rawToken = request.cookies?.[COOKIE_NAME]
-    if (typeof rawToken === 'string') await prisma.authSession.updateMany({ where: { refreshTokenHash: digest(rawToken) }, data: { revokedAt: new Date(), lastActiveAt: null } })
-    clearRefreshCookie(response)
+    if (typeof rawToken === 'string' && rawToken.length <= 256 && await revokeRefreshToken(rawToken)) clearRefreshCookie(response)
     response.status(204).end()
   })
 
   router.post('/logout-all', requireAuth, async (request: AuthenticatedRequest, response) => {
-    await prisma.authSession.updateMany({ where: { userId: request.auth!.userId, revokedAt: null }, data: { revokedAt: new Date(), lastActiveAt: null } })
+    await prisma.$transaction(async tx => { const result = await tx.authSession.updateMany({ where: { userId: request.auth!.userId, revokedAt: null }, data: { revokedAt: new Date(), lastActiveAt: null } }); await recordSecurityEvent(tx, { action: 'SESSIONS_REVOKED', userId: request.auth!.userId, count: result.count }) })
     clearRefreshCookie(response)
     response.status(204).end()
   })
@@ -307,14 +312,14 @@ export function createAuthRouter({ sendCode = deliverSecurityCode }: { sendCode?
   router.delete('/sessions/:sessionId', requireAuth, async (request: AuthenticatedRequest, response) => {
     const parsed = z.string().uuid().safeParse(request.params.sessionId)
     if (!parsed.success) { response.status(400).json({ message: 'Некорректный идентификатор сеанса.' }); return }
-    const revoked = await prisma.authSession.updateMany({ where: { id: parsed.data, userId: request.auth!.userId, revokedAt: null }, data: { revokedAt: new Date(), lastActiveAt: null } })
+    const revoked = await prisma.$transaction(async tx => { const result = await tx.authSession.updateMany({ where: { id: parsed.data, userId: request.auth!.userId, revokedAt: null }, data: { revokedAt: new Date(), lastActiveAt: null } }); if (result.count) await recordSecurityEvent(tx, { action: 'SESSION_REVOKED', userId: request.auth!.userId, resourceType: 'SESSION', resourceId: parsed.data }); return result })
     if (!revoked.count) { response.status(404).json({ message: 'Активный сеанс не найден.' }); return }
     if (parsed.data === request.auth!.sessionId) clearRefreshCookie(response)
     response.status(204).end()
   })
 
   router.post('/sessions/revoke-others', requireAuth, async (request: AuthenticatedRequest, response) => {
-    await prisma.authSession.updateMany({ where: { userId: request.auth!.userId, id: { not: request.auth!.sessionId }, revokedAt: null }, data: { revokedAt: new Date(), lastActiveAt: null } })
+    await prisma.$transaction(tx => revokeOtherSessions(tx, request.auth!.userId, request.auth!.sessionId))
     response.status(204).end()
   })
 
@@ -381,7 +386,7 @@ export function createAuthRouter({ sendCode = deliverSecurityCode }: { sendCode?
     if (!parsed.success) { response.status(400).json({ message: parsed.error.issues.find(issue => issue.path.includes('newPassword'))?.message ?? 'Проверьте новый пароль.' }); return }
     const user = await prisma.user.findUniqueOrThrow({ where: { id: request.auth!.userId } })
     if (!user.passwordHash) { response.status(409).json({ code: 'PASSWORD_NOT_SET', message: 'Сначала создайте пароль в настройках способов входа, подтвердив Яндекс ID.' }); return }
-    if (!await verifyLoginPassword(user.passwordHash, parsed.data.currentPassword, user.email)) { response.status(401).json({ message: 'Текущий пароль указан неверно.' }); return }
+    if (!await verifyLoginPassword(user.passwordHash, parsed.data.currentPassword, user.email)) { await recordSecurityEvent(prisma, { action: 'CONFIRMATION_FAILED', userId: user.id, outcome: 'DENIED', reasonCode: 'INVALID_CONFIRMATION', resourceType: 'ACCOUNT', resourceId: user.id }); response.status(401).json({ message: 'Текущий пароль указан неверно.' }); return }
     if (parsed.data.currentPassword === parsed.data.newPassword) { response.status(400).json({ message: 'Новый пароль должен отличаться от текущего.' }); return }
     const nextHash = await passwordHash(parsed.data.newPassword)
     await prisma.$transaction(async tx => {
@@ -395,6 +400,12 @@ export function createAuthRouter({ sendCode = deliverSecurityCode }: { sendCode?
     response.json({ message: 'Пароль обновлён. Другие сеансы завершены.' })
   })
 
+  router.use(async (error: unknown, request: AuthenticatedRequest, _response: Response, next: NextFunction) => {
+    if (request.auth && error instanceof ApiError && ['INVALID_PASSWORD', 'INVALID_CODE', 'SECURITY_CHANGED', 'YANDEX_WRONG_ACCOUNT', 'YANDEX_EXPIRED'].includes(error.code)) {
+      await recordSecurityEvent(prisma, { action: 'CONFIRMATION_FAILED', userId: request.auth.userId, outcome: 'DENIED', reasonCode: 'INVALID_CONFIRMATION', resourceType: 'ACCOUNT', resourceId: request.auth.userId })
+    }
+    next(error)
+  })
   return router
 }
 

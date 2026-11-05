@@ -1,3 +1,5 @@
+import { safeError } from '../security/safe-error.ts'
+import { recordSecurityEvent } from '../security/journal.ts'
 import { randomUUID } from 'node:crypto'
 import type { Prisma, EmailDelivery } from '../../generated/prisma/client.ts'
 import { prisma } from '../db.ts'
@@ -17,12 +19,14 @@ export function passwordChangedEmail(): EmailContent {
   return { title: 'Пароль изменён', eyebrow: 'Безопасность', intro: 'Пароль вашего аккаунта Staffly обновлён. Остальные активные сеансы завершены.', action: { label: 'Проверить безопасность', path: '/app/settings?section=security' }, footer: 'Если это сделали не вы, немедленно восстановите доступ через страницу входа.' }
 }
 export async function queuePasswordChanged(tx: Prisma.TransactionClient, userId: string) {
+  await recordSecurityEvent(tx, { action: 'PASSWORD_CHANGED', userId, resourceType: 'ACCOUNT', resourceId: userId })
   const user = await tx.user.findUniqueOrThrow({ where: { id: userId }, select: { email: true } })
   await enqueueEmail(tx, { userId, sourceKind: 'MANDATORY', sourceKey: `password:${randomUUID()}`, recipientEmail: user.email, content: passwordChangedEmail() })
 }
 
 type SecurityEvent = 'YANDEX_LINKED' | 'YANDEX_UNLINKED' | 'PASSWORD_CREATED' | 'EMAIL_CHANGED'
 export async function queueAccountSecurityEvent(tx: Prisma.TransactionClient, userId: string, event: SecurityEvent, details?: { oldEmail: string; newEmail: string }) {
+  await recordSecurityEvent(tx, { action: event, userId, resourceType: 'ACCOUNT', resourceId: userId })
   const user = await tx.user.findUniqueOrThrow({ where: { id: userId }, select: { email: true } })
   const messages: Record<SecurityEvent, { title: string; intro: string }> = {
     YANDEX_LINKED: { title: 'Яндекс ID подключён', intro: 'К вашему аккаунту Staffly подключён вход через Яндекс. Данные профиля и организации сохранены.' },
@@ -84,7 +88,7 @@ export async function processEmailDeliveries(options: { now?: Date; send?: typeo
         await finish(job, 'SENT', now)
       } catch (error) {
         // Do not store mail content, addresses, credentials or provider responses in the queue log.
-        console.error('Email delivery attempt failed:', job.id, error instanceof Error ? error.name : 'Error')
+        console.error('Email delivery attempt failed:', job.id, safeError(error))
         const status = job.attempts >= 7 || +now - +job.createdAt > 86400_000 ? 'FAILED' : 'PENDING'
         const availableAt = new Date(+now + Math.min(3600_000, 30_000 * 2 ** (job.attempts - 1))).toISOString()
         await prisma.$executeRaw`UPDATE email_deliveries SET locked_until=NULL,status=${status},available_at=${availableAt}::timestamptz WHERE id=${job.id}::uuid AND status='PENDING'`

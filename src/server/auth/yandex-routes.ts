@@ -1,3 +1,4 @@
+import { recordSecurityEvent } from '../security/journal.ts'
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { Router, type Request, type Response, type RequestHandler } from 'express'
 import { rateLimit, ipKeyGenerator } from 'express-rate-limit'
@@ -190,6 +191,7 @@ export function createYandexRouter(dependencies: Dependencies) {
       response.redirect(303, '/auth/yandex')
     } catch (error) {
       if (record && ownsAttempt) { await prisma.oAuthAttempt.deleteMany({ where: { id: record.id } }).catch(() => undefined); clearCookie(response) }
+      await recordSecurityEvent(prisma, { action: record?.userId ? 'CONFIRMATION_FAILED' : 'LOGIN_FAILED', userId: record?.userId, outcome: 'DENIED', reasonCode: record?.userId ? 'INVALID_CONFIRMATION' : 'INVALID_CREDENTIALS' })
       const code = error instanceof ApiError ? error.code : 'YANDEX_FAILED'
       const marker = code === 'YANDEX_CANCELLED' ? 'cancelled' : code === 'YANDEX_ALREADY_LINKED' ? 'already-linked' : code === 'YANDEX_EMAIL_REQUIRED' ? 'email-required' : code === 'YANDEX_ACCOUNT_UNAVAILABLE' ? 'account-unavailable' : code === 'YANDEX_WRONG_ACCOUNT' ? 'wrong-account' : code === 'SECURITY_CHANGED' ? 'security-changed' : code === 'YANDEX_EXPIRED' ? 'expired' : 'failed'
       const target = record?.userId ? new URL('/app/settings?section=security', 'https://staffly.invalid') : new URL('/auth', 'https://staffly.invalid')

@@ -1,0 +1,11 @@
+{
+  "browser": "firefox",
+  "version": "157.0",
+  "platform": "darwin",
+  "arch": "arm64",
+  "viewport": {
+    "width": 320,
+    "height": 740
+  },
+  "theme": "light"
+}

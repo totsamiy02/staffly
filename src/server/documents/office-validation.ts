@@ -2,6 +2,16 @@
 import { crc32, inflateRawSync } from 'node:zlib'
 import { ApiError } from '../api-error.ts'
 function invalid(): never { throw new ApiError(415, 'INVALID_DOCUMENT_FILE', 'Недопустимое содержимое Office-файла.') }
+function officeXml(bytes: Buffer) {
+  const prefix = bytes.subarray(0, 4).toString('hex')
+  const encoding = prefix.startsWith('fffe') || prefix === '3c003f00' ? 'utf-16le' : prefix.startsWith('feff') || prefix === '003c003f' ? 'utf-16be' : 'utf-8'
+  let xml: string
+  try { xml = new TextDecoder(encoding, { fatal: true }).decode(bytes) } catch { invalid() }
+  const declared = /^\s*<\?xml\b[^?]*\bencoding\s*=\s*["']([^"']+)["']/i.exec(xml.slice(0, 512))?.[1].toLowerCase().replaceAll('-', '')
+  if (declared && (encoding === 'utf-8' ? declared !== 'utf8' : !['utf16', encoding.replaceAll('-', '')].includes(declared))) invalid()
+  if (/\x00|<!\s*(?:DOCTYPE|ENTITY)\b/i.test(xml)) invalid()
+  return xml
+}
 
 // Inspect the ZIP central directory and every entry with bounded decompression.
 // OOXML is a container, not permission to upload arbitrary ZIP files or macros.
@@ -33,7 +43,8 @@ export function validateOffice(contents: Buffer, extension: 'docx' | 'xlsx' | 'p
     let decoded: Buffer
     try { decoded = method === 0 ? contents.subarray(start, start + compressedSize) : inflateRawSync(contents.subarray(start, start + compressedSize), { maxOutputLength: Math.max(1, size) }) } catch { invalid() }
     if (decoded.length !== size || crc32(decoded) !== expectedCrc) invalid()
-    if (name === '[Content_Types].xml') contentTypes = decoded.toString('utf8')
+    const xml = /\.(?:xml|rels)$/i.test(name) ? officeXml(decoded) : ''
+    if (name === '[Content_Types].xml') contentTypes = xml
     cursor = next
   }
   const main = { docx: 'word/document.xml', xlsx: 'xl/workbook.xml', pptx: 'ppt/presentation.xml' }[extension]

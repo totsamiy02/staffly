@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto'
 import express from 'express'
 import { SignJWT } from 'jose'
 import sharp from 'sharp'
+import { Readable } from 'node:stream'
 import { prisma, databasePool } from '../../src/server/db.ts'
 import { Prisma } from '../../src/generated/prisma/client.ts'
 import { createBusinessOrganization as createOrganization } from '../support/business-organization.ts'
@@ -16,9 +17,13 @@ import { performanceSnapshot } from '../../src/server/performance.ts'
 import { replaceUserAvatar, removeUserAvatar, replaceOrganizationLogo, removeOrganizationLogo, stageStoredFile } from '../../src/server/storage/image-service.ts'
 import mediaRoutes from '../../src/server/storage/routes.ts'
 import { downloadRequestAttachment } from '../../src/server/requests/attachment-service.ts'
-import { enqueueExport, getExport } from '../../src/server/schedule/reports/export-jobs.ts'
+import { enqueueExport, getExport, processReportExport } from '../../src/server/schedule/reports/export-jobs.ts'
 import { defaultReportConfig } from '../../src/app/schedule/reports/reporting.ts'
-import { getDocument } from '../../src/server/documents/service.ts'
+import { getDocument, deliverDocument, authorizeDocumentContent, listDocuments } from '../../src/server/documents/service.ts'
+import { listSchema } from '../../src/server/documents/schemas.ts'
+import { storage } from '../../src/server/storage/provider.ts'
+import { guardFileStream } from '../../src/server/storage/guarded-delivery.ts'
+import { locationContext } from '../../src/server/organizations/location-context.ts'
 import { documentReadSql, canReadDocument } from '../../src/server/access/document-policy.ts'
 
 let org: string, point: string, second: string, typeId: string, roleId: string, ownerMember: string
@@ -204,4 +209,83 @@ it('uses the same document and notification policy for a restricted ancestor, po
     await setPermissions([])
     await assert.rejects(getDocument(users.viewer,org,document.id),code('DOCUMENT_NOT_FOUND'))
   } finally {await setPermissions()}
+})
+
+async function contentDocument() {
+  const bytes = Buffer.from('private document')
+  const file = await stageStoredFile({ objectKey: `organizations/${org}/documents/${randomUUID()}.txt`, purpose: 'DOCUMENT', mimeType: 'text/plain', size: bytes.length, checksumSha256: '0'.repeat(64), uploadedByUserId: users.owner, organizationId: org }, bytes)
+  await prisma.storedFile.update({ where: { id: file.id }, data: { pendingDeletionAt: null } })
+  return prisma.document.create({ data: { organizationId: org, locationId: point, storedFileId: file.id, uploadedByMemberId: ownerMember, fileName: 'private.txt', displayName: 'Race fixture', visibility: 'ORGANIZATION' } })
+}
+
+it('rejects revoked download permissions after storage latency and closes the already opened source', async t => {
+  const doc = await contentDocument(), original = storage.stream
+  let source: Readable | undefined
+  t.mock.method(storage, 'stream', async (key: string) => { const object = await original(key); source = object.stream; await setPermissions([]); return object })
+  try {
+    await assert.rejects(deliverDocument(users.viewer, org, doc.id, 'download'), code('DOCUMENT_NOT_FOUND'))
+    assert.equal(source?.destroyed, true)
+  } finally { await setPermissions() }
+})
+
+it('stops a running stream after role revocation instead of reusing a request authorization cache', async () => {
+  const doc = await contentDocument()
+  const source = Readable.from((async function* () { yield Buffer.alloc(1024 * 1024); await setPermissions([]); yield Buffer.alloc(1024 * 1024) })())
+  let delivered = 0
+  try {
+    await assert.rejects(locationContext.run({ organizationId: org, locationId: point, memberships: new Map() }, async () => {
+      await getMembership(users.viewer, org) // Deliberately populate the old HTTP request cache.
+      for await (const bytes of guardFileStream(source, () => authorizeDocumentContent(users.viewer, org, doc.id, 'download'))) delivered += bytes.length
+    }), code('DOCUMENT_NOT_FOUND'))
+    assert.ok(delivered <= 1024 * 1024); assert.equal(source.destroyed, true)
+  } finally { await setPermissions() }
+})
+
+it('rechecks attachment access after storage returns bytes and refuses a file bound to another tenant', async t => {
+  const request = await prisma.organizationRequest.create({ data: requestData() }), bytes = Buffer.from('%PDF-1.4\n%%EOF')
+  const file = await stageStoredFile({ objectKey: `organizations/${org}/requests/${randomUUID()}.pdf`, purpose: 'REQUEST_ATTACHMENT', mimeType: 'application/pdf', size: bytes.length, checksumSha256: '0'.repeat(64), uploadedByUserId: users.employee, organizationId: org }, bytes)
+  await prisma.storedFile.update({ where: { id: file.id }, data: { pendingDeletionAt: null } })
+  const attachment = await prisma.requestAttachment.create({ data: { requestId: request.id, storedFileId: file.id, fileName: 'private.pdf' } })
+  const original = storage.read
+  const mock = t.mock.method(storage, 'read', async (key: string) => { const contents = await original(key); await setPermissions([]); return contents })
+  try {
+    await assert.rejects(downloadRequestAttachment(users.viewer, org, request.id, attachment.id), code('REQUEST_NOT_FOUND'))
+    mock.mock.restore(); await setPermissions()
+    await prisma.storedFile.update({ where: { id: file.id }, data: { organizationId: null } })
+    await assert.rejects(downloadRequestAttachment(users.viewer, org, request.id, attachment.id), code('ATTACHMENT_NOT_FOUND'))
+  } finally { await setPermissions(); await prisma.organizationRequest.delete({ where: { id: request.id } }) }
+})
+
+it('does not publish an export when its requester leaves during the final object upload', async t => {
+  await prisma.reportExport.deleteMany({ where: { organizationId: org } })
+  const job = await enqueueExport(users.viewer, org, { from: '2026-01-01', to: '2026-01-31', locationIds: [point], memberIds: [], includeFormer: false, config: defaultReportConfig() })
+  const original = storage.put; let key: string | undefined
+  t.mock.method(storage, 'put', async (objectKey: string, bytes: Buffer) => {
+    await original(objectKey, bytes); key = objectKey
+    await prisma.organizationMember.update({ where: { id: members.viewer }, data: { leftAt: new Date() } })
+  })
+  try {
+    assert.equal(await processReportExport(), true)
+    const result = await prisma.reportExport.findUniqueOrThrow({ where: { id: job.id } })
+    assert.equal(result.status, 'FAILED'); assert.equal(result.objectKey, null); assert.ok(key)
+    assert.equal(await prisma.storedFile.count({ where: { objectKey: key } }), 0)
+    await assert.rejects(getExport(users.viewer, org, job.id), code('ORGANIZATION_NOT_FOUND'))
+  } finally { await prisma.organizationMember.update({ where: { id: members.viewer }, data: { leftAt: null } }) }
+})
+
+it('applies changed roles and point assignments to lists and saved direct links from an open card', async () => {
+  const doc = await contentDocument()
+  assert.equal((await getDocument(users.viewer, org, doc.id)).canDownload, true)
+  assert.ok((await listDocuments(users.viewer, org, listSchema.parse({}))).documents.some(d => d.id === doc.id))
+  try {
+    await setPermissions([])
+    await assert.rejects(getDocument(users.viewer, org, doc.id), code('DOCUMENT_NOT_FOUND'))
+    await assert.rejects(deliverDocument(users.viewer, org, doc.id, 'preview'), code('DOCUMENT_NOT_FOUND'))
+    await assert.rejects(listDocuments(users.viewer, org, listSchema.parse({})), code('INSUFFICIENT_PERMISSIONS'))
+    await setPermissions()
+    await prisma.accessAssignment.updateMany({ where: { memberId: members.viewer }, data: { locationId: second } })
+    await assert.rejects(getDocument(users.viewer, org, doc.id), code('DOCUMENT_NOT_FOUND'))
+    assert.ok(!(await listDocuments(users.viewer, org, listSchema.parse({}))).documents.some(d => d.id === doc.id))
+    await assert.rejects(getDocument(users.foreign, org, doc.id), code('DOCUMENT_NOT_FOUND'))
+  } finally { await setPermissions(); await prisma.accessAssignment.updateMany({ where: { memberId: members.viewer }, data: { locationId: point } }) }
 })

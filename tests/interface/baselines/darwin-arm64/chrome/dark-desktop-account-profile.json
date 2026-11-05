@@ -1,0 +1,11 @@
+{
+  "browser": "chrome",
+  "version": "156.0.8078.76",
+  "platform": "darwin",
+  "arch": "arm64",
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "theme": "dark"
+}

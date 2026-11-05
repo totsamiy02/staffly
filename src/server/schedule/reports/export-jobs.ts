@@ -15,6 +15,8 @@ import type { ReportInput } from '../../../app/schedule/reports/reporting.ts'
 import type { ReportExport, Prisma } from '../../../generated/prisma/client.ts'
 import { startBackgroundTask } from '../../background-task.ts'
 import { stageStoredFile, deletePendingFile } from '../../storage/image-service.ts'
+import { freshFileAccess } from '../../storage/guarded-delivery.ts'
+import { parserArguments } from '../../file-processing/runner.ts'
 
 const publicJob = (job: ReportExport) => ({ id: job.id, status: job.status,
   message: job.status === 'FAILED' ? job.errorCode === 'ORGANIZATION_STORAGE_QUOTA' ? 'Хранилище организации заполнено. Освободите место и повторите экспорт.' : 'Не удалось подготовить отчёт. Проверьте доступ и повторите попытку.' : undefined,
@@ -50,7 +52,7 @@ export async function getExport(userId: string, organizationId: string, id: stri
     return tx.reportExport.findFirst({ where: { id, userId, organizationId, expiresAt: { gt: new Date() } } })
   })
   if (!job) throw new ApiError(404, 'EXPORT_NOT_FOUND', 'Отчёт не найден или срок хранения истёк.')
-  await authorizeExport(userId, organizationId, reportBody.parse(job.input))
+  await freshFileAccess(() => authorizeExport(userId, organizationId, reportBody.parse(job.input)))
   return { job, public: publicJob(job) }
 }
 
@@ -59,9 +61,10 @@ async function generate(job: ReportExport, directory: string) {
   const report = await buildReport(job.userId, job.organizationId, reportBody.parse(job.input), new Date(), 'reports.export')
   // V8 serialization preserves native dates without passing DB access to the renderer.
   await writeFile(source, serialize(report), { mode: 0o600, flag: 'wx' })
-  const child = spawn(process.execPath, ['--max-old-space-size=384', '--import', fileURLToPath(import.meta.resolve('tsx')),
-    fileURLToPath(new URL('./export-child.ts', import.meta.url)), source, output], { cwd: process.cwd(),
-    env: { PATH: process.env.PATH, TMPDIR: directory, NODE_ENV: process.env.NODE_ENV },
+  const args = parserArguments(fileURLToPath(new URL('./export-child.ts', import.meta.url)), [source, output])
+  args.unshift(`--allow-fs-read=${source}`, `--allow-fs-write=${output}`, `--allow-fs-read=${fileURLToPath(new URL('./', import.meta.url))}`, `--allow-fs-read=${fileURLToPath(new URL('../../../app/schedule/reports/', import.meta.url))}`)
+  const child = spawn(process.execPath, args, { cwd: directory,
+    env: { LANG: 'C' },
     stdio: ['ignore', 'ignore', 'pipe'] })
   converters.add(child)
   let diagnostic = ''
@@ -108,6 +111,7 @@ export async function processReportExport() {
     const staged = await stageStoredFile({ objectKey: `exports/${claimed.organizationId}/${randomUUID()}.xlsx`, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       size: bytes.length, checksumSha256: createHash('sha256').update(bytes).digest('hex'), purpose: 'DOCUMENT', uploadedByUserId: claimed.userId, organizationId: claimed.organizationId }, bytes)
     stagedId = staged.id
+    await freshFileAccess(() => authorizeExport(claimed.userId, claimed.organizationId, reportBody.parse(claimed.input)))
     // Keep the durable expiry record even after READY. A crash between object
     // upload and job binding cannot leave an untracked object in shared storage.
     const changed = await prisma.reportExport.updateMany({ where: { id: claimed.id, leaseToken: token, status: 'RUNNING' }, data: { status: 'READY', objectKey: staged.objectKey, leaseUntil: null } })

@@ -1,3 +1,4 @@
+import { registerBackupRetention } from './backup-retention.ts'
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { mkdir, open, link, unlink } from 'node:fs/promises'
@@ -33,13 +34,13 @@ export async function createDatabaseBackup({ databaseUrl, file, pgBin = '' }: { 
       // Individual libpq variables keep credentials out of argv/logs.
       env: libpqEnvironment(databaseUrl), stdio: ['ignore', 'ignore', 'pipe'],
     })
-    let stderr = ''
-    child.stderr.on('data', part => { stderr = (stderr + part).slice(-2000) })
+    child.stderr.resume()
     const code = await new Promise<number | null>((resolve, reject) => { child.once('error', reject); child.once('exit', code => resolve(code)) })
-    if (code !== 0) throw new Error(`pg_dump failed (${code}): ${stderr.replaceAll(databaseUrl, '[redacted]').replaceAll(new URL(databaseUrl).password || 'unused-secret', '[redacted]')}`)
+    if (code !== 0) throw new Error(`pg_dump failed (${code}); connection details omitted`)
     const completed = await open(temporary, 'r+')
     try { await completed.sync() } finally { await completed.close() }
     await link(temporary, destination) // Fail rather than overwrite an existing backup.
+    try { await registerBackupRetention(destination) } catch (error) { await unlink(destination); throw error }
     return destination
   } finally { await unlink(temporary).catch(() => {}) }
 }

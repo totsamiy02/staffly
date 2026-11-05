@@ -62,6 +62,14 @@ it('spreads early refresh decisions without extending token expiry', () => {
   assert.ok(tokens.every(token => !accessTokenNeedsRefresh(token, exp * 1000 - 151000)))
 })
 
+it('retries a lost refresh response once while holding the shared cookie lock', async () => {
+  const original = globalThis.fetch
+  let calls = 0
+  globalThis.fetch = async () => { if (++calls === 1) throw new TypeError('Response lost'); return Response.json({ accessToken: 'recovered' }) }
+  try { assert.deepEqual(await refreshSession(), { accessToken: 'recovered' }); assert.equal(calls, 2) }
+  finally { globalThis.fetch = original }
+})
+
 it('refreshes an expiring access token before the protected request', async () => {
   let token = jwt(Math.floor(Date.now() / 1000) - 1)
   const fresh = jwt(Math.floor(Date.now() / 1000) + 900)

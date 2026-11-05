@@ -1,3 +1,4 @@
+import { recordSecurityEvent } from '../security/journal.ts'
 import { createHash } from 'node:crypto'
 import { z } from 'zod'
 import type { Prisma } from '../../generated/prisma/client.ts'
@@ -177,6 +178,7 @@ export async function confirmDeparture(userId: string, organizationId: string, m
         await tx.documentAcknowledgement.updateMany({ where: { memberId, acknowledgedAt: null, cancelledAt: null, document: { organizationId } }, data: { cancelledAt: data.now } })
       }
       const result: DepartureResult = { scope: input.scope, locationId: data.actor.locationId, cancelled: input.choices.filter(c => c.action === 'cancel').length, reassigned: input.choices.filter(c => c.action === 'reassign').length, retainedCurrent: current.length }
+      await recordSecurityEvent(tx, { action: 'MEMBER_DEPARTED', userId, organizationId, resourceType: 'MEMBER', resourceId: memberId })
       await tx.accessAudit.create({ data: { organizationId, actorMemberId: data.actor.id, action: input.scope === 'organization' ? 'MEMBER_EXCLUDED' : 'MEMBER_LOCATION_REMOVED', details: { memberId, name: name(data.target.user), actorName: name(reviewer), ...result, reason, choices: input.choices, keepCurrent: input.keepCurrent, drafts: data.drafts.map(d => d.id), revokedTransfers: data.transfers.map(t => t.id), previousShifts: future.map(s => ({ id: s.id, memberId: s.memberId, startAt: s.scheduledStartAt.toISOString(), endAt: s.scheduledEndAt.toISOString() })) } } })
       return result
     }, { isolationLevel: 'Serializable', timeout: 30000 })

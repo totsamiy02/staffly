@@ -103,6 +103,7 @@ model User {
   emailDeliveries EmailDelivery[]
 
   sessions                 AuthSession[]
+  deletionChallenge        AccountDeletionChallenge?
   identities               AuthIdentity[]
   oauthAttempts            OAuthAttempt[]
   emailChangeTokens        EmailChangeToken[]
@@ -816,15 +817,79 @@ model AuthSession {
   idleExpiresAt     DateTime  @map("idle_expires_at") @db.Timestamptz(3)
   absoluteExpiresAt DateTime  @map("absolute_expires_at") @db.Timestamptz(3)
   revokedAt         DateTime? @map("revoked_at") @db.Timestamptz(3)
+  refreshReuseDetectedAt DateTime? @map("refresh_reuse_detected_at") @db.Timestamptz(3)
   userAgent         String?   @map("user_agent") @db.VarChar(512)
   ipAddress         String?   @map("ip_address") @db.VarChar(45)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshTokenUses RefreshTokenUse[]
 
   @@index([browserTokenHash, revokedAt])
   @@index([userId, revokedAt])
   @@index([idleExpiresAt])
   @@map("auth_sessions")
+}
+
+model RefreshTokenUse {
+  tokenHash String @id @map("token_hash") @db.VarChar(64)
+  sessionId String @map("session_id") @db.Uuid
+  consumedAt DateTime @map("consumed_at") @db.Timestamptz(3)
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+  session AuthSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@index([expiresAt])
+  @@map("refresh_token_uses")
+}
+
+model SecurityEvent {
+  id String @id @default(uuid()) @db.Uuid
+  userId String? @map("user_id") @db.Uuid
+  organizationId String? @map("organization_id") @db.Uuid
+  sessionId String? @map("session_id") @db.Uuid
+  correlationId String @map("correlation_id") @db.Uuid
+  action String @db.VarChar(64)
+  outcome String @db.VarChar(16)
+  resourceType String? @map("resource_type") @db.VarChar(24)
+  resourceId String? @map("resource_id") @db.Uuid
+  reasonCode String? @map("reason_code") @db.VarChar(64)
+  count Int?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  expiresAt DateTime @default(dbgenerated("(CURRENT_TIMESTAMP + interval '180 days')")) @map("expires_at") @db.Timestamptz(3)
+  @@index([userId, organizationId, createdAt, id])
+  @@index([organizationId, createdAt, id])
+  @@index([correlationId])
+  @@index([expiresAt])
+  @@map("security_events")
+}
+
+model DataDeletion {
+  id String @id @default(uuid()) @db.Uuid
+  kind String @db.VarChar(16)
+  subjectId String @map("subject_id") @db.Uuid
+  requestedAt DateTime @default(now()) @map("requested_at") @db.Timestamptz(3)
+  dueAt DateTime @map("due_at") @db.Timestamptz(3)
+  completedAt DateTime? @map("completed_at") @db.Timestamptz(3)
+  hold Boolean @default(false)
+  attempts Int @default(0)
+  lastErrorCode String? @map("last_error_code") @db.VarChar(64)
+  @@unique([kind, subjectId])
+  @@index([completedAt, dueAt])
+  @@map("data_deletions")
+}
+
+model AccountDeletionChallenge {
+  id String @id @default(uuid()) @db.Uuid
+  userId String @unique @map("user_id") @db.Uuid
+  sessionId String @map("session_id") @db.Uuid
+  securityVersion Int @map("security_version")
+  codeHash String @map("code_hash") @db.VarChar(64)
+  attempts Int @default(0)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([expiresAt])
+  @@map("account_deletion_challenges")
 }
 
 model EmailVerificationToken {

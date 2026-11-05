@@ -1,3 +1,5 @@
+import { safeError } from './security/safe-error.ts'
+import { securityContext } from './security/journal.ts'
 import subscriptionRouter, { subscriptionWritePolicy } from './subscriptions/routes.ts'
 import teamPlanningRouter from './schedule/planning/team-planning-routes.ts'
 import express from 'express'
@@ -33,6 +35,7 @@ import { drainHttpServer } from './http-drain.ts'
 if (process.env.NODE_ENV === 'production') await checkDatabasePolicy(databasePool)
 
 const app = express()
+app.use(securityContext)
 app.disable('x-powered-by')
 const metrics = createHttpMetrics()
 app.use(metrics.middleware)
@@ -84,7 +87,7 @@ if (process.env.NODE_ENV !== 'production') app.get('/api/database-status', async
     const result = await prisma.$queryRaw<Array<{ database: string; server_time: Date }>>`SELECT current_database() AS database, now() AS server_time`
     response.json({ connected: true, ...result[0] })
   } catch (error) {
-    console.error('Database connection failed:', error)
+    console.error('Database connection failed:', safeError(error))
     response.status(503).json({ connected: false, message: 'Не удалось подключиться к базе данных' })
   }
 })
@@ -92,7 +95,7 @@ if (process.env.NODE_ENV !== 'production') app.get('/api/database-status', async
 const live = createLiveHub()
 let warmed = process.env.API_WARMUP !== 'true'
 const warming = warmed ? Promise.resolve() : warmReadPaths().then(() => { warmed = true }).catch(error => {
-  console.error('API warm-up failed:', error instanceof Error ? error.name : 'Error')
+  console.error('API warm-up failed:', safeError(error))
   process.exitCode = 1; void shutdown()
 })
 app.get('/internal/metrics', metrics.handler(live.size))
@@ -147,7 +150,7 @@ app.use((error: unknown, request: express.Request, response: express.Response, _
     response.status(409).json({ code: 'CONCURRENT_UPDATE', message: 'Данные уже изменились. Повторите запрос.' })
     return
   }
-  console.error('API error:', error)
+  console.error('API error:', safeError(error))
   response.status(500).json({ code: 'INTERNAL_ERROR', message: 'Внутренняя ошибка сервера.' })
 })
 
@@ -174,7 +177,7 @@ async function shutdown() {
     await prisma.$disconnect()
     clearTimeout(deadline)
   } catch (error) {
-    console.error('API shutdown failed:', error)
+    console.error('API shutdown failed:', safeError(error))
     process.exitCode = 1
   }
 }

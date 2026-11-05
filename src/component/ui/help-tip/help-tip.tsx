@@ -12,14 +12,20 @@ export default function HelpTip({ children, label = 'Пояснение', classN
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current) }, [])
   useLayoutEffect(() => {
     if (!open) return
-    const rect = trigger.current?.getBoundingClientRect(), height = popup.current?.offsetHeight ?? 80
-    if (rect) setStyle({ position: 'fixed', width: Math.min(280, window.innerWidth - 24), left: Math.max(12, Math.min(rect.left - 12, window.innerWidth - 292)), top: rect.bottom + height + 18 < window.innerHeight ? rect.bottom + 8 : Math.max(12, rect.top - height - 8), visibility: 'visible' })
+    function position() {
+      const rect = trigger.current?.getBoundingClientRect(), height = popup.current?.offsetHeight ?? 80
+      if (rect) setStyle({ position: 'fixed', width: Math.min(280, window.innerWidth - 24), left: Math.max(12, Math.min(rect.left - 12, window.innerWidth - 292)), top: rect.bottom + height + 18 < window.innerHeight ? rect.bottom + 8 : Math.max(12, rect.top - height - 8), visibility: 'visible' })
+    }
+    position()
     function close() { setOpen(false) }
     function escape(event: KeyboardEvent) { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close() } }
     function outside(event: PointerEvent) { if (!trigger.current?.contains(event.target as Node) && !popup.current?.contains(event.target as Node)) close() }
-    window.addEventListener('scroll', close, true); window.addEventListener('resize', close)
+    // Focusing a control can scroll its dialog in Firefox. Keep keyboard help
+    // visible and anchored instead of closing it immediately after focus.
+    function viewportChanged() { if (document.activeElement === trigger.current) position(); else close() }
+    window.addEventListener('scroll', viewportChanged, true); window.addEventListener('resize', viewportChanged)
     document.addEventListener('keydown', escape, true); document.addEventListener('pointerdown', outside, true)
-    return () => { window.removeEventListener('scroll', close, true); window.removeEventListener('resize', close); document.removeEventListener('keydown', escape, true); document.removeEventListener('pointerdown', outside, true) }
+    return () => { window.removeEventListener('scroll', viewportChanged, true); window.removeEventListener('resize', viewportChanged); document.removeEventListener('keydown', escape, true); document.removeEventListener('pointerdown', outside, true) }
   }, [open])
   // A native button here would become the implicit control of an enclosing field label.
   return <span className={`staffly-help ${className}`}>

@@ -6,6 +6,7 @@ import CookieConsent from './component/cookie-consent/cookie-consent.tsx'
 import ProtectedRoute from './pages/app/shell/protected-route.tsx'
 import StatusPage from './pages/error/status-page.tsx'
 import ThemeToggle from './component/ui/theme-toggle/theme-toggle.tsx'
+import RouteAccessibility from './app/route/route-accessibility.tsx'
 
 const PrivacyPolicy = lazy(() => import('./pages/legal/privacy-policy.tsx'))
 const PersonalDataConsent = lazy(() => import('./pages/legal/personal-data-consent.tsx'))
@@ -35,6 +36,7 @@ function App() {
 
   return (
     <>
+      <RouteAccessibility />
       {!hidePublicFrame && <Header />}
       {isAuthPage && <div className="auth-theme-control"><ThemeToggle /></div>}
 

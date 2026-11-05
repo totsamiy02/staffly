@@ -4,7 +4,6 @@ import { useQuery } from '@tanstack/react-query'
 import { useAuth } from '../../../app/auth/auth-context.tsx'
 import { useAccessRoles } from '../../../app/access/queries.ts'
 import { useDocumentMembers } from '../../../app/documents/queries.ts'
-import HelpTip from '../../../component/ui/help-tip/help-tip.tsx'
 import MemberPicker from '../members/profile/profile-member-picker.tsx'
 import './document-audience.scss'
 export type Audience = { audienceRoleIds: string[]; audienceMemberIds: string[]; inheritAccess: boolean }
@@ -22,7 +21,7 @@ export default function DocumentAudience({ organizationId,value,onChange,pointId
       <MemberPicker label="Дополнительные сотрудники" members={(members.data?.members ?? []).filter(m=>!m.former).map(m=>({id:m.id,displayName:m.name,avatarUrl:m.avatarUrl,email:m.email}))} value={value.audienceMemberIds} onChange={ids=>onChange({...value,audienceMemberIds:ids})} disabled={disabled} loading={members.isLoading}/>
       {members.isError && <p className="form-inline-error" role="alert">Не удалось загрузить сотрудников.</p>}
     </>}
-    {preview.data && <details className="document-audience-preview"><summary><span className="document-audience-preview__title">Доступ к документу<HelpTip label="Как определяется доступ к документу">Учитываются права на библиотеку, выбранная точка и доступ родительских папок. Владелец имеет полный доступ. При выборе роли учитываются её текущие участники.</HelpTip></span><span className="document-audience-preview__count">С доступом: {preview.data.members.filter(m=>m.allowed).length}</span><span className="document-audience-preview__chevron" aria-hidden="true">⌄</span></summary><ul>{preview.data.members.map(m=><li key={m.id}><MemberAvatar memberId={m.id} locationId={pointId || undefined} url={m.avatarUrl} name={m.name} className="app-avatar"/><span className="document-audience-preview__name">{m.name}</span><span className={`document-audience-preview__status${m.allowed?' is-allowed':''}`}>{m.allowed?'Есть доступ':'Нет доступа'}</span></li>)}</ul></details>}
+    {preview.data && <details className="document-audience-preview"><summary><span className="document-audience-preview__title">Доступ к документу</span><span className="document-audience-preview__count">С доступом: {preview.data.members.filter(m=>m.allowed).length}</span><span className="document-audience-preview__chevron" aria-hidden="true">⌄</span></summary><p className="document-audience-preview__explanation">Учитываются права на библиотеку, выбранная точка и родительские папки. Владелец имеет полный доступ. Состав выбранных ролей проверяется при каждом обращении.</p><ul>{preview.data.members.map(m=><li key={m.id}><MemberAvatar memberId={m.id} locationId={pointId || undefined} url={m.avatarUrl} name={m.name} className="app-avatar"/><span className="document-audience-preview__name">{m.name}</span><span className={`document-audience-preview__status${m.allowed?' is-allowed':''}`}>{m.allowed?'Есть доступ':'Нет доступа'}</span></li>)}</ul></details>}
     {preview.isError&&<p className="form-inline-error">Не удалось проверить аудиторию. {preview.error.message}</p>}
   </div>
 }

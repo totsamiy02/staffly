@@ -1,5 +1,5 @@
 import { createHash,randomUUID } from 'node:crypto'
-import sharp from 'sharp'
+import { processFile } from '../file-processing/client.ts'
 import { definitionOf } from '../../app/requests/workflow.ts'
 import { ApiError } from '../api-error.ts'
 import { prisma } from '../db.ts'
@@ -9,6 +9,8 @@ import { storage } from '../storage/provider.ts'
 import { lockRequest } from './request-lock.ts'
 import { notifyStage } from './request-notifications.ts'
 import { assertRequestFileAccess } from './service.ts'
+import { freshFileAccess } from '../storage/guarded-delivery.ts'
+import { getMembership } from '../organizations/access/permissions.ts'
 
 export const MAX_REQUEST_FILE_BYTES = 10 * 1024 * 1024
 const allowed = new Map([['application/pdf', 'pdf'], ['image/jpeg', 'jpg'], ['image/png', 'png'], ['image/webp', 'webp']])
@@ -31,13 +33,11 @@ async function validateContents(input: Buffer, mimeType: string) {
     if (input.subarray(0, 5).toString('ascii') !== '%PDF-' || !input.subarray(Math.max(0, input.length - 2048)).includes(Buffer.from('%%EOF'))) throw new ApiError(400, 'INVALID_ATTACHMENT', 'PDF повреждён или имеет неверный формат.')
     return
   }
-  try {
-    const image = sharp(input, { failOn: 'error', limitInputPixels: 25_000_000 })
-    const metadata = await image.metadata()
-    const expected = mimeType === 'image/jpeg' ? 'jpeg' : mimeType.slice(6)
-    if (metadata.format !== expected || (metadata.pages ?? 1) > 1) throw new Error('format mismatch')
-    await image.raw().toBuffer() // Decode pixels too: a valid header alone can hide a truncated image.
-  } catch { throw new ApiError(400, 'INVALID_ATTACHMENT', 'Изображение повреждено или его содержимое не соответствует формату.') }
+  try { return await processFile('image', mimeType === 'image/jpeg' ? 'jpeg' : mimeType.slice(6), input) }
+  catch (error) {
+    if (error instanceof ApiError && error.code === 'INVALID_DOCUMENT_FILE') throw new ApiError(400, 'INVALID_ATTACHMENT', 'Изображение повреждено или его содержимое не соответствует формату.')
+    throw error
+  }
 }
 
 export async function addRequestAttachment(userId: string, organizationId: string, requestId: string, input: unknown, mimeType: string, originalName?: string) {
@@ -50,16 +50,20 @@ export async function addRequestAttachment(userId: string, organizationId: strin
   const count = await prisma.requestAttachment.count({ where: { requestId } })
   if (count >= 5) throw new ApiError(409, 'ATTACHMENT_LIMIT', 'К одной заявке можно добавить не больше пяти файлов.')
   if (!Buffer.isBuffer(input)) throw new ApiError(400, 'EMPTY_ATTACHMENT', 'Выберите файл для загрузки.')
-  await validateContents(input, mimeType)
+  const contents = await validateContents(input, mimeType) ?? input
+  if (contents.length > MAX_REQUEST_FILE_BYTES) throw new ApiError(413, 'ATTACHMENT_TOO_LARGE', 'Изображение после обработки превышает допустимый размер.')
   const extension = allowed.get(mimeType)!
   const objectKey = `organizations/${organizationId}/requests/${requestId}/${randomUUID()}.${extension}`
   const fileName = safeName(originalName, extension)
-  const staged = await stageStoredFile({ objectKey, mimeType, size: input.length, checksumSha256: createHash('sha256').update(input).digest('hex'), purpose: 'REQUEST_ATTACHMENT', uploadedByUserId: userId, organizationId }, input)
+  const staged = await stageStoredFile({ objectKey, mimeType, size: contents.length, checksumSha256: createHash('sha256').update(contents).digest('hex'), purpose: 'REQUEST_ATTACHMENT', uploadedByUserId: userId, organizationId }, contents)
   try {
     return await prisma.$transaction(async (tx) => {
       await lockRequest(tx,requestId)
       const fresh=await tx.organizationRequest.findFirst({where:{id:requestId,organizationId,OR:[{createdByMemberId:actor.id},{authorMemberId:actor.id}],status:{in:['PENDING','DRAFT','RETURNED']}},include:{requestType:true}})
       if(!fresh)throw new ApiError(409,'REQUEST_ALREADY_RESOLVED','Обращение уже рассмотрено.')
+      const current = await getMembership(userId, organizationId, tx)
+      requirePermission(current, 'requests.edit', fresh.locationId)
+      if (fresh.createdByMemberId !== current.id) requirePermission(current, 'requests.onBehalf', fresh.locationId)
       if(!(definitionOf(fresh.formSnapshot).allowsAttachments??fresh.requestType.allowsAttachments))throw new ApiError(400,'ATTACHMENTS_NOT_ALLOWED','Вложения недоступны.')
       const duplicate=await tx.requestAttachment.findFirst({where:{requestId,fileName,storedFile:{checksumSha256:staged.checksumSha256}},include:{storedFile:true}})
       if(duplicate)return duplicate
@@ -78,10 +82,12 @@ export async function addRequestAttachment(userId: string, organizationId: strin
 export async function downloadRequestAttachment(userId: string, organizationId: string, requestId: string, attachmentId: string) {
   await assertRequestFileAccess(userId, organizationId, requestId)
   const attachment = await prisma.requestAttachment.findFirst({ where: { id: attachmentId, requestId, request: { organizationId } }, include: { storedFile: true } })
-  if (!attachment || attachment.storedFile.purpose !== 'REQUEST_ATTACHMENT') throw new ApiError(404, 'ATTACHMENT_NOT_FOUND', 'Вложение не найдено.')
+  if (!attachment || attachment.storedFile.purpose !== 'REQUEST_ATTACHMENT' || attachment.storedFile.organizationId !== organizationId || attachment.storedFile.pendingDeletionAt || attachment.storedFile.purgedAt) throw new ApiError(404, 'ATTACHMENT_NOT_FOUND', 'Вложение не найдено.')
   let contents: Buffer
   try { contents = await storage.read(attachment.storedFile.objectKey) }
   catch (error) { if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') throw new ApiError(404, 'ATTACHMENT_NOT_FOUND', 'Вложение не найдено.'); throw error }
+  await freshFileAccess(() => assertRequestFileAccess(userId, organizationId, requestId))
+  if (!await prisma.requestAttachment.count({ where: { id: attachmentId, requestId, storedFile: { organizationId, pendingDeletionAt: null, purgedAt: null } } })) throw new ApiError(404, 'ATTACHMENT_NOT_FOUND', 'Вложение не найдено.')
   return { attachment, contents }
 }
 

@@ -28,7 +28,13 @@
     "db:backup": "node --import tsx scripts/database-backup.ts",
     "db:time:plan": "node --env-file=src/server/.env --import tsx scripts/database-time-migration.ts",
     "db:time:apply": "node --env-file=src/server/.env --import tsx scripts/database-time-migration.ts --apply=true",
-    "test:frontend": "node --import tsx tests/performance/load-test.mjs --profile=frontend"
+    "test:frontend": "node --import tsx tests/performance/load-test.mjs --profile=frontend",
+    "test:interface": "node --import tsx tests/performance/load-test.mjs --profile=interface --modals=true",
+    "test:interface:smoke": "node --import tsx tests/performance/load-test.mjs --profile=interface --browsers=chrome --routes=auth,account-profile,controls --viewports=desktop,mobile --quiet=true",
+    "test:interface:visual:update": "node --import tsx tests/performance/load-test.mjs --profile=interface --routes=auth,register,forgot,account-profile,controls --viewports=desktop,mobile --update-visual=true",
+    "test:interface:browsers": "PLAYWRIGHT_BROWSERS_PATH=artifacts/browser-binaries playwright install chromium firefox webkit",
+    "data:retention": "node --env-file=src/server/.env --import tsx scripts/data-retention.ts",
+    "db:backup:retention": "node --import tsx scripts/backup-retention.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1158.0",
@@ -73,6 +79,8 @@
     }
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.14.0",
+    "@playwright/test": "^1.64.1",
     "@types/cookie-parser": "^1.4.10",
     "@types/express": "^5.0.6",
     "@types/node": "^24.13.2",
@@ -83,6 +91,8 @@
     "@vitejs/plugin-react": "^6.0.3",
     "concurrently": "^10.0.6",
     "oxlint": "^1.71.0",
+    "pixelmatch": "^8.0.0",
+    "pngjs": "^7.0.0",
     "prisma": "^7.10.1",
     "sass-embedded": "^1.100.0",
     "typescript": "~6.0.2",

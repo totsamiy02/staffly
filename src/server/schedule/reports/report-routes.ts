@@ -1,13 +1,15 @@
+import { auditSensitiveAccess } from '../../security/journal.ts'
 import { Router, type Request } from 'express'
 import { accountRateLimit } from '../../security/rate-limit.ts'
 import { z } from 'zod'
-import { requireAuth, type AuthenticatedRequest } from '../../auth.ts'
+import { requireAuth, assertActiveSession, type AuthenticatedRequest } from '../../auth.ts'
 import { ApiError } from '../../api-error.ts'
 import { reportBody, templateBody } from './report-schemas.ts'
 import { buildReport, previewReport, reportOptions, reportMembers, saveReportTemplate, deleteReportTemplate } from './report-service.ts'
 import { enqueueExport, getExport } from './export-jobs.ts'
 import { storage } from '../../storage/provider.ts'
 import { pipeline } from 'node:stream/promises'
+import { freshFileAccess, guardFileStream } from '../../storage/guarded-delivery.ts'
 
 const router = Router()
 router.use(requireAuth)
@@ -21,10 +23,10 @@ const user = (request: Request) => (request as AuthenticatedRequest).auth!.userI
 const base = '/organizations/:organizationId/statistics/reports'
 router.get(base + '/options', async (request, response) => { const { organizationId } = parse(params, request.params); response.set('Cache-Control', 'no-store').json(await reportOptions(user(request), organizationId)) })
 router.post(base + '/members', heavyLimiter, async (request, response) => { const { organizationId } = parse(params, request.params); response.set('Cache-Control', 'no-store').json(await reportMembers(user(request), organizationId, parse(reportBody, request.body))) })
-router.post(base + '/preview', heavyLimiter, async (request, response) => { const { organizationId } = parse(params, request.params); response.set('Cache-Control', 'no-store').json(previewReport(await buildReport(user(request), organizationId, parse(reportBody, request.body)))) })
+router.post(base + '/preview', heavyLimiter, async (request, response) => { const { organizationId } = parse(params, request.params); response.set('Cache-Control', 'no-store').json(previewReport(await auditSensitiveAccess({ action: 'REPORT_PREVIEW', userId: user(request), organizationId }, () => buildReport(user(request), organizationId, parse(reportBody, request.body))))) })
 router.post(base + '/export', exportLimiter, async (request, response) => {
   const { organizationId } = parse(params, request.params), input = parse(reportBody, request.body)
-  response.status(202).set('Cache-Control', 'no-store').json({ job: await enqueueExport(user(request), organizationId, input) })
+  response.status(202).set('Cache-Control', 'no-store').json({ job: await auditSensitiveAccess({ action: 'REPORT_EXPORT', userId: user(request), organizationId }, () => enqueueExport(user(request), organizationId, input)) })
 })
 router.get(base + '/exports/:jobId', async (request, response) => {
   const { organizationId, jobId } = parse(params.extend({ jobId: z.uuid() }), request.params)
@@ -32,11 +34,15 @@ router.get(base + '/exports/:jobId', async (request, response) => {
 })
 router.get(base + '/exports/:jobId/content', async (request, response) => {
   const { organizationId, jobId } = parse(params.extend({ jobId: z.uuid() }), request.params)
-  const { job } = await getExport(user(request), organizationId, jobId)
+  const { job } = await auditSensitiveAccess({ action: 'EXPORT_DOWNLOAD', userId: user(request), organizationId, resourceType: 'EXPORT', resourceId: jobId }, () => getExport(user(request), organizationId, jobId))
   if (job.status !== 'READY' || !job.objectKey) throw new ApiError(409, 'EXPORT_NOT_READY', 'Отчёт ещё готовится.')
   const object = await storage.stream(job.objectKey)
+  const authorize = async () => { await assertActiveSession((request as AuthenticatedRequest).auth!); return getExport(user(request), organizationId, jobId) }
+  const stream = guardFileStream(object.stream, authorize)
+  try { await freshFileAccess(authorize) }
+  catch (error) { stream.destroy(); object.stream.destroy(); throw error }
   response.set({ 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Content-Disposition': 'attachment; filename="Staffly.xlsx"', 'Content-Length': String(object.size), 'Cache-Control': 'private, no-store' })
-  await pipeline(object.stream, response)
+  await pipeline(stream, response)
 })
 router.post(base + '/templates', mutationLimiter, async (request, response) => { const { organizationId } = parse(params, request.params); response.status(201).json(await saveReportTemplate(user(request), organizationId, null, parse(templateBody, request.body))) })
 router.put(base + '/templates/:templateId', mutationLimiter, async (request, response) => { const { organizationId, templateId } = parse(templateParams, request.params); response.json(await saveReportTemplate(user(request), organizationId, templateId, parse(templateBody, request.body))) })

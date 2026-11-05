@@ -1,3 +1,6 @@
+import { safeError } from '../security/safe-error.ts'
+import { auditSensitiveAccess } from '../security/journal.ts'
+import { securityHistory } from '../security/history-service.ts'
 import { organizationResources } from '../resources/quotas.ts'
 import { previewDeparture, confirmDeparture, departureCandidates, departureBody, departureScope } from './departure-service.ts'
 import { memberProfile } from './member-profile-service.ts'
@@ -92,11 +95,17 @@ router.get('/organizations/:organizationId/members', async (request, response) =
   response.json({ members: await listMembers(auth(request).userId, organizationId) })
 })
 
+router.get('/organizations/:organizationId/security-history', async (request, response) => {
+  const { organizationId } = parse(organizationIdParams, request.params)
+  const { page } = parse(z.object({ page: z.coerce.number().int().min(1).max(100000).default(1) }), request.query)
+  response.set('Cache-Control', 'private, no-store').json(await securityHistory(auth(request).userId, organizationId, page))
+})
+
 router.get('/organizations/:organizationId/members/:memberId/profile', async (request, response) => {
   const { organizationId, memberId } = parse(memberParams, request.params)
   const options = parse(z.object({ month: z.string().regex(/^(20\d{2})-(0[1-9]|1[0-2])$/), page: z.coerce.number().int().min(1).max(100000).default(1), section: z.enum(['overview', 'time', 'documents', 'requests']).default('overview'), kind: z.enum(['personal', 'acknowledgements']).default('personal'), requestState: z.enum(['all', 'pending']).default('all') }), request.query)
   response.set('Cache-Control', 'private, no-store')
-  response.json(await memberProfile(auth(request).userId, organizationId, memberId, options))
+  response.json(await auditSensitiveAccess({ action: 'MEMBER_PROFILE', userId: auth(request).userId, organizationId, resourceType: 'MEMBER', resourceId: memberId }, () => memberProfile(auth(request).userId, organizationId, memberId, options)))
 })
 
 router.patch('/organizations/:organizationId/members/:memberId/role', async (request, response) => {
@@ -134,7 +143,7 @@ router.post('/organizations/:organizationId/invitations/email', invitationLimite
   const result = await createEmailInvitation(auth(request).userId, organizationId, email)
   let emailDelivered = true
   try { await deliverOrganizationInvitation(email, result.organizationName, result.inviterName, result.token, result.invitation.expiresAt, result.logoUrl) }
-  catch (error) { emailDelivered = false; console.error('Organization invitation email failed:', error) }
+  catch (error) { emailDelivered = false; console.error('Organization invitation email failed:', safeError(error)) }
   response.status(201).json({ invitation: { id: result.invitation.id, email, expiresAt: result.invitation.expiresAt }, emailDelivered })
 })
 router.post('/organizations/:organizationId/invitations/:invitationId/resend', invitationLimiter, async (request, response) => {

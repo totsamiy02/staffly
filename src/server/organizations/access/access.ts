@@ -1,3 +1,4 @@
+import { recordSecurityEvent } from '../../security/journal.ts'
 import { browsePermissionKeys, crossPointPermissionKeys, permissionCatalog, permissionKeys, recommendedPermissions, systemRoleNames, type Permission } from '../../../app/access/catalog.ts'
 import type { Prisma } from '../../../generated/prisma/client.ts'
 import { ApiError } from '../../api-error.ts'
@@ -45,7 +46,9 @@ export function resolveAccess(member: { role: 'OWNER'|'ADMIN'|'MEMBER'; accessCo
   return { owner, accessSystemCode:global?.systemCode, permissions, organizationPermissions, permissionLocations: map, roleName: owner ? 'Владелец' : current?.name ?? global?.name ?? (!member.accessConfigured ? fallback?.name : undefined) ?? 'Без роли' }
 }
 export async function auditAccess(db: DB, actor: { id: string; organizationId: string }, action: string, details: Prisma.InputJsonValue) {
-  await db.accessAudit.create({ data: { organizationId: actor.organizationId, actorMemberId: actor.id, action, details } })
+  const entry = await db.accessAudit.create({ data: { organizationId: actor.organizationId, actorMemberId: actor.id, action, details } })
+  const member = await db.organizationMember.findUniqueOrThrow({ where: { id: actor.id }, select: { userId: true } })
+  await recordSecurityEvent(db, { action: 'ACCESS_CHANGED', userId: member.userId, organizationId: actor.organizationId, resourceType: 'ACCESS', resourceId: entry.id })
 }
 export async function loadPermissionMembers(db: DB, organizationId: string) {
   const members = await db.organizationMember.findMany({ where: { organizationId, leftAt: null, user: { deletedAt: null }, organization: { deletedAt: null } }, include: { _count: {select:{locationMemberships:true}}, locationMemberships: { where: { leftAt: null } }, accessAssignments: true } })

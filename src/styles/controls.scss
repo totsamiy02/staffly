@@ -62,7 +62,7 @@ input[type=time]::-webkit-calendar-picker-indicator { display: none; }
 .auth input:disabled { color: var(--theme-quiet,#a4a4ab) !important; background-color: var(--theme-solid,#292929) !important; }
 .auth input[readonly] { color: var(--theme-quiet,#dedee3) !important; }
 .staffly-calendar--floating { z-index:2000; min-width:0; overscroll-behavior:contain; box-sizing:border-box; }
-.staffly-control[aria-readonly=true] { background: var(--theme-surface-muted,#f5f5f6); color: var(--theme-text,#454b54); cursor: default; }
+.staffly-control[data-readonly=true] { background: var(--theme-surface-muted,#f5f5f6); color: var(--theme-text,#454b54); cursor: default; }
 input[aria-invalid=true]:focus-visible, textarea[aria-invalid=true]:focus-visible, input:user-invalid:focus-visible, textarea:user-invalid:focus-visible { outline-color: var(--theme-danger,#a34b4b) !important; }
 .auth__field, .account-password-field > div {
   --field-focus: var(--theme-focus,#686868);
@@ -89,4 +89,7 @@ input[aria-invalid=true]:focus-visible, textarea[aria-invalid=true]:focus-visibl
 [data-tone=rose] { --point-color: var(--theme-rose,#ac526d); --point-bg: var(--theme-rose-bg,#fcf0f4); --point-border: var(--theme-rose-border,#f0d4dd); }
 [data-tone=clay] { --point-color: var(--theme-warning,#996145); --point-bg: var(--theme-warning-bg,#faf1e9); --point-border: var(--theme-warning-border,#ead8c9); }
 .staffly-select__options--floating { z-index: 2000; min-width: 0; overscroll-behavior: contain; scrollbar-width: thin; box-sizing: border-box; }
+@media(max-width:600px) {
+  input:not([type=checkbox]):not([type=radio]):not([type=file]):not([type=hidden]):not(.staffly-select__validation),textarea {font-size:16px!important;}
+}
 .staffly-select > button.staffly-select__profile {width:auto;min-height:26px;height:auto;padding:3px 0;margin-top:5px;border:0;background:transparent;font:inherit;font-size:11px;color:var(--theme-muted,#777);cursor:pointer;text-align:left;}

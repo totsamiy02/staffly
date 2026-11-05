@@ -1,19 +1,15 @@
 import { createHash } from 'node:crypto'
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
-import { tmpdir } from 'node:os'
-import { fileURLToPath } from 'node:url'
 import type { Readable } from 'node:stream'
 import { ApiError } from '../api-error.ts'
 import { fileExtension } from '../../app/file-preview/formats.ts'
 import { LEGACY_PREVIEW_MIME, SHEET_PREVIEW_MIME } from '../../app/file-preview/types.ts'
 import { MAX_DOCUMENT_BYTES } from '../documents/file-validation.ts'
-import { runProcess } from './process.ts'
+import { processFile } from '../file-processing/client.ts'
 
 export type PreparedPreview = { bytes: Buffer; mime: string }
-const CACHE_BYTES = 64 * 1024 * 1024, MAX_RESULT = 40 * 1024 * 1024, TTL = 10 * 60_000
+const CACHE_BYTES = 64 * 1024 * 1024, TTL = 10 * 60_000
 // Include the parser revision so prepared output never crosses incompatible rendering changes.
-const PREVIEW_REVISION = 'ooxml-namespaces-1'
+const PREVIEW_REVISION = 'isolated-processing-2'
 const cache = new Map<string, PreparedPreview & { expires: number }>()
 const pending = new Map<string, Promise<PreparedPreview>>()
 let cacheSize = 0, running = 0
@@ -40,15 +36,10 @@ export async function preparePreview(bytes: Buffer, name: string, organizationId
   if (found) { cache.delete(key); cache.set(key, found); return found }
   const active = pending.get(key); if (active) return active
   const promise = slot(async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'staffly-preview-'))
     try {
-      await writeFile(join(directory, `source.${extension}`), bytes, { mode: 0o600 })
       const table = ['xls', 'xlsx', 'csv'].includes(extension)
-      const output = join(directory, 'preview.json')
       const mime = table ? SHEET_PREVIEW_MIME : LEGACY_PREVIEW_MIME
-      await runProcess(process.execPath, ['--max-old-space-size=384', '--import', fileURLToPath(import.meta.resolve('tsx')), fileURLToPath(new URL('./workbook-worker.ts', import.meta.url)), join(directory, `source.${extension}`), output, extension], directory, 30_000)
-      if ((await stat(output)).size > MAX_RESULT) throw new ApiError(413, 'PREVIEW_TOO_LARGE', 'Результат слишком велик для предпросмотра. Скачайте оригинал.')
-      const result = { bytes: await readFile(output), mime }
+      const result = { bytes: await processFile('preview', extension, bytes), mime }
       while (cacheSize + result.bytes.length > CACHE_BYTES && cache.size) { const id = cache.keys().next().value!; cacheSize -= cache.get(id)!.bytes.length; cache.delete(id) }
       cache.set(key, { ...result, expires: Date.now() + TTL }); cacheSize += result.bytes.length
       return result
@@ -57,7 +48,7 @@ export async function preparePreview(bytes: Buffer, name: string, organizationId
       // Do not expose filesystem paths or converter diagnostics to clients.
       const message = error instanceof Error && error.message.startsWith('Таблица слишком велика') ? error.message : 'Не удалось подготовить просмотр. Файл может быть повреждён, защищён паролем или содержать неподдерживаемые элементы.'
       throw new ApiError(422, 'PREVIEW_FAILED', message)
-    } finally { await rm(directory, { recursive: true, force: true }) }
+    }
   })
   pending.set(key, promise)
   try { return await promise } finally { pending.delete(key) }

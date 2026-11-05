@@ -114,9 +114,13 @@ try {
   const flood = await Promise.all(Array.from({ length: 1000 }, () => request('/api/probe')))
   const statuses = Object.fromEntries([...new Set(flood.map(item => item.status))].map(status => [status, flood.filter(item => item.status === status).length]))
   assert(statuses[429] > 0); assert(!Object.keys(statuses).some(code => Number(code) >= 500)); results.checks.flood = statuses
+  // Upstream failures normally leak the original URI in Nginx error logs.
+  await Promise.all(backends.map(server => new Promise(resolve => { server.closeAllConnections(); server.close(resolve) })))
+  assert.equal((await request('/api/auth/yandex/callback?code=never-log-upstream-error&state=secret-error')).status, 502)
   await new Promise(resolve => setTimeout(resolve, 100))
   const accessLog = await readFile(path.join(directory, 'access.log'), 'utf8')
-  assert(!accessLog.includes('never-log-this') && !accessLog.includes('state=secret')); results.checks.oauthQueryNotLogged = true
+  const runtimeErrors = await readFile(path.join(directory, 'error.log'), 'utf8').catch(error => { if (error.code === 'ENOENT') return ''; throw error })
+  assert(!/never-log-|state=secret/.test(accessLog + runtimeErrors + log)); results.checks.oauthQueryNotLogged = true; results.checks.upstreamFailureDoesNotLogOAuthSecrets = true
   await writeReport(output, results)
   console.log(JSON.stringify(results, null, 2))
   console.log(`Results saved to ${path.relative(root, output)}/report.json`)

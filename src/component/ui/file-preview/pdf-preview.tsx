@@ -22,7 +22,7 @@ export default function PdfPreview({ blob, slides = false }: { blob: Blob; slide
     void blob.arrayBuffer().then(buffer => {
       if (disposed) return
       const root = `/pdfjs/${version}/`
-      task = getDocument({ data: new Uint8Array(buffer), cMapUrl: `${root}cmaps/`, cMapPacked: true, standardFontDataUrl: `${root}standard_fonts/`, wasmUrl: `${root}wasm/`, useSystemFonts: true })
+      task = getDocument({ data: new Uint8Array(buffer), cMapUrl: `${root}cmaps/`, cMapPacked: true, standardFontDataUrl: `${root}standard_fonts/`, wasmUrl: `${root}wasm/`, useSystemFonts: true, maxImageSize: 25_000_000 })
       task.onPassword = (update: (value: string) => void) => { passwordCallback.current = update; setPasswordPrompt(true); setBusy(false) }
       return task.promise.then(document => { if (!disposed) { setPdf(document); setPasswordPrompt(false) } })
     }).catch(() => { if (!disposed) { setError('Не удалось прочитать страницы. Файл может быть повреждён.'); setBusy(false) } })

@@ -6,3 +6,4 @@
 .member-profile-avatar:hover {text-decoration:none;}
 .member-profile-avatar.member-profile-link { border-radius:50%; }
 .member-profile-avatar:is(.app-avatar,.access-member-avatar) { background:var(--theme-surface-muted,#f0f1f4); color:var(--theme-text,#505663); border:1px solid var(--theme-border,#dedfe5); }
+.member-profile-link { min-height:24px;max-width:100%;overflow-wrap:anywhere; }

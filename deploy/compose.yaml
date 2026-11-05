@@ -27,9 +27,11 @@ x-app: &app
     API_WARMUP: 'true'
     TRUST_PROXY: 172.30.40.10/32
     STORAGE_DRIVER: s3
+    FILE_PROCESSOR_SOCKET: /run/file-processor/processor.sock
     S3_ENDPOINT: ${S3_ENDPOINT:-}
     S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-false}
     S3_ALLOW_INSECURE: 'false'
+    DATA_PURGE_ENABLED: 'false'
     DB_POOL_MAX: '10'
     DB_TIMEZONE: ${DB_TIMEZONE:?Set DB_TIMEZONE}
     HTTP_SHUTDOWN_TIMEOUT_MS: '30000'
@@ -54,9 +56,30 @@ x-app: &app
     postgres: {condition: service_healthy}
   networks: [backend]
 services:
+  file-processor:
+    build: {context: .., target: file-processor}
+    image: staffly-file-processor:local
+    network_mode: none
+    read_only: true
+    volumes: ['file-processing-socket:/run/file-processor']
+    tmpfs: ['/tmp:size=64m,mode=1777']
+    mem_limit: 1536m
+    cpus: 1.5
+    pids_limit: 64
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 40s
+    environment: {FILE_PROCESSOR_SOCKET: /run/file-processor/processor.sock}
+    healthcheck:
+      test: [CMD, node, -e, "require('http').get({socketPath:'/run/file-processor/processor.sock',path:'/health'},r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
   postgres:
     image: postgres:18
-    command: [postgres, -c, 'timezone=${DB_TIMEZONE:?Set DB_TIMEZONE to UTC}']
+    command: [postgres, -c, 'timezone=${DB_TIMEZONE:?Set DB_TIMEZONE to UTC}', -c, log_parameter_max_length=0, -c, log_parameter_max_length_on_error=0]
     environment:
       POSTGRES_DB: staffly
       POSTGRES_USER: staffly_admin
@@ -85,16 +108,20 @@ services:
     healthcheck: {disable: true}
   api1:
     <<: *app
-    depends_on: {migrate: {condition: service_completed_successfully}}
+    volumes: &processor-socket ['file-processing-socket:/run/file-processor:ro']
+    depends_on: &api-dependencies {migrate: {condition: service_completed_successfully}, file-processor: {condition: service_healthy}}
   api2:
     <<: *app
-    depends_on: {migrate: {condition: service_completed_successfully}}
+    volumes: *processor-socket
+    depends_on: *api-dependencies
   api3:
     <<: *app
-    depends_on: {migrate: {condition: service_completed_successfully}}
+    volumes: *processor-socket
+    depends_on: *api-dependencies
   api4:
     <<: *app
-    depends_on: {migrate: {condition: service_completed_successfully}}
+    volumes: *processor-socket
+    depends_on: *api-dependencies
   worker:
     <<: *app
     command: [node, --import, tsx, src/server/worker.ts]
@@ -129,3 +156,4 @@ networks:
   backend: {ipam: {config: [{subnet: 172.30.40.0/24}]}}
 volumes:
   postgres:
+  file-processing-socket:

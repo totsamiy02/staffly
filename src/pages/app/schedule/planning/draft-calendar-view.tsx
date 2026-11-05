@@ -23,7 +23,7 @@ export default function DraftCalendarView({from,to,timezone,date,onDate,shifts,p
       <div className="draft-calendar-key"><span>Новая смена</span><span>Изменение</span><span>Отмена</span><span>Без изменений</span></div>
       <p className="planning-footnote">Нажмите на день — в списке появятся {manager?'сотрудники и':'ваши'} смены с должностями и точным временем.</p>
     </div>
-    <section className="planning-card draft-day-detail"><header><div><h3>{displayDate(date)}</h3><p>{manager?'Предварительные смены команды':'Мои предлагаемые смены'} · {selected.length}</p></div>{canEdit&&<button className="app-primary" onClick={onAdd}>＋ Добавить смену</button>}</header>
+    <section className="planning-card draft-day-detail"><header><div><h2>{displayDate(date)}</h2><p>{manager?'Предварительные смены команды':'Мои предлагаемые смены'} · {selected.length}</p></div>{canEdit&&<button className="app-primary" onClick={onAdd}>＋ Добавить смену</button>}</header>
       <div className="draft-day-detail__list">{selected.length?selected.map(shift=>{
         const proposal=proposalFor(shift),kind=proposal?.kind??'KEEP'
         return <ActionSurface aria-label={`Открыть предварительную смену ${shift.memberName}`} className="draft-day-shift" key={shift.id} onClick={()=>onShift(shift,proposal)}>

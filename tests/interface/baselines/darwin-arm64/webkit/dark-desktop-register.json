@@ -1,0 +1,11 @@
+{
+  "browser": "webkit",
+  "version": "27.2",
+  "platform": "darwin",
+  "arch": "arm64",
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "theme": "dark"
+}

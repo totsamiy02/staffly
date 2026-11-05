@@ -1,3 +1,4 @@
+import { safeError } from './security/safe-error.ts'
 type Options = {
   name: string
   intervalMs: number
@@ -28,7 +29,7 @@ export function startBackgroundTask({ name, intervalMs, run, retryExpiredTransac
           await run(shouldContinue)
         } else throw error
       }
-    }).then(() => { state.failures = 0 }).catch(error => { state.failures++; console.error(`${name} failed:`, error) }).finally(() => { state.running = false; state.finishedAt = Date.now(); current = undefined })
+    }).then(() => { state.failures = 0 }).catch(error => { state.failures++; console.error(`${name} failed:`, safeError(error)) }).finally(() => { state.running = false; state.finishedAt = Date.now(); current = undefined })
   }
   const timer = setInterval(tick, intervalMs)
   timer.unref()

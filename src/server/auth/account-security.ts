@@ -1,5 +1,6 @@
 import type { Prisma } from '../../generated/prisma/client.ts'
 import { ApiError } from '../api-error.ts'
+import { recordSecurityEvent } from '../security/journal.ts'
 
 export type AccountSession = { userId: string; sessionId: string }
 export async function lockAccount(tx: Prisma.TransactionClient, auth: AccountSession) {
@@ -16,8 +17,10 @@ export async function invalidateSecurityChallenges(tx: Prisma.TransactionClient,
   await tx.passwordResetToken.updateMany({ where: { userId, usedAt: null }, data: { usedAt: now } })
   await tx.emailChangeToken.updateMany({ where: { userId, usedAt: null }, data: { usedAt: now } })
 }
-export function revokeOtherSessions(tx: Prisma.TransactionClient, userId: string, keepSessionId?: string) {
-  return tx.authSession.updateMany({ where: { userId, ...(keepSessionId ? { id: { not: keepSessionId } } : {}), revokedAt: null }, data: { revokedAt: new Date(), lastActiveAt: null } })
+export async function revokeOtherSessions(tx: Prisma.TransactionClient, userId: string, keepSessionId?: string) {
+  const result = await tx.authSession.updateMany({ where: { userId, ...(keepSessionId ? { id: { not: keepSessionId } } : {}), revokedAt: null }, data: { revokedAt: new Date(), lastActiveAt: null } })
+  if (result.count) await recordSecurityEvent(tx, { action: 'SESSIONS_REVOKED', userId, count: result.count })
+  return result
 }
 export function securityChanged() {
   return new ApiError(409, 'SECURITY_CHANGED', 'Настройки безопасности уже изменились. Подтвердите действие ещё раз.')

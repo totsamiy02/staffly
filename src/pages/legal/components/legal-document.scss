@@ -43,6 +43,7 @@
 }
 
 .legal-document__content {
+  overflow-wrap:anywhere;
   display: grid;
   gap: 46px;
   margin-top: 46px;
@@ -91,6 +92,7 @@
 
     h1 {
       font-size: 34px;
+      overflow-wrap:anywhere;
     }
   }
 

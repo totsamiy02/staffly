@@ -1,3 +1,4 @@
+import SecurityHistory from '../shared/security-history.tsx'
 import SubscriptionSettings from '../../subscriptions/subscription-settings.tsx'
 import PageHeading from '../../../../component/ui/page-heading/page-heading.tsx'
 import { useImageDraft } from '../../../../component/ui/image-upload/use-image-draft.ts'
@@ -10,7 +11,7 @@ import EmployeePicker from '../../shared/employee-picker.tsx'
 import { ProfileDetails, ProfileEditActions } from '../shared/profile-settings.tsx'
 import Select from '../../../../component/ui/select/select.tsx'
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../../../app/auth/auth-context.tsx'
 import { useOrganizationDirectory } from '../../../../app/organizations/queries.ts'
@@ -45,6 +46,7 @@ export default function OrganizationSettings({ organization }: { organization: O
   const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
   const section =  ['profile', 'locations', 'schedule', 'requests', 'roles', 'access', 'subscription'].includes(params.get('section') ?? '') ? params.get('section')! : 'profile'
+  const lifecycle = useQuery({ queryKey: ['data-lifecycle'], queryFn: () => apiRequest<{ cleanupEnabled: boolean }>('/profile/data-lifecycle'), enabled: organization.owner && section === 'access' })
   const members = useOrganizationDirectory(organization.id, organization.owner && section === 'access')
   function changeSection(value: string) { setMessage(''); setError(''); setParams(previous => { previous.set('section', value); return previous }, { replace: true }) }
   const [targetMemberId, setTargetMemberId] = useState('')
@@ -163,6 +165,6 @@ export default function OrganizationSettings({ organization }: { organization: O
     {section === 'locations' && <LocationSettings organization={organization} />}
     {section === 'requests' && canAccess(organization,'requestTypes.manage') && <RequestTypesSettings organization={organization} onMessage={setMessage} onError={setError} />}
     {section === 'access' && organization.role === 'OWNER' && <><article className="settings-card"><div><h2>Передать владение</h2><p>Вы станете администратором, а выбранный участник — новым владельцем.</p></div>{transferRequested ? <form onSubmit={confirmTransfer} className="sensitive-form"><SensitiveCodeInput value={transferCode} onChange={setTransferCode} label="Код подтверждения передачи владения" /><button className="app-primary" disabled={busy || transferCode.length !== 6}>Подтвердить передачу</button><button className="app-secondary" type="button" onClick={() => setTransferRequested(false)}>Отмена</button></form> : <form onSubmit={requestTransfer} className="sensitive-form ownership-transfer-form"><EmployeePicker label="Новый владелец" emptyLabel={members.isLoading ? 'Загружаем сотрудников…' : 'Выберите сотрудника'} members={candidates} value={targetMemberId} onChange={setTargetMemberId} disabled={busy || members.isLoading || members.isError || !candidates.length} /><button className="app-primary" disabled={busy || members.isLoading || members.isError || !candidates.some(member => member.id === targetMemberId)}>Получить код</button>{members.isError ? <p className="form-inline-error" role="alert">Не удалось загрузить сотрудников. <button className="app-secondary" type="button" onClick={() => void members.refetch()}>Повторить</button></p> : !members.isLoading && !candidates.length && <p className="profile-settings-note">Для передачи владения нужен другой сотрудник организации.</p>}</form>}</article>
-    <article className="settings-card settings-card--danger"><div><h2>Удалить организацию</h2><p>Организация исчезнет у всех участников, а активные приглашения будут отозваны.</p></div>{deleteRequested ? <form onSubmit={confirmDeletion} className="sensitive-form"><SensitiveCodeInput value={deleteCode} onChange={setDeleteCode} label="Код подтверждения удаления организации" /><button className="app-danger" disabled={busy || deleteCode.length !== 6}>Удалить организацию</button><button className="app-secondary" type="button" onClick={() => setDeleteRequested(false)}>Отмена</button></form> : <button className="app-danger" disabled={busy} onClick={requestDeletion}>Получить код удаления</button>}</article></>}
+    <article className="settings-card settings-card--danger"><div><h2>Удалить организацию</h2><p>Доступ закроется всем участникам, приглашения будут отозваны. Окончательная очистка данных и файлов запланирована через 30 дней. {lifecycle.data ? lifecycle.data.cleanupEnabled ? 'Очистка включена.' : 'Очистка выключена, данные сохраняются.' : 'Статус очистки загружается.'} Сроки обязательных архивов нужно определить до её включения.</p></div>{deleteRequested ? <form onSubmit={confirmDeletion} className="sensitive-form"><SensitiveCodeInput value={deleteCode} onChange={setDeleteCode} label="Код подтверждения удаления организации" /><button className="app-danger" disabled={busy || deleteCode.length !== 6}>Удалить организацию</button><button className="app-secondary" type="button" onClick={() => setDeleteRequested(false)}>Отмена</button></form> : <button className="app-danger" disabled={busy} onClick={requestDeletion}>Получить код удаления</button>}</article><SecurityHistory organizationId={organization.id} /></>}
   </section>
 }

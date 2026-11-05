@@ -1,18 +1,18 @@
+import { safeError } from '../security/safe-error.ts'
 import { storageQuotaError } from '../resources/quotas.ts'
 import type { Prisma } from '../../generated/prisma/client.ts'
 import { requirePermission } from '../organizations/access/access.ts'
 import { createHash, randomUUID } from 'node:crypto'
-import sharp from 'sharp'
+import { processFile } from '../file-processing/client.ts'
 import { prisma } from '../db.ts'
 import { startBackgroundTask } from '../background-task.ts'
 import { ApiError } from '../api-error.ts'
 import type { StoredFilePurpose } from '../../generated/prisma/enums.ts'
 import { storage } from './provider.ts'
 import { getMembership } from '../organizations/access/permissions.ts'
+import { freshFileAccess } from './guarded-delivery.ts'
 
 export const MAX_IMAGE_BYTES = 8 * 1024 * 1024
-const MAX_INPUT_PIXELS = 25_000_000
-const allowedFormats = new Set(['jpeg', 'png', 'webp'])
 
 export function mediaUrl(fileId: string | null | undefined) {
   return fileId ? `/api/media/v2/${fileId}` : null
@@ -22,24 +22,13 @@ async function normalizeImage(input: unknown) {
   if (!Buffer.isBuffer(input) || input.length === 0) throw new ApiError(400, 'EMPTY_IMAGE', 'Выберите изображение для загрузки.')
   if (input.length > MAX_IMAGE_BYTES) throw new ApiError(413, 'IMAGE_TOO_LARGE', 'Изображение должно весить не больше 8 МБ.')
 
-  try {
-    const source = sharp(input, { failOn: 'error', limitInputPixels: MAX_INPUT_PIXELS })
-    const metadata = await source.metadata()
-    if (!metadata.format || !allowedFormats.has(metadata.format)) throw new ApiError(415, 'UNSUPPORTED_IMAGE', 'Поддерживаются только JPEG, PNG и WebP.')
-    if (!metadata.width || !metadata.height) throw new ApiError(400, 'INVALID_IMAGE', 'Не удалось определить размеры изображения.')
-    if ((metadata.pages ?? 1) > 1) throw new ApiError(415, 'ANIMATED_IMAGE_NOT_ALLOWED', 'Анимированные изображения не поддерживаются.')
-
-    const output = await source
-      .rotate()
-      .resize(512, 512, { fit: 'cover', position: 'centre', withoutEnlargement: true })
-      .webp({ quality: 82, effort: 4 })
-      .toBuffer()
-
-    return { buffer: output, checksum: createHash('sha256').update(output).digest('hex') }
-  } catch (error) {
-    if (error instanceof ApiError) throw error
-    throw new ApiError(400, 'INVALID_IMAGE', 'Файл повреждён или не является допустимым изображением.')
+  let output: Buffer
+  try { output = await processFile('avatar', 'auto', input) }
+  catch (error) {
+    if (error instanceof ApiError && error.code === 'INVALID_DOCUMENT_FILE') throw new ApiError(400, 'INVALID_IMAGE', 'Файл повреждён или не является допустимым изображением.')
+    throw error
   }
+  return { buffer: output, checksum: createHash('sha256').update(output).digest('hex') }
 }
 
 type RemoveObject = (objectKey: string) => Promise<void>
@@ -61,11 +50,11 @@ export async function deletePendingFile(fileId: string, removeObject: RemoveObje
     } else await prisma.storedFile.deleteMany({ where: { id: file.id, pendingDeletionAt: { not: null } } })
     return true
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown storage deletion error'
+    const message = JSON.stringify(safeError(error))
     await prisma.storedFile.updateMany({
       where: { id: file.id, pendingDeletionAt: { not: null } },
-      data: { deletionAttempts: { increment: 1 }, lastDeletionError: message.slice(0, 500) },
-    }).catch((databaseError) => console.error('Failed to record image cleanup error:', databaseError))
+      data: { deletionAttempts: { increment: 1 }, lastDeletionError: message },
+    }).catch((databaseError) => console.error('Failed to record image cleanup error:', safeError(databaseError)))
     return false
   }
 }
@@ -102,6 +91,7 @@ export function startStorageCleanup() {
 export async function stageProfileImage(userId: string, input: unknown, organizationId?: string) {
   if (organizationId) await requireOrganizationEditor(userId, organizationId)
   const image = await normalizeImage(input)
+  if (organizationId) await freshFileAccess(() => requireOrganizationEditor(userId, organizationId))
   const purpose = organizationId ? 'ORGANIZATION_LOGO' : 'USER_AVATAR'
   const objectKey = organizationId ? `organizations/${organizationId}/logos/${randomUUID()}.webp` : `users/${userId}/avatars/${randomUUID()}.webp`
   return stageStoredFile({ objectKey, mimeType: 'image/webp', size: image.buffer.length, checksumSha256: image.checksum, purpose, uploadedByUserId: userId, organizationId }, image.buffer)
@@ -136,7 +126,7 @@ export async function replaceUserAvatar(userId: string, input: unknown) {
     await deletePendingFile(staged.id)
     throw error
   }
-  if (stored.previousId) await deletePendingFile(stored.previousId).catch((error) => console.error('Immediate avatar cleanup failed:', error))
+  if (stored.previousId) await deletePendingFile(stored.previousId).catch((error) => console.error('Immediate avatar cleanup failed:', safeError(error)))
   return mediaUrl(stored.file.id)
 }
 
@@ -148,7 +138,7 @@ export async function removeUserAvatar(userId: string) {
     await tx.storedFile.update({ where: { id: current.avatarFileId }, data: { pendingDeletionAt: new Date(), lastDeletionError: null } })
     return current.avatarFileId
   }, { isolationLevel: 'Serializable' })
-  if (fileId) await deletePendingFile(fileId).catch((error) => console.error('Immediate avatar deletion failed:', error))
+  if (fileId) await deletePendingFile(fileId).catch((error) => console.error('Immediate avatar deletion failed:', safeError(error)))
 }
 
 async function requireOrganizationEditor(userId: string, organizationId: string) {
@@ -164,6 +154,7 @@ export async function replaceOrganizationLogo(userId: string, organizationId: st
   let stored: { file: { id: string }; previousId: string | null }
   try {
     stored = await prisma.$transaction(async (tx) => {
+      requirePermission(await getMembership(userId, organizationId, tx), 'organization.edit', null)
       const previous = await tx.organization.findUniqueOrThrow({ where: { id: organizationId }, select: { logoFileId: true } })
       const file = await tx.storedFile.update({ where: { id: staged.id }, data: { pendingDeletionAt: null } })
       await tx.organization.update({ where: { id: organizationId }, data: { logoFileId: file.id } })
@@ -174,7 +165,7 @@ export async function replaceOrganizationLogo(userId: string, organizationId: st
     await deletePendingFile(staged.id)
     throw error
   }
-  if (stored.previousId) await deletePendingFile(stored.previousId).catch((error) => console.error('Immediate organization logo cleanup failed:', error))
+  if (stored.previousId) await deletePendingFile(stored.previousId).catch((error) => console.error('Immediate organization logo cleanup failed:', safeError(error)))
   return mediaUrl(stored.file.id)
 }
 
@@ -187,5 +178,5 @@ export async function removeOrganizationLogo(userId: string, organizationId: str
     await tx.storedFile.update({ where: { id: current.logoFileId }, data: { pendingDeletionAt: new Date(), lastDeletionError: null } })
     return current.logoFileId
   }, { isolationLevel: 'Serializable' })
-  if (fileId) await deletePendingFile(fileId).catch((error) => console.error('Immediate organization logo deletion failed:', error))
+  if (fileId) await deletePendingFile(fileId).catch((error) => console.error('Immediate organization logo deletion failed:', safeError(error)))
 }

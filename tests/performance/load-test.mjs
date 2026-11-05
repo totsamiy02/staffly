@@ -26,7 +26,7 @@ const seconds = Number(options.seconds ?? 20)
 assert(Number.isInteger(seconds) && seconds >= 5 && seconds <= 120, '--seconds must be 5–120')
 const bin = options['pg-bin'] ?? '/Applications/Postgres.app/Contents/Versions/18/bin'
 await access(path.join(bin, 'initdb'))
-const output = await createArtifactDirectory(options.tests ? 'regression' : options.profile === 'scale' ? 'scale' : options.profile === 'frontend' ? 'frontend' : 'load', options.output)
+const output = await createArtifactDirectory(options.tests ? 'regression' : options.profile === 'interface' ? 'audit' : options.profile === 'scale' ? 'scale' : options.profile === 'frontend' ? 'frontend' : 'load', options.output)
 const temporary = await mkdtemp(path.join(os.tmpdir(), 'staffly-load-'))
 const data = path.join(temporary, 'postgres')
 const storage = path.join(temporary, 'storage')
@@ -96,7 +96,7 @@ async function startApi() {
     } catch { /* Wait only for our new isolated process. */ }
     await delay(100)
   }
-  throw new Error('Isolated API did not become ready')
+  throw new Error(`Isolated API did not become ready; last output: ${apiLog.slice(-2000)}`)
 }
 async function monitor(phase, work) {
   const from = Date.now(), database = []
@@ -278,7 +278,10 @@ try {
     }))
     console.log(testLog.slice(-2500))
   }
-  if (options.profile === 'frontend') {
+  if (options.profile === 'interface') {
+    const { runInterface } = await import('../interface/run-interface.mjs')
+    results.interface = await runInterface({ prisma, env, root, temporary, output, options, startApi })
+  } else if (options.profile === 'frontend') {
     const { runFrontend } = await import('./frontend-scenarios.mjs')
     results.frontend = await runFrontend({ prisma, env, root, temporary, output, options, startApi })
   } else if (options.profile === 'scale') {

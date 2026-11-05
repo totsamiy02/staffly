@@ -1,9 +1,10 @@
+import { auditSensitiveAccess } from '../security/journal.ts'
 import express,{ Router,type Request } from 'express'
 import { z } from 'zod'
 import type { OrganizationRequest,RequestType } from '../../generated/prisma/client.ts'
 import type { RequestMutationResponse,RequestTypeResponse,RequestTypesResponse } from '../../shared/requests.ts'
 import { ApiError } from '../api-error.ts'
-import { requireAuth,type AuthenticatedRequest } from '../auth.ts'
+import { requireAuth,assertActiveSession,type AuthenticatedRequest } from '../auth.ts'
 import { accountRateLimit } from '../security/rate-limit.ts'
 import { addRequestAttachment,deleteRequestAttachment,downloadRequestAttachment,MAX_REQUEST_FILE_BYTES } from './attachment-service.ts'
 import { publicRequestType,requestMutation } from './request-presenter.ts'
@@ -49,7 +50,7 @@ router.post('/organizations/:organizationId/requests/:requestId/approve', mutati
 router.post('/organizations/:organizationId/requests/:requestId/reject', mutationLimiter, async (request, response) => { const { organizationId, requestId } = parse(requestParams, request.params); const body = parse(rejectRequestBody, request.body); response.json(mutationResponse(await resolveRequest(auth(request).userId, organizationId, requestId, 'REJECTED', body.comment))) })
 router.post('/organizations/:organizationId/requests/:requestId/cancel', mutationLimiter, async (request, response) => { const { organizationId, requestId } = parse(requestParams, request.params); await cancelRequest(auth(request).userId, organizationId, requestId); response.status(204).end() })
 router.put('/organizations/:organizationId/requests/:requestId/attachments', uploadLimiter, fileBody, async (request, response) => { const { organizationId, requestId } = parse(requestParams, request.params); const attachment = await addRequestAttachment(auth(request).userId, organizationId, requestId, request.body, request.get('content-type')?.split(';')[0] ?? '', request.get('x-file-name')); response.status(201).json({ attachment: { id: attachment.id, fileName: attachment.fileName, mimeType: attachment.storedFile.mimeType, size: attachment.storedFile.size } }) })
-router.get('/organizations/:organizationId/requests/:requestId/attachments/:attachmentId', async (request, response) => { const { organizationId, requestId, attachmentId } = parse(attachmentParams, request.params); const { attachment, contents } = await downloadRequestAttachment(auth(request).userId, organizationId, requestId, attachmentId); response.set({ 'Content-Type': attachment.storedFile.mimeType, 'Content-Length': String(contents.length), 'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(attachment.fileName)}`, 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' }); response.send(contents) })
+router.get('/organizations/:organizationId/requests/:requestId/attachments/:attachmentId', async (request, response) => { const { organizationId, requestId, attachmentId } = parse(attachmentParams, request.params); const { attachment, contents } = await auditSensitiveAccess({ action: 'ATTACHMENT_DOWNLOAD', userId: auth(request).userId, organizationId, resourceType: 'ATTACHMENT', resourceId: attachmentId }, () => downloadRequestAttachment(auth(request).userId, organizationId, requestId, attachmentId)); await assertActiveSession(auth(request)); response.set({ 'Content-Type': attachment.storedFile.mimeType, 'Content-Length': String(contents.length), 'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(attachment.fileName)}`, 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' }); response.send(contents) })
 router.delete('/organizations/:organizationId/requests/:requestId/attachments/:attachmentId', mutationLimiter, async (request, response) => { const { organizationId, requestId, attachmentId } = parse(attachmentParams, request.params); await deleteRequestAttachment(auth(request).userId, organizationId, requestId, attachmentId); response.status(204).end() })
 
 export default router

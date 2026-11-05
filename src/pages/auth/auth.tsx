@@ -70,7 +70,7 @@ function AuthPage() {
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setAttempted(true)
-    if (emailError || passwordError) return
+    if (emailError || passwordError) { event.currentTarget.querySelector<HTMLInputElement>(`input[name="${emailError ? 'email' : 'password'}"]`)?.focus(); return }
     setSubmitting(true)
     setServerError('')
     setNotice('')

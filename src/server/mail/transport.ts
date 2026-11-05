@@ -5,7 +5,7 @@ const smtpUser = process.env.SMTP_USER
 const smtpPassword = process.env.SMTP_APP_PASSWORD
 const smtpReady = Boolean(smtpUser && smtpPassword)
 if (process.env.NODE_ENV === 'production' && !smtpReady) throw new Error('SMTP_USER and SMTP_APP_PASSWORD are required in production')
-if (process.env.NODE_ENV === 'development' && !smtpReady) console.log('SMTP is not configured: email contents will be printed in this terminal.')
+if (process.env.NODE_ENV === 'development' && !smtpReady) console.log('SMTP is not configured; email contents are not logged.')
 export function getSmtpOptions(env: NodeJS.ProcessEnv = process.env) {
   const port = Number(env.SMTP_PORT ?? 465), user = env.SMTP_USER
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('SMTP_PORT must be a valid port')
@@ -34,7 +34,7 @@ export function renderEmail(content: EmailContent) {
 export async function sendPreparedMail(email: string, message: ReturnType<typeof renderEmail>, id?: string) {
   if (!transport) {
     if (!['development', 'test'].includes(process.env.NODE_ENV ?? '')) throw new Error('SMTP is not configured')
-    if (process.env.NODE_ENV === 'development') console.log(`[DEV ONLY] Email to ${email}: ${message.text}`)
+    if (process.env.NODE_ENV === 'development') console.log('SMTP disabled: message not sent; private content omitted.')
     return
   }
   await transport.sendMail({ from: { name: 'Staffly', address: smtpUser! }, to: email, ...message, ...(id ? { messageId: `<${id}@${new URL(appUrl).hostname}>` } : {}) })

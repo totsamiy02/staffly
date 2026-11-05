@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import { BlackButton, WhiteButton } from '../ui/btn/button'
 import Modal from '../ui/modal/modal'
 
@@ -13,7 +14,9 @@ function hasSavedChoice() {
 }
 
 function CookieConsent() {
+  const { pathname } = useLocation()
   const [isOpen, setIsOpen] = useState(() => !hasSavedChoice())
+  const readingPolicy = ['/privacy-policy', '/personal-data-consent', '/terms', '/offer'].includes(pathname)
 
   function saveChoice(value: 'necessary' | 'all') {
     try {
@@ -25,7 +28,7 @@ function CookieConsent() {
 
   return (
     <Modal
-      isOpen={isOpen}
+      isOpen={isOpen && !readingPolicy}
       title="Мы используем cookie"
       actions={
         <>

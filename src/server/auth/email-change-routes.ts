@@ -1,3 +1,4 @@
+import { recordSecurityEvent } from '../security/journal.ts'
 import { createHmac, randomInt, randomUUID, timingSafeEqual } from 'node:crypto'
 import { Router, type RequestHandler, type Response } from 'express'
 import { rateLimit } from 'express-rate-limit'
@@ -40,6 +41,7 @@ export function createEmailChangeRouter(dependencies: Dependencies) {
       if (user.email === input.email || await tx.user.findUnique({ where: { email: input.email } })) throw unavailable()
       await tx.emailChangeToken.updateMany({ where: { userId: user.id, usedAt: null }, data: { usedAt: new Date() } })
       await tx.emailChangeToken.create({ data: { id, userId: user.id, sessionId: request.auth!.sessionId, email: input.email, codeHash: codeHash(id, input.email, code), securityVersion: user.securityVersion, expiresAt } })
+      await recordSecurityEvent(tx, { action: 'CONFIRMATION_REQUESTED', userId: user.id, resourceType: 'ACCOUNT', resourceId: user.id })
       if (proof) await tx.oAuthAttempt.delete({ where: { id: proof.id } })
     })
     try { await (dependencies.sendCode ?? deliverSecurityCode)('email-change', input.email, code) }

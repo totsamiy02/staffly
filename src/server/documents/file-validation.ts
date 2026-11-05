@@ -1,6 +1,6 @@
 /* oxlint-disable eslint/no-control-regex -- File validation deliberately rejects control bytes. */
 import { validateOfficeIsolated } from './office-validation-process.ts'
-import sharp from 'sharp'
+import { processFile } from '../file-processing/client.ts'
 import { ApiError } from '../api-error.ts'
 
 const configuredLimit = Number(process.env.DOCUMENT_MAX_BYTES ?? 25 * 1024 * 1024)
@@ -19,10 +19,11 @@ export async function validateDocumentFile(input: unknown, mime: string, encoded
   const ext = name.split('.').at(-1)?.toLowerCase() as keyof typeof documentMimeTypes
   const canonical = documentMimeTypes[ext]
   if (!canonical || mime !== canonical && !(ext === 'md' && ['text/plain', 'text/x-markdown'].includes(mime))) invalid()
-  const contents = input
+  let contents = input
   if (ext === 'pdf') { if (!contents.subarray(0, 5).equals(Buffer.from('%PDF-')) || !contents.subarray(-2048).includes(Buffer.from('%%EOF'))) invalid() }
   else if (['jpg', 'jpeg', 'png', 'webp'].includes(ext)) {
-    try { const image = sharp(contents, { failOn: 'error', limitInputPixels: 25_000_000 }); const metadata = await image.metadata(); if (metadata.format !== (ext === 'jpg' || ext === 'jpeg' ? 'jpeg' : ext) || (metadata.pages ?? 1) > 1) invalid(); await image.raw().toBuffer() } catch { invalid() }
+    contents = await processFile('image', ext === 'jpg' || ext === 'jpeg' ? 'jpeg' : ext, contents)
+    if (contents.length > MAX_DOCUMENT_BYTES) throw new ApiError(413, 'DOCUMENT_TOO_LARGE', 'Изображение после обработки превышает допустимый размер.')
   } else if (['docx', 'xlsx', 'pptx', 'doc', 'xls', 'ppt'].includes(ext)) await validateOfficeIsolated(contents, ext)
   else {
     let text: string

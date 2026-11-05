@@ -13,6 +13,7 @@ import { deletePendingFile, mediaUrl, stageStoredFile } from '../storage/image-s
 import { storage } from '../storage/provider.ts'
 import { MAX_DOCUMENT_BYTES, supportsPreview, validateDocumentFile } from './file-validation.ts'
 import type { Assignment, ListOptions, Metadata } from './schemas.ts'
+import { freshFileAccess, guardFileStream } from '../storage/guarded-delivery.ts'
 
 const missing = () => new ApiError(404, 'DOCUMENT_NOT_FOUND', 'Документ не найден или недоступен.')
 export const isManager = (actor: Pick<OrganizationMember, 'role'> & Partial<PermissionActor>) => actor.permissions ? actor.role === 'OWNER' || ['documents.upload','documents.edit','documents.delete','documents.assign','documents.control','documents.folders','documents.access'].some(key => (actor.permissions!.includes(key) || !!actor.permissionLocations?.[key]?.length)) : actor.role === 'OWNER' || actor.role === 'ADMIN'
@@ -262,18 +263,27 @@ export async function documentProgress(userId: string, organizationId: string, d
     return { recipients: items.map(item => ({ ...ackDto(item, actor.organization.timezone), member: { id: item.memberId, name: memberName(item.member.user), avatarUrl: mediaUrl(item.member.user.avatarFileId), former: Boolean(item.member.leftAt) } })), pagination: { page, pages: Math.max(1, Math.ceil(total / 50)), total } }
   })
 }
-export async function deliverDocument(userId: string, organizationId: string, documentId: string, action: 'preview' | 'download') {
+export async function authorizeDocumentContent(userId: string, organizationId: string, documentId: string, action: 'preview' | 'download') {
   return transaction(userId, organizationId, async (tx, actor) => {
     const doc = await accessible(tx, actor, documentId)
     if (action === 'download') assertDocumentManager(actor, doc.locationId, 'documents.download')
     const file = await tx.storedFile.findFirst({ where: { id: doc.storedFileId, organizationId, purpose: 'DOCUMENT', pendingDeletionAt: null, purgedAt: null } })
     if (!file) throw missing()
     if (action === 'preview' && !supportsPreview(file.mimeType, file.size)) throw new ApiError(415, 'PREVIEW_UNSUPPORTED', 'Предпросмотр недоступен. Скачайте документ.')
-    let object: Awaited<ReturnType<typeof storage.stream>>
-    try { object = await storage.stream(file.objectKey) } catch { throw new ApiError(404, 'DOCUMENT_FILE_MISSING', 'Файл временно недоступен. Обратитесь к администратору.') }
-    if (object.size !== file.size) { object.stream.destroy(); throw new ApiError(409, 'DOCUMENT_FILE_INVALID', 'Файл повреждён.') }
-    return { ...object, mimeType: file.mimeType, fileName: doc.fileName, actorId: actor.id }
+    return { file, fileName: doc.fileName, actorId: actor.id }
   })
+}
+export async function deliverDocument(userId: string, organizationId: string, documentId: string, action: 'preview' | 'download', sessionCheck?: () => Promise<void>) {
+  const { file, fileName, actorId } = await authorizeDocumentContent(userId, organizationId, documentId, action)
+  let object: Awaited<ReturnType<typeof storage.stream>>
+  try { object = await storage.stream(file.objectKey) } catch { throw new ApiError(404, 'DOCUMENT_FILE_MISSING', 'Файл временно недоступен. Обратитесь к администратору.') }
+  const authorize = async () => { await sessionCheck?.(); return authorizeDocumentContent(userId, organizationId, documentId, action) }
+  const stream = guardFileStream(object.stream, authorize)
+  try {
+    await freshFileAccess(authorize)
+    if (object.size !== file.size) throw new ApiError(409, 'DOCUMENT_FILE_INVALID', 'Файл повреждён.')
+    return { ...object, stream, mimeType: file.mimeType, fileName, actorId }
+  } catch (error) { stream.destroy(); object.stream.destroy(); throw error }
 }
 // Called only after a successful, explicit content response; metadata and HEAD never enter here.
 export async function recordDocumentOpened(userId: string, organizationId: string, documentId: string) {

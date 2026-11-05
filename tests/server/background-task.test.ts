@@ -69,7 +69,8 @@ it('reports a failed recovery and never retries an expired transaction indefinit
   const stop = startBackgroundTask({ name: 'test', intervalMs: 60_000, retryExpiredTransaction: true, run: async () => { attempts++; throw failure } })
   await turn(); await stop()
   assert.equal(attempts, 2); assert.equal(error.mock.callCount(), 1)
-  assert.equal(error.mock.calls[0].arguments[1], failure)
+  assert.deepEqual(error.mock.calls[0].arguments[1], { name: 'Error', code: 'P2028' })
+  assert.doesNotMatch(JSON.stringify(error.mock.calls[0].arguments), /expired/)
 })
 
 it('does not retry unrelated failures or begin work after an immediate stop', async t => {

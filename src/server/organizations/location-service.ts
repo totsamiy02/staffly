@@ -1,3 +1,4 @@
+import { recordSecurityEvent } from '../security/journal.ts'
 import { requireCapacity, requireLocationInPlan, requireSubscriptionWritable } from '../subscriptions/access.ts'
 import { enqueueEmail } from '../mail/email-outbox.ts'
 import { ensureAccessRoles, hasPermission, requirePermission } from './access/access.ts'
@@ -77,6 +78,7 @@ export async function archiveLocation(userId: string, organizationId: string, lo
     await tx.organizationInvite.updateMany({ where: { locationId, acceptedAt: null, revokedAt: null }, data: { revokedAt: new Date() } })
     const point = await tx.organizationLocation.update({ where: { id: locationId }, data: { archivedAt: new Date() } })
     await enqueueEmail(tx, { userId, organizationId, sourceKind: 'MANDATORY', sourceKey: `location:closed:${point.id}:${point.archivedAt!.toISOString()}`, content: { title: 'Точка закрыта', eyebrow: 'Действие выполнено', organization: actor.organization.name, intro: `Точка «${point.name}» в организации «${actor.organization.name}» закрыта.`, action: { label: 'Открыть организацию', path: `/app/organizations/${organizationId}` }, footer: 'Это подтверждение выполненного действия.' } })
+    await recordSecurityEvent(tx, { action: 'LOCATION_ARCHIVED', userId, organizationId, resourceType: 'LOCATION', resourceId: locationId })
     return point
   })
   if (!result) throw new ApiError(400, 'INVALID_VERIFICATION_CODE', 'Код неверен или срок его действия истёк.')
@@ -98,6 +100,7 @@ export async function assignLocationMember(userId: string, organizationId: strin
       await tx.locationMember.updateMany({ where: { memberId, organizationId, leftAt: null }, data: { role } })
     }
     if (old?.role === 'ADMIN' && role === 'MEMBER') await tx.documentAcknowledgement.updateMany({ where: { memberId, acknowledgedAt: null, cancelledAt: null, document: { organizationId, locationId, visibility: 'ADMINS' } }, data: { cancelledAt: new Date() } })
+    await recordSecurityEvent(tx, { action: 'ACCESS_CHANGED', userId, organizationId, resourceType: 'MEMBER', resourceId: memberId })
     return tx.locationMember.upsert({ where: { locationId_memberId: { locationId, memberId } }, create: { organizationId, locationId, memberId, role }, update: { role, leftAt: null } })
   })
 }
@@ -110,6 +113,7 @@ export async function removeLocationMember(userId: string, organizationId: strin
     if (target.member.role === 'OWNER' || (actor.role !== 'OWNER' && target.role === 'ADMIN')) throw new ApiError(403, 'INSUFFICIENT_PERMISSIONS', 'Этого участника нельзя убрать из точки.')
     await tx.locationTeamMember.deleteMany({ where: { memberId, team: { locationId } } })
     await tx.locationMember.update({ where: { locationId_memberId: { locationId, memberId } }, data: { leftAt: new Date() } })
+    await recordSecurityEvent(tx, { action: 'MEMBER_DEPARTED', userId, organizationId, resourceType: 'MEMBER', resourceId: memberId })
     // Removing a point assignment does not end organization membership or rewrite shifts.
   })
 }
@@ -162,6 +166,7 @@ export async function transferMember(userId: string, organizationId: string, inp
       await tx.locationTeamMember.deleteMany({ where: { memberId: input.memberId, team: { locationId: input.fromLocationId } } })
     }
     await tx.accountNotification.create({ data: { organizationId, userId: source.member.userId, type: 'ROLE_CHANGED', title: input.temporary ? 'Назначена подмена' : 'Перевод в другую точку', message: 'Изменено распределение по точкам. Уже назначенные смены сохранены.' } })
+    await recordSecurityEvent(tx, { action: 'ACCESS_CHANGED', userId, organizationId, resourceType: 'MEMBER', resourceId: input.memberId })
     return transfer
   })
 }

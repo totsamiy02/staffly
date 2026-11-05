@@ -4,6 +4,13 @@
 .app-topbar--workspace .app-topbar__inner { width: 100%; padding-inline: clamp(18px, 3vw, 48px); }
 .app-topbar__logo img { width: 124px; }
 .app-topbar__controls { display: flex; align-items: center; gap: 9px; }
+@media (max-width:600px) {
+  .app-topbar .app-topbar__inner { width:calc(100% - 24px);gap:8px; }
+  .app-topbar--workspace .app-topbar__inner { width:100%;padding-inline:12px; }
+  .app-topbar__logo img { width:clamp(88px,26vw,110px); }
+  .app-topbar__controls { gap:6px;flex-shrink:0; }
+  .app-topbar .topbar-profile-trigger { min-width:44px;min-height:44px;padding:0;justify-content:center; }
+}
 .topbar-popover-host { position: relative; }
 .topbar-icon-button { position: relative; display: grid; width: 42px; height: 42px; place-items: center; border: 1px solid var(--theme-border,#dedede); border-radius: 12px; background: var(--theme-surface,#fff); color: var(--theme-text,#444); cursor: pointer; transition: border-color .2s, background .2s; }
 .topbar-icon-button:hover, .topbar-icon-button--active { border-color: var(--theme-border-strong,#bcbcbc); background: var(--theme-surface-muted,#f4f4f4); color: var(--theme-text-strong,#111); }

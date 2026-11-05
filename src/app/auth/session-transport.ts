@@ -22,15 +22,24 @@ export async function readJson<T>(response: Response): Promise<T> {
 }
 
 export async function postAuthJson(path: string, body: unknown): Promise<Response> {
-  const execute = () => fetch(`/api/auth/${path}`, {
+  const send = () => fetch(`/api/auth/${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'same-origin',
     signal: AbortSignal.timeout(10000),
     body: JSON.stringify(body),
   })
+  const execute = async () => {
+    try { return await send() }
+    catch (error) {
+      // A response may be lost after the server committed rotation. Keep the
+      // origin lock during this one retry; the server coalesces spent tokens.
+      if (path !== 'refresh' || !(error instanceof TypeError || error instanceof DOMException && ['TimeoutError', 'AbortError'].includes(error.name))) throw error
+      return send()
+    }
+  }
   // Refresh cookies are shared by tabs. Serialize rotation and account changes by origin.
-  if (['refresh', 'login', 'verify-email', 'yandex/complete', 'logout', 'reset-password'].includes(path) && navigator.locks) return navigator.locks.request('staffly-auth-cookie', { signal: AbortSignal.timeout(12000) }, execute)
+  if (['refresh', 'login', 'verify-email', 'yandex/complete', 'logout', 'reset-password'].includes(path) && navigator.locks) return navigator.locks.request('staffly-auth-cookie', { signal: AbortSignal.timeout(25000) }, execute)
   return execute()
 }
 

@@ -1,3 +1,4 @@
+import { recordSecurityEvent } from '../security/journal.ts'
 import { requireCapacity, subscriptionSnapshot } from '../subscriptions/access.ts'
 import { effectiveSubscription, plans, TRIAL_DAYS } from '../../app/subscriptions/plans.ts'
 import { hasPermission, requirePermission, ensureAccessRoles, locationsFor } from './access/access.ts'
@@ -191,6 +192,7 @@ export async function changeMemberRole(actorUserId: string, organizationId: stri
     const updated = await tx.organizationMember.update({ where: { id: target.id }, data: { role: nextRole,accessRoleId:null,accessConfigured:false } })
     if (nextRole === 'MEMBER') await tx.documentAcknowledgement.updateMany({ where: { memberId: target.id, acknowledgedAt: null, cancelledAt: null, document: { organizationId, OR: [{ visibility: 'ADMINS' }, { visibility: 'PRIVATE_MEMBER', targetMemberId: { not: target.id } }] } }, data: { cancelledAt: new Date() } })
     await tx.accountNotification.create({ data: { userId: target.userId, organizationId, type: 'ROLE_CHANGED', title: 'Роль изменена', message: `В организации «${actor.organization.name}» вам назначена роль «${roleName}».` } })
+    await recordSecurityEvent(tx, { action: 'ACCESS_CHANGED', userId: actorUserId, organizationId, resourceType: 'MEMBER', resourceId: target.id })
     return updated
   })
   return member
@@ -224,6 +226,7 @@ export async function removeMember(actorUserId: string, organizationId: string, 
     await tx.locationMember.updateMany({ where: { memberId: target.id, organizationId, leftAt: null }, data: { leftAt: now } })
     await tx.locationTeamMember.deleteMany({ where: { memberId: target.id, organizationId } })
     await tx.organizationMember.update({ where: { id: target.id }, data: { leftAt: now } })
+    await recordSecurityEvent(tx, { action: 'MEMBER_DEPARTED', userId: actorUserId, organizationId, resourceType: 'MEMBER', resourceId: target.id })
     const pending = await tx.organizationRequest.findMany({ where: { organizationId, createdByMemberId: target.id, status: 'PENDING' }, select: { id: true } })
     if (pending.length) {
       const ids = pending.map((request) => request.id)

@@ -1,6 +1,6 @@
 // Light styles keep their original fallbacks. Every UI module consumes these
 // shared roles, including lazy routes and popups portaled to document.body.
-:root {color-scheme:light;}
+:root {color-scheme:light;--theme-muted:#64616c;--theme-quiet:#696570;}
 :where(html[data-theme=dark]) :where(button,select) {color:inherit;}
 :root[data-theme=dark] {
   color-scheme:dark;
@@ -83,7 +83,7 @@ html[data-theme=dark] {
     --theme-text-strong:#222;--theme-text:#444;--theme-muted:#666;--theme-border:#ddd;
     background:#fff;color:#222;color-scheme:light;
   }
-  .auth {background:var(--theme-canvas);}
+  .auth {--theme-quiet:var(--theme-muted);background:var(--theme-canvas);}
   .auth__panel {background:var(--theme-header);}
   ::selection {background:#665178;color:#fff;}
 }
@@ -93,7 +93,8 @@ html[data-theme=dark] {
 html[data-theme=light] .auth {
   --theme-solid:#eae7ef;--theme-surface:#fff;--theme-translucent:rgb(255 255 255 / 65%);
   --theme-on-solid:#29252e;--theme-text-strong:#29252e;--theme-text:#4d4856;
-  --theme-muted:#716a7b;--theme-quiet:#716a7b;--theme-border:#ddd8e4;--theme-border-strong:#b0a8ba;
+  --theme-muted:#625b6e;--theme-quiet:#625b6e;--theme-border:#ddd8e4;--theme-border-strong:#b0a8ba;
+  --theme-danger:#a02d3c;--theme-danger-border:#b84b58;--theme-success:#2e6f43;--theme-success-bg:#edf6ef;
   --field-value:#29252e;--field-example:#79717f;
   background:#f5f4f7;color:#29252e;
   .auth__panel {background:#fff;box-shadow:0 12px 50px rgb(37 30 47 / 8%);}

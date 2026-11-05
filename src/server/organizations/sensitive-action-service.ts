@@ -4,6 +4,8 @@ import type { Prisma } from '../../generated/prisma/client.ts'
 import { ApiError } from '../api-error.ts'
 import { getMembership, requireOrganizationRole } from './access/permissions.ts'
 import { enqueueEmail } from '../mail/email-outbox.ts'
+import { recordSecurityEvent } from '../security/journal.ts'
+import { scheduleDeletion } from '../privacy/deletion-service.ts'
 
 const configuredSecret = process.env.JWT_SECRET
 if (!configuredSecret) throw new Error('JWT_SECRET is missing')
@@ -23,9 +25,9 @@ export async function createSensitiveToken(userId: string, organizationId: strin
   const latest = await prisma.sensitiveActionToken.findFirst({ where: { userId, organizationId, action }, orderBy: { createdAt: 'desc' } })
   if (latest && latest.createdAt > new Date(Date.now() - COOLDOWN_MS)) throw new ApiError(429, 'CODE_COOLDOWN', 'Новый код можно запросить через минуту.')
   const code = newCode()
-  await prisma.$transaction([
-    prisma.sensitiveActionToken.deleteMany({ where: { userId, organizationId, action, usedAt: null } }),
-    prisma.sensitiveActionToken.create({ data: {
+  await prisma.$transaction(async tx => {
+    await tx.sensitiveActionToken.deleteMany({ where: { userId, organizationId, action, usedAt: null } })
+    await tx.sensitiveActionToken.create({ data: {
       userId,
       organizationId,
       action,
@@ -33,8 +35,9 @@ export async function createSensitiveToken(userId: string, organizationId: strin
       targetLocationId,
       codeHash: codeHash(userId, organizationId, action, code),
       expiresAt: new Date(Date.now() + CODE_MS),
-    } }),
-  ])
+    } })
+    await recordSecurityEvent(tx, { action: 'CONFIRMATION_REQUESTED', userId, organizationId, resourceType: targetLocationId ? 'LOCATION' : 'ORGANIZATION', resourceId: targetLocationId ?? organizationId })
+  })
   return code
 }
 
@@ -57,14 +60,20 @@ export async function requestOrganizationDeletion(userId: string, organizationId
 
 export async function claimSensitiveToken(tx: Prisma.TransactionClient, userId: string, organizationId: string, action: Action, code: string, locationId?: string) {
   const token = await tx.sensitiveActionToken.findFirst({ where: { userId, organizationId, action, usedAt: null }, orderBy: { createdAt: 'desc' } })
-  if (!token || token.expiresAt <= new Date() || token.attempts >= MAX_ATTEMPTS) throw new ApiError(400, 'INVALID_VERIFICATION_CODE', 'Код неверен или срок его действия истёк.')
+  if (!token || token.expiresAt <= new Date() || token.attempts >= MAX_ATTEMPTS) {
+    await recordSecurityEvent(tx, { action: 'CONFIRMATION_FAILED', userId, organizationId, resourceType: 'ORGANIZATION', resourceId: organizationId, outcome: 'DENIED', reasonCode: 'INVALID_CONFIRMATION' })
+    return null
+  }
   const valid = (!locationId || token.targetLocationId === locationId) && equalHash(token.codeHash, codeHash(userId, organizationId, action, code))
   const claimed = await tx.sensitiveActionToken.updateMany({
     where: { id: token.id, usedAt: null, attempts: { lt: MAX_ATTEMPTS }, expiresAt: { gt: new Date() } },
     data: { attempts: { increment: 1 }, ...(valid ? { usedAt: new Date() } : {}) },
   })
   // Return a failed claim so callers commit its attempt counter before reporting an error.
-  if (!claimed.count || !valid) return null
+  if (!claimed.count || !valid) {
+    await recordSecurityEvent(tx, { action: 'CONFIRMATION_FAILED', userId, organizationId, resourceType: 'ORGANIZATION', resourceId: organizationId, outcome: 'DENIED', reasonCode: 'INVALID_CONFIRMATION' })
+    return null
+  }
   return token
 }
 
@@ -73,6 +82,8 @@ export async function confirmOwnershipTransfer(userId: string, organizationId: s
   requireOrganizationRole(actor.role, ['OWNER'])
   const actorUser = await prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { email: true } })
   const result = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId}, 1))::text`
+    requireOrganizationRole((await getMembership(userId, organizationId, tx)).organizationRole, ['OWNER'])
     const token = await claimSensitiveToken(tx, userId, organizationId, 'TRANSFER_OWNERSHIP', code)
     if (!token) return null
     if (!token.targetUserId) throw new ApiError(400, 'INVALID_OWNERSHIP_TARGET', 'Участник для передачи владения не найден.')
@@ -90,6 +101,7 @@ export async function confirmOwnershipTransfer(userId: string, organizationId: s
     const action = { label: 'Открыть организацию', path: `/app/organizations/${organizationId}` }
     await enqueueEmail(tx, { userId: target.userId, organizationId, sourceKind: 'MANDATORY', sourceKey: `ownership:new:${token.id}`, content: { title: 'Вы стали владельцем', eyebrow: 'Владение передано', organization: actor.organization.name, intro: `Вам передано владение организацией «${actor.organization.name}».`, fields: [['Прежний владелец', actorUser.email], ['Новый владелец', targetName]], action, footer: 'Это подтверждение критического изменения доступа.' } })
     await enqueueEmail(tx, { userId, organizationId, sourceKind: 'MANDATORY', sourceKey: `ownership:previous:${token.id}`, content: { title: 'Владение передано', eyebrow: 'Безопасность', organization: actor.organization.name, intro: `Вы передали организацию «${actor.organization.name}» участнику ${targetName}.`, fields: [['Ваша новая роль', 'Администратор']], action, footer: 'Если это сделали не вы, немедленно восстановите доступ.' } })
+    await recordSecurityEvent(tx, { action: 'OWNERSHIP_TRANSFERRED', userId, organizationId, resourceType: 'MEMBER', resourceId: target.id })
     return { ownerUserId: target.userId }
   }, { isolationLevel: 'Serializable' })
   if (!result) throw new ApiError(400, 'INVALID_VERIFICATION_CODE', 'Код неверен или срок его действия истёк.')
@@ -100,6 +112,8 @@ export async function confirmOrganizationDeletion(userId: string, organizationId
   const actor = await getMembership(userId, organizationId)
   requireOrganizationRole(actor.role, ['OWNER'])
   const result = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId}, 1))::text`
+    requireOrganizationRole((await getMembership(userId, organizationId, tx)).organizationRole, ['OWNER'])
     const token = await claimSensitiveToken(tx, userId, organizationId, 'DELETE_ORGANIZATION', code)
     if (!token) return null
     const now = new Date()
@@ -107,7 +121,9 @@ export async function confirmOrganizationDeletion(userId: string, organizationId
     if (!deleted.count) throw new ApiError(404, 'ORGANIZATION_NOT_FOUND', 'Организация не найдена.')
     await tx.organizationInvite.updateMany({ where: { organizationId, acceptedAt: null, rejectedAt: null, revokedAt: null }, data: { revokedAt: now } })
     await enqueueEmail(tx, { userId, organizationId, sourceKind: 'MANDATORY', sourceKey: `organization:deleted:${token.id}`, content: { title: 'Организация удалена', eyebrow: 'Подтверждение действия', intro: `Удаление организации «${actor.organization.name}» подтверждено. Доступ к ней закрыт.`, fields: [['Дата и время', now.toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' }) + ' МСК']], action: { label: 'К моим организациям', path: '/app' }, footer: 'Если это сделали не вы, проверьте безопасность аккаунта.' } })
-    return { deleted: true }
+    const deletion = await scheduleDeletion(tx, 'ORGANIZATION', organizationId, now)
+    await recordSecurityEvent(tx, { action: 'ORGANIZATION_DELETED', userId, organizationId, resourceType: 'ORGANIZATION', resourceId: organizationId })
+    return { deleted: true, dueAt: deletion.dueAt }
   }, { isolationLevel: 'Serializable' })
   if (!result) throw new ApiError(400, 'INVALID_VERIFICATION_CODE', 'Код неверен или срок его действия истёк.')
   return result

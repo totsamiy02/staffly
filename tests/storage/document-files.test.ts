@@ -5,10 +5,10 @@ import sharp from 'sharp'
 import { supportsPreview, validateDocumentFile, MAX_DOCUMENT_BYTES, documentMimeTypes } from '../../src/server/documents/file-validation.ts'
 import { metadataSchema, assignSchema } from '../../src/server/documents/schemas.ts'
 
-function zip(entries: Array<[string, string]>) {
+function zip(entries: Array<[string, string | Buffer]>) {
   const locals: Buffer[] = [], central: Buffer[] = []; let offset = 0
   for (const [name, value] of entries) {
-    const body = Buffer.from(value), packed = deflateRawSync(body), filename = Buffer.from(name), header = Buffer.alloc(30), record = Buffer.alloc(46)
+    const body = Buffer.isBuffer(value) ? value : Buffer.from(value), packed = deflateRawSync(body), filename = Buffer.from(name), header = Buffer.alloc(30), record = Buffer.alloc(46)
     header.writeUInt32LE(0x04034b50); header.writeUInt16LE(20, 4); header.writeUInt16LE(8, 8); header.writeUInt32LE(crc32(body), 14); header.writeUInt32LE(packed.length, 18); header.writeUInt32LE(body.length, 22); header.writeUInt16LE(filename.length, 26)
     record.writeUInt32LE(0x02014b50); record.writeUInt16LE(20, 4); record.writeUInt16LE(20, 6); record.writeUInt16LE(8, 10); record.writeUInt32LE(crc32(body), 16); record.writeUInt32LE(packed.length, 20); record.writeUInt32LE(body.length, 24); record.writeUInt16LE(filename.length, 28); record.writeUInt32LE(offset, 42)
     const local = Buffer.concat([header, filename, packed]); locals.push(local); central.push(Buffer.concat([record, filename])); offset += local.length
@@ -43,6 +43,15 @@ it('accepts an OOXML package but refuses arbitrary ZIP, macros, traversal and co
   for (const contents of [zip([['plain.txt', 'not office']]), zip([...wordParts, ['word/vbaProject.bin', 'macro']]), zip([...wordParts, ['../bad.xml', 'bad']]), zip([...wordParts, ['secret.zip', 'archive']]), zip(wordParts).subarray(0, -1)]) await assert.rejects(() => validateDocumentFile(contents, documentMimeTypes.docx, 'policy.docx'))
   const corrupt = zip(wordParts); corrupt[45] ^= 0xff
   await assert.rejects(() => validateDocumentFile(corrupt, documentMimeTypes.docx, 'policy.docx'))
+})
+it('rejects DTD/entities in UTF-8 and UTF-16 XML parts without rejecting ordinary UTF-16 Office XML', async () => {
+  const unsafe = '<?xml version="1.0"?><!DOCTYPE x [<!ENTITY data SYSTEM "file:///etc/passwd">]><x>&data;</x>'
+  const le = Buffer.concat([Buffer.from('fffe', 'hex'), Buffer.from(unsafe, 'utf16le')])
+  const be = Buffer.from(le); be.swap16()
+  for (const bytes of [Buffer.from(unsafe), le, be, Buffer.from('<x>\0hidden</x>')]) {
+    await assert.rejects(validateDocumentFile(zip([...wordParts, ['word/extra.xml', bytes]]), documentMimeTypes.docx, 'unsafe.docx'))
+  }
+  await validateDocumentFile(zip([...wordParts, ['word/extra.xml', Buffer.concat([Buffer.from('fffe', 'hex'), Buffer.from('<?xml version="1.0" encoding="UTF-16"?><x>Текст</x>', 'utf16le')])]]), documentMimeTypes.docx, 'safe.docx')
 })
 it('rejects fake legacy Office headers and recognizes all supported preview formats', async () => {
   const fake = Buffer.alloc(1024); Buffer.from('d0cf11e0a1b11ae1', 'hex').copy(fake); fake.write('WordDocument', 200, 'utf16le')

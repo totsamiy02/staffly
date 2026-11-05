@@ -188,6 +188,7 @@
 .auth__field input {
   width: 100%;
   min-width: 0;
+  min-height: 48px;
   border: 0;
   outline: 0;
   appearance: none;
@@ -210,6 +211,7 @@
 
 .auth__eye {
   display: grid;
+  min-height: 44px;
   flex: 0 0 28px;
   place-items: center;
   color: var(--theme-quiet,#aaa);
@@ -343,7 +345,8 @@
   .auth__back { top: 16px; left: 16px; width: 36px; justify-content: center; padding: 0; font-size: 0; }
   .auth__code-cells { gap: 6px; }
   .auth__code-cell { height: 50px; font-size: 22px; }
-  .auth { padding: 12px; }
+  .auth { padding: 64px 12px 12px; }
+  .auth-theme-control { position: absolute; top: 12px; right: 12px; }
   .auth__panel { padding: 28px 22px 24px; border-radius: 20px; }
   .auth__tabs { margin: 22px auto 28px; }
   .auth__tab { min-height: 44px; font-size: 14px; }

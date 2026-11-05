@@ -3,11 +3,12 @@ import express, { Router, type Request } from 'express'
 import { accountRateLimit } from '../security/rate-limit.ts'
 import { z } from 'zod'
 import { ApiError } from '../api-error.ts'
-import { requireAuth, type AuthenticatedRequest } from '../auth.ts'
+import { requireAuth, assertActiveSession, type AuthenticatedRequest } from '../auth.ts'
 import { prisma } from '../db.ts'
 import { organizationIdParams } from '../organizations/schemas.ts'
 import { MAX_IMAGE_BYTES, removeOrganizationLogo, removeUserAvatar, replaceOrganizationLogo, replaceUserAvatar, stageProfileImage } from './image-service.ts'
 import { storage } from './provider.ts'
+import { freshFileAccess } from './guarded-delivery.ts'
 
 const router = Router()
 const imageBody = express.raw({ type: ['image/jpeg', 'image/png', 'image/webp'], limit: MAX_IMAGE_BYTES })
@@ -37,6 +38,9 @@ router.get(['/media/:fileId', '/media/v2/:fileId'], async (request, response, ne
     if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') throw new ApiError(404, 'MEDIA_NOT_FOUND', 'Изображение не найдено.')
     throw error
   }
+  if (file.purpose === 'USER_AVATAR' && !await freshFileAccess(() => canReadAvatar(auth(request).userId, file.id))) throw new ApiError(404, 'MEDIA_NOT_FOUND', 'Изображение не найдено.')
+  if (file.purpose === 'USER_AVATAR') await assertActiveSession(auth(request))
+  if (file.purpose === 'ORGANIZATION_LOGO' && !await prisma.organization.count({ where: { logoFileId: file.id, deletedAt: null } })) throw new ApiError(404, 'MEDIA_NOT_FOUND', 'Изображение не найдено.')
   response.set({ 'Content-Type': file.mimeType, 'Content-Length': String(contents.length) })
   response.end(contents) // Avoid Express generating an ETag/304 for private image bytes.
 })

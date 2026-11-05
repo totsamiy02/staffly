@@ -1,3 +1,4 @@
+import { safeError } from './security/safe-error.ts'
 import { startWorkers } from './workers.ts'
 import { prisma, databasePool } from './db.ts'
 import { checkDatabasePolicy } from './database-policy.ts'
@@ -14,7 +15,7 @@ async function shutdown() {
   stopping = true
   const deadline = setTimeout(() => process.exit(1), 75000)
   try { await Promise.all([stop(), stopHealth()]); await prisma.$disconnect(); clearInterval(keepAlive); clearTimeout(deadline) }
-  catch (error) { console.error('Worker shutdown failed:', error); process.exitCode = 1; clearInterval(keepAlive); clearTimeout(deadline) }
+  catch (error) { console.error('Worker shutdown failed:', safeError(error)); process.exitCode = 1; clearInterval(keepAlive); clearTimeout(deadline) }
 }
 process.once('SIGTERM', () => { void shutdown() })
 process.once('SIGINT', () => { void shutdown() })

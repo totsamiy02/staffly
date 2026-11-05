@@ -1,9 +1,13 @@
+import { safeError } from '../security/safe-error.ts'
+import { auditSensitiveAccess } from '../security/journal.ts'
 import { needsPreparedPreview, preparePreview, readPreviewSource } from '../file-preview/service.ts'
+import { freshFileAccess } from '../storage/guarded-delivery.ts'
+import { authorizeDocumentContent } from './service.ts'
 import express, { Router, type Request } from 'express'
 import { z } from 'zod'
 import { accountRateLimit } from '../security/rate-limit.ts'
 import { pipeline } from 'node:stream/promises'
-import { requireAuth, type AuthenticatedRequest } from '../auth.ts'
+import { requireAuth, assertActiveSession, type AuthenticatedRequest } from '../auth.ts'
 import { ApiError } from '../api-error.ts'
 import { assignSchema, folderSchema, listSchema, metadataSchema, paramsSchema } from './schemas.ts'
 import { MAX_DOCUMENT_BYTES } from './file-validation.ts'
@@ -38,14 +42,15 @@ router.delete(`${base}/:documentId`, mutate, async (request, response) => { cons
 router.post(`${base}/:documentId/content`, mutate, async (request, response) => {
   const { organizationId, documentId } = parse(paramsSchema, request.params)
   const { action } = parse(z.object({ action: z.enum(['preview', 'download']) }), request.query)
-  const actor = user(request), file = await deliverDocument(actor, organizationId, documentId!, action)
+  const sessionCheck = () => assertActiveSession((request as AuthenticatedRequest).auth!)
+  const actor = user(request), file = await auditSensitiveAccess({ action: action === 'preview' ? 'DOCUMENT_PREVIEW' : 'DOCUMENT_DOWNLOAD', userId: actor, organizationId, resourceType: 'DOCUMENT', resourceId: documentId! }, () => deliverDocument(actor, organizationId, documentId!, action, sessionCheck))
   if (action === 'preview' && needsPreparedPreview(file.fileName)) {
     const prepared = await preparePreview(await readPreviewSource(file.stream), file.fileName, organizationId)
     // Parsing/queue can take time. Re-authorize against current membership, folder and audience.
-    const current = await getDocument(actor, organizationId, documentId!)
-    if (current.fileRemovedAt || current.filePurgePending) throw new ApiError(404, 'DOCUMENT_FILE_MISSING', 'Файл документа удалён или ожидает очистки.')
+    await freshFileAccess(() => authorizeDocumentContent(actor, organizationId, documentId!, action))
+    await sessionCheck()
     response.set({ 'Content-Type': prepared.mime, 'Content-Length': String(prepared.bytes.length), 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "sandbox; default-src 'none'" })
-    response.once('finish', () => { void recordDocumentOpened(actor, organizationId, documentId!).catch(error => console.error('Document preview status failed:', error)) })
+    response.once('finish', () => { void recordDocumentOpened(actor, organizationId, documentId!).catch(error => console.error('Document preview status failed:', safeError(error))) })
     response.send(prepared.bytes)
     return
   }
@@ -54,7 +59,7 @@ router.post(`${base}/:documentId/content`, mutate, async (request, response) => 
   // No GET/HEAD content endpoint: link prefetches cannot mark documents opened.
   try {
     await pipeline(file.stream, response)
-    if (!response.destroyed || response.writableFinished) await recordDocumentOpened(actor, organizationId, documentId!).catch(error => console.error('Document delivery status failed:', error))
+    if (!response.destroyed || response.writableFinished) await recordDocumentOpened(actor, organizationId, documentId!).catch(error => console.error('Document delivery status failed:', safeError(error)))
   } catch (error) { file.stream.destroy(); if (!response.headersSent) throw error }
 })
 router.delete(`${base}/:documentId/content`, mutate, async (request, response) => {

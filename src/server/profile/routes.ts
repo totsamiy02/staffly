@@ -1,9 +1,12 @@
+import { securityHistory } from '../security/history-service.ts'
+import { lifecycleStatus, requestAccountDeletion, confirmAccountDeletion } from '../privacy/deletion-service.ts'
+import { accountRateLimit } from '../security/rate-limit.ts'
 import { updatePresence } from './presence.ts'
 import { Router, type Request } from 'express'
 import { z } from 'zod'
 import { prisma } from '../db.ts'
 import { ApiError } from '../api-error.ts'
-import { requireAuth, type AuthenticatedRequest } from '../auth.ts'
+import { requireAuth, clearRefreshCookie, type AuthenticatedRequest } from '../auth.ts'
 import { updateProfileBody } from './schemas.ts'
 import { bindProfileImage, mediaUrl } from '../storage/image-service.ts'
 import { emailPreferencesBody, getEmailPreferences, saveEmailPreferences } from '../mail/email-preferences.ts'
@@ -29,6 +32,23 @@ function profileUser(user: { id: string; email: string; firstName: string | null
     avatarUrl: mediaUrl(user.avatarFileId),
   }
 }
+
+const deletionLimiter = accountRateLimit('account-deletion', 10, 900000)
+router.get('/profile/security-history', async (request, response) => {
+  const { page } = z.object({ page: z.coerce.number().int().min(1).max(100000).default(1) }).parse(request.query)
+  response.json(await securityHistory(auth(request).userId, undefined, page))
+})
+router.get('/profile/data-lifecycle', async (request, response) => { response.json(await lifecycleStatus(auth(request).userId)) })
+router.post('/profile/delete/request', deletionLimiter, async (request, response) => {
+  z.object({ confirm: z.literal(true) }).strict().parse(request.body)
+  response.json(await requestAccountDeletion(auth(request)))
+})
+router.post('/profile/delete/confirm', deletionLimiter, async (request, response) => {
+  const { challengeId, code } = z.object({ confirm: z.literal(true), challengeId: z.uuid(), code: z.string().regex(/^\d{6}$/) }).strict().parse(request.body)
+  const result = await confirmAccountDeletion(auth(request), challengeId, code)
+  clearRefreshCookie(response)
+  response.json(result)
+})
 
 router.get('/profile', async (request, response) => {
   const user = await prisma.user.findUniqueOrThrow({ where: { id: auth(request).userId } })

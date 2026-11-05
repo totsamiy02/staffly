@@ -115,3 +115,14 @@ test('every migrated UI color role is supplied by the root dark palette, also fo
   assert.ok(html.indexOf('<script src="/theme-init.js"></script>') < html.indexOf('<body>'))
   assert.doesNotMatch(html, /<script[^>]+(?:async|defer)[^>]+theme-init/)
 })
+
+test('all eight light event location badges keep small text readable', () => {
+  const css = readFileSync(path.join(root, 'src/pages/app/events/events.scss'), 'utf8')
+  const tones = [...css.matchAll(/&\[data-tone=(\w+)\]\s*\{\s*background:\s*var\([^,]+,(#[\da-f]{6})\);\s*color:\s*var\([^,]+,(#[\da-f]{6})\)/g)]
+  assert.equal(tones.length, 8)
+  const luminance = (hex: string) => [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255).map(c => c <= .04045 ? c / 12.92 : ((c + .055) / 1.055) ** 2.4).reduce((sum, c, i) => sum + c * [.2126, .7152, .0722][i], 0)
+  for (const [, name, background, foreground] of tones) {
+    const a = luminance(foreground), b = luminance(background), ratio = (Math.max(a, b) + .05) / (Math.min(a, b) + .05)
+    assert.ok(ratio >= 4.5, `${name}: ${ratio.toFixed(2)}`)
+  }
+})

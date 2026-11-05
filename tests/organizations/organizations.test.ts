@@ -414,7 +414,7 @@ describe('profiles and public organization details', { concurrency: false }, () 
     assert.equal(failed.deleted, 0)
     const pending = await prisma.storedFile.findUniqueOrThrow({ where: { id: fileId } })
     assert.equal(pending.deletionAttempts, 1)
-    assert.equal(pending.lastDeletionError, 'simulated filesystem outage')
+    assert.equal(pending.lastDeletionError, '{"name":"Error"}')
     const retried = await cleanupPendingFiles()
     assert.equal(retried.deleted, 1)
     assert.equal(await prisma.storedFile.findUnique({ where: { id: fileId } }), null)
@@ -736,12 +736,12 @@ describe('session continuity, presence and cross-user synchronization regression
     assert.equal((await prisma.authSession.findFirstOrThrow({ where: { userId: first.id, revokedAt: null } })).id, previous.id)
   })
 
-  it('does not clear a newly rotated cookie when an obsolete refresh loses the race', async () => {
+  it('recovers a racing refresh from the same browser without invalidating its new cookie', async () => {
     const obsolete = firstCookie
     const valid = await http('/auth/refresh', { method: 'POST', cookie: firstCookie, body: {} })
     assert.equal(valid.status, 200); firstCookie = cookie(valid); firstAuth = await valid.json()
-    const stale = await http('/auth/refresh', { method: 'POST', cookie: obsolete, body: {} })
-    assert.equal(stale.status, 401); assert.equal(stale.headers.get('set-cookie'), null)
+    const stale = await http('/auth/refresh', { method: 'POST', cookie: `${obsolete}; ${firstBrowserCookie}`, body: {} })
+    assert.equal(stale.status, 200); assert.equal(cookie(stale), firstCookie)
     const stillValid = await http('/auth/refresh', { method: 'POST', cookie: firstCookie, body: {} })
     assert.equal(stillValid.status, 200); firstCookie = cookie(stillValid); firstAuth = await stillValid.json()
   })
