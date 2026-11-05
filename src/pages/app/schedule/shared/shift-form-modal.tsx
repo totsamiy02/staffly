@@ -1,3 +1,4 @@
+import { useFormSafety } from '../../../../app/forms/use-form-safety.ts'
 import PlanningMonthCalendar from '../../shared/planning-month-calendar.tsx'
 import '../schedule-redesign.scss'
 import { useToast, useToastFeedback } from '../../../../component/ui/toast/toast-context.ts'
@@ -53,6 +54,8 @@ export default function ShiftFormModal({ organization, members, date, shift, act
   const [absenceWarning, setAbsenceWarning] = useState(false)
   useEffect(() => { setAcknowledgeAbsence(false); setAbsenceWarning(false) }, [memberId, startDate, endDate, startTime, endTime, description, dates, overrides, positionId, batch])
   const [workloadWarning, setWorkloadWarning] = useState(false)
+  const safety = useFormSafety({ scope: 'shift:' + organization.id + ':' + organization.locationId + ':' + (shift?.id ?? 'new'), value: { memberId, startDate, startTime, endDate, endTime, description, reason, attendance, extendWindow, deadlineDate, deadlineTime, positionId, templateId, batch, batchMonth, dates, overrides }, busy })
+  const initializeDefaults = safety.initialize
   const initialized = useRef(false)
   useEffect(() => {
     if (initialized.current || !planning.data || shift || actual) return
@@ -60,9 +63,10 @@ export default function ShiftFormModal({ organization, members, date, shift, act
     const assigned = planning.data.assignments.find(item => item.memberId === memberId && planning.data!.positions.some(position => position.id === item.positionId && position.isActive))
     const selected = assigned?.positionId ?? ''
     setPositionId(selected)
+    initializeDefaults({ positionId: selected })
     const template = planning.data.templates.find(item => item.isActive && item.positionId === (selected || null))
-    if (template) { setTemplateId(template.id); setStartTime(template.startTime); setEndTime(template.endTime); setEndDate(addDays(startDate, template.endDayOffset)) }
-  }, [planning.data, shift, actual, memberId, startDate])
+    if (template && startTime === '09:00' && endTime === '18:00' && endDate === startDate) { initializeDefaults({ templateId: template.id, startTime: template.startTime, endTime: template.endTime, endDate: addDays(startDate, template.endDayOffset) }); setTemplateId(template.id); setStartTime(template.startTime); setEndTime(template.endTime); setEndDate(addDays(startDate, template.endDayOffset)) }
+  }, [planning.data, shift, actual, memberId, startDate, startTime, endTime, endDate, initializeDefaults])
   const positions = planning.data?.positions.filter(item => item.isActive && planning.data?.assignments.some(assignment => assignment.memberId === memberId && assignment.positionId === item.id)) ?? []
   const templates = planning.data?.templates.filter(item => item.isActive && (!item.positionId || item.positionId === positionId) && (!item.positionId || planning.data?.positions.some(position => position.id === item.positionId && position.isActive))) ?? []
   function applyTemplate(id: string) {
@@ -109,12 +113,12 @@ export default function ShiftFormModal({ organization, members, date, shift, act
       else await apiRequest(`/organizations/${organization.id}/shifts${shift ? `/${shift.id}` : ''}`, { method: shift ? 'PATCH' : 'POST', body: { acknowledgeAbsence, acknowledgeWorkload, positionId: positionId || null, memberId, startDate, startTime, endDate, endTime, breakMinutes: 0, description } })
       await invalidateOrganizationWork(queryClient, organization.id)
       toast(draft ? 'Предварительный график сохранён' : actual ? 'Рабочее время обновлено' : shift ? 'Смена изменена' : 'Смены добавлены', 'success')
-      close()
+      safety.markSaved(); close()
     } catch (failure) { if ((failure as { code?: string }).code === 'EMPLOYEE_ABSENT') setAbsenceWarning(true); if ((failure as { code?: string }).code === 'WORKLOAD_WARNING') setWorkloadWarning(true); setError(failure instanceof Error ? failure.message : 'Не удалось сохранить смену.') }
     finally { setBusy(false) }
   }
 
-  return <AnimatedOverlay variant="modal" dismissible={!busy} onClose={onClose}>{(close) => <DocumentDialog className="schedule-shift-dialog" title={actual ? 'Изменить отработанное время' : shift ? 'Редактировать смену' : 'Создать смену'} headerContent={<></>} busy={busy} onClose={close}><form className="shift-form" onChangeCapture={event => { if (!(event.target instanceof HTMLInputElement && ['ackWorkload', 'ackAbsence'].includes(event.target.name))) { setAcknowledgeWorkload(false); if (workloadWarning) { setWorkloadWarning(false); setError('') } } }} onSubmit={(event) => void submit(event, close)}>
+  return <AnimatedOverlay variant="modal" dismissible={!busy} onClose={onClose} beforeClose={safety.confirmClose}>{(close) => <DocumentDialog className="schedule-shift-dialog" title={actual ? 'Изменить отработанное время' : shift ? 'Редактировать смену' : 'Создать смену'} headerContent={<></>} busy={busy} onClose={close}><form className="shift-form" onChangeCapture={event => { if (!(event.target instanceof HTMLInputElement && ['ackWorkload', 'ackAbsence'].includes(event.target.name))) { setAcknowledgeWorkload(false); if (workloadWarning) { setWorkloadWarning(false); setError('') } } }} onSubmit={(event) => void submit(event, close)}>
     <header><div><p className="app-eyebrow">{actual ? 'Завершённая смена' : shift ? 'Редактирование графика' : displayDate(date)}</p><h2>{actual ? 'Изменить отработанное время' : shift ? 'Редактировать смену' : 'Создать смену'}</h2><p>{draft ? 'Предварительный график. Основной календарь пока не изменится.' : actual ? 'План сохранится без изменений. Укажите фактическое время и причину.' : 'Выберите сотрудника и время его работы.'}</p></div><button type="button" disabled={busy} aria-label="Закрыть" onClick={close}>×</button></header>
     {actual && shift && <div className="shift-form__plan"><span>Запланированное время</span><strong>{scheduledStart.time}–{scheduledEnd.time}</strong><small>{displayDate(scheduledStart.date)}{scheduledEnd.date !== scheduledStart.date ? ` → ${displayDate(scheduledEnd.date)}` : ''}</small></div>}
 

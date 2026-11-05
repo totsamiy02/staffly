@@ -1,3 +1,5 @@
+import FormDraftNotice from '../../../../component/ui/form-draft-notice.tsx'
+import { useFormSafety } from '../../../../app/forms/use-form-safety.ts'
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '../../../../app/auth/auth-context.tsx'
@@ -31,12 +33,13 @@ export default function RoleEditor({ org, role, onClose }: { org: string; role?:
   const affectedMembers = role?.memberCount ?? 0
   const employeeWord = affectedMembers % 10 === 1 && affectedMembers % 100 !== 11 ? 'сотрудника' : 'сотрудников'
   const mutation = useMutation({
-    mutationFn: () => apiRequest(`/organizations/${org}/access/roles${existing ? '/' + role.id : ''}`, {
+    mutationFn: (): Promise<unknown> => apiRequest(`/organizations/${org}/access/roles${existing ? '/' + role.id : ''}`, {
       method: existing ? 'PUT' : 'POST',
-      body: { name, description, permissions, ...(existing ? { revision: role.revision } : {}) },
+      body: { name, description, permissions, ...(existing ? { revision: safety.expectedRevision } : {}) },
     }),
-    onSuccess: async () => { await client.invalidateQueries(); toast(existing ? 'Изменения роли сохранены.' : 'Новая роль создана.', 'success'); onClose() },
+    onSuccess: async () => { safety.markSaved(); await client.invalidateQueries(); toast(existing ? 'Изменения роли сохранены.' : 'Новая роль создана.', 'success'); onClose() },
   })
+  const safety = useFormSafety({ scope: 'access-role:' + org + ':' + (role?.id ?? 'new'), value: { name, description, permissions, copy }, active: !protectedRole, busy: mutation.isPending, draft: true, revision: existing ? role?.revision : undefined, onRestore: value => { setName(value.name); setDescription(value.description); setPermissions(normalizePermissions(value.permissions)); setCopy(value.copy) } })
   const old = role?.permissions ?? []
   const added = permissions.filter(permission => !old.includes(permission))
   const removed = old.filter(permission => !permissions.includes(permission))
@@ -54,8 +57,9 @@ export default function RoleEditor({ org, role, onClose }: { org: string; role?:
   }
 
   return <div className="access-settings access-role-page">
+    <FormDraftNotice form={safety} />
     <div ref={heading} className="access-editor-heading">
-      <button className="access-back" disabled={mutation.isPending} onClick={onClose}><AccessIcon name="back" />К списку ролей</button>
+      <button className="access-back" disabled={mutation.isPending} onClick={() => void safety.close(onClose)}><AccessIcon name="back" />К списку ролей</button>
       <div className="access-heading"><div className="access-heading__identity"><span className={`access-tile${protectedRole ? ' access-tile--owner' : ''}`}><AccessIcon name={protectedRole ? 'crown' : 'shield'} /></span><div><h2>{protectedRole ? 'Роль владельца' : existing ? name : 'Новая роль'}</h2><p>{protectedRole ? 'Полный доступ к организации и всем её точкам.' : 'Выберите, что сотрудник с этой ролью сможет делать в Staffly.'}</p></div></div><span className={`access-tag${protectedRole ? ' access-tag--owner' : ''}`}>{protectedRole ? 'Защищённая роль' : role?.systemCode && !copy ? 'Стандартная роль' : 'Своя роль'}</span></div>
     </div>
 
@@ -97,7 +101,7 @@ export default function RoleEditor({ org, role, onClose }: { org: string; role?:
 
       <div className="access-editor-note"><AccessIcon name="info" /><p>При включении действия автоматически добавляется нужный просмотр. Если выключить просмотр, связанные действия тоже отключатся.</p></div>
       {mutation.error && !confirm && <p className="form-inline-error">{mutation.error instanceof Error ? mutation.error.message : 'Не удалось сохранить роль.'}</p>}
-      <footer className="access-editor-footer"><div className="access-actions">{role && !protectedRole && <button className="access-text-button" disabled={mutation.isPending} onClick={createCopy}><AccessIcon name="copy" />Создать копию</button>}{role?.systemCode && !protectedRole && !copy && <button className="access-text-button" disabled={mutation.isPending} onClick={() => { setPermissions(recommendedPermissions[role.systemCode!]); mutation.reset() }}><AccessIcon name="history" />Рекомендуемые права</button>}</div><div className="access-actions"><button className="app-secondary" disabled={mutation.isPending} onClick={onClose}>{protectedRole ? 'Закрыть' : 'Отмена'}</button>{!protectedRole && <button className="app-primary" disabled={name.trim().length < 2 || mutation.isPending} onClick={() => existing ? setConfirm(true) : mutation.mutate()}>{mutation.isPending ? 'Сохраняем…' : 'Сохранить роль'}</button>}</div></footer>
+      <footer className="access-editor-footer"><div className="access-actions">{role && !protectedRole && <button className="access-text-button" disabled={mutation.isPending} onClick={createCopy}><AccessIcon name="copy" />Создать копию</button>}{role?.systemCode && !protectedRole && !copy && <button className="access-text-button" disabled={mutation.isPending} onClick={() => { setPermissions(recommendedPermissions[role.systemCode!]); mutation.reset() }}><AccessIcon name="history" />Рекомендуемые права</button>}</div><div className="access-actions"><button className="app-secondary" disabled={mutation.isPending} onClick={() => void safety.close(onClose)}>{protectedRole ? 'Закрыть' : 'Отмена'}</button>{!protectedRole && <button className="app-primary" disabled={name.trim().length < 2 || mutation.isPending} onClick={() => existing ? setConfirm(true) : mutation.mutate()}>{mutation.isPending ? 'Сохраняем…' : 'Сохранить роль'}</button>}</div></footer>
     </section>
 
     {confirm && <AnimatedOverlay variant="modal" dismissible={!mutation.isPending} onClose={() => setConfirm(false)}>{close => <DocumentDialog title="Применить изменения роли?" eyebrow={role?.name} className="access-dialog access-confirm-dialog" onClose={close} busy={mutation.isPending}>

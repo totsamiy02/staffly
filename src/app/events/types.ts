@@ -14,6 +14,7 @@ export type StaffEvent = {
 }
 export type EventPage = { events: StaffEvent[]; markedDays: string[]; pagination: { page: number; pageSize: number; total: number; pages: number } }
 export type EventFormInput = {
+  submissionKey?: string;
   important?: boolean;
   title: string; description: string; typeLabel: string; startDate: string; startTime: string; endDate: string | null; endTime: string | null;
   place: string; meetingUrl: string; shared: boolean; locationIds: string[]; audienceMode: EventAudienceMode;

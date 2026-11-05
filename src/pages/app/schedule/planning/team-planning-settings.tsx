@@ -1,3 +1,5 @@
+import { useFormSafety } from '../../../../app/forms/use-form-safety.ts'
+import OperationStatus from '../../../../component/ui/operation-status.tsx'
 import { useSubscription } from '../../../../app/subscriptions/context.ts'
 import { LockBadge } from '../../subscriptions/plan-ui.tsx'
 import { useState } from 'react'
@@ -14,16 +16,18 @@ export default function TeamPlanningSettings({organization}:{organization:Organi
   const subscription = useSubscription()
   const settings=useTeamSettings(organization.id),{apiRequest}=useAuth(),client=useQueryClient(),toast=useToast()
   const [pending,setPending]=useState<Settings|null>(null),[error,setError]=useState('')
+  const [failedAttempt,setFailedAttempt]=useState<Settings|null>(null)
+  useFormSafety({ scope: 'team-settings:' + organization.id, value: pending, dirty: false, busy: !!pending })
   if(settings.isLoading)return <p className="planning-empty">Загружаем настройки планирования…</p>
   if(settings.isError||!settings.data)return <p className="form-inline-error" role="alert">Не удалось загрузить настройки. <button onClick={()=>void settings.refetch()}>Повторить</button></p>
   const value=pending??settings.data,manage=!!(organization.owner||organization.organizationPermissions?.includes('schedule.settings')),busy=!!pending
   async function save(next:Settings) {
     if ((next.coverageEnabled || next.discussionEnabled) && !subscription.available('planning')) { subscription.request({ feature: 'planning' }); return }
-    setPending(next);setError('')
+    setPending(next);setError('');setFailedAttempt(next)
     try {
       const saved=await apiRequest<Settings>(`/organizations/${organization.id}/schedule/team-settings`,{method:'PUT',body:next})
       client.setQueryData(['team-planning-settings',organization.id],saved)
-      toast('Настройка сохранена','success');await invalidateOrganizationWork(client,organization.id)
+      setFailedAttempt(null);toast('Настройка сохранена','success');await invalidateOrganizationWork(client,organization.id)
     } catch(e) {setError(e instanceof Error?e.message:'Не удалось сохранить настройку.')}
     finally {setPending(null)}
   }
@@ -33,7 +37,6 @@ export default function TeamPlanningSettings({organization}:{organization:Organi
     <div className="planning-option"><span className="planning-option__icon" aria-hidden="true"><PlanningIcon name="people"/></span><div><strong>Согласование графика</strong><p>Подготовьте график в разделе «Расписание → Согласование» и обсудите его с командой перед применением.</p></div><button type="button" role="switch" aria-checked={value.discussionEnabled} aria-label="Согласование графика" className="planning-toggle" disabled={!manage||busy} onClick={()=>void save({...value,discussionEnabled:!value.discussionEnabled})}><i/></button></div>
     <p className="planning-footnote">Чтобы выключить согласование, сначала примените или отмените незавершённые графики во всех заведениях. Обычные смены можно назначать напрямую.</p>
     {!manage&&<p className="planning-footnote">Для изменения нужно право «Настройки расписания» на уровне организации.</p>}
-    {busy&&<p className="planning-footnote" role="status">Сохраняем настройку…</p>}
-    {error&&<p className="form-inline-error" role="alert">{error}</p>}
+    <OperationStatus state={pending ? { phase: 'running', message: 'Сохраняем настройку…' } : error ? { phase: 'failed', message: error } : null} onRetry={!pending && failedAttempt ? () => void save(failedAttempt) : undefined} />
   </section>
 }

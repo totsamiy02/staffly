@@ -4,15 +4,15 @@ import { prisma } from '../../src/server/db.ts'
 import { createBusinessOrganization } from '../support/business-organization.ts'
 import { storage } from '../../src/server/storage/provider.ts'
 
-export async function interfaceFixtures() {
+export async function interfaceFixtures(namespace = '') {
   const password = 'Interface-Test-Only-4729!'
-  const owner = await prisma.user.create({ data: { email: 'interface-owner@example.test', passwordHash: await hash(password), emailVerifiedAt: new Date(), firstName: 'Александра', lastName: 'Константинопольская-Рождественская', middleName: 'Александровна', bio: 'Длинное описание профиля для проверки переноса текста и адаптивных полей. '.repeat(5).trim(), phone: '+79991234567' } })
+  const owner = await prisma.user.create({ data: { email: `interface-owner${namespace}@example.test`, passwordHash: await hash(password), emailVerifiedAt: new Date(), firstName: 'Александра', lastName: 'Константинопольская-Рождественская', middleName: 'Александровна', bio: 'Длинное описание профиля для проверки переноса текста и адаптивных полей. '.repeat(5).trim(), phone: '+79991234567' } })
   const org = await createBusinessOrganization(owner.id, { name: 'Объединённая производственная организация с очень длинным названием и несколькими подразделениями', description: 'Проверка интерфейса на синтетических данных.', timezone: 'Europe/Moscow', firstLocation: { name: 'Центральное подразделение с очень длинным названием', city: 'Санкт-Петербург', address: 'Длинный адрес: набережная Промышленная, дом 123, корпус 45', timezone: 'Europe/Moscow' }, locations: [{ name: 'Вторая точка', city: 'Москва', address: 'Тестовая, 2', timezone: 'Europe/Moscow' }] })
   const member = await prisma.organizationMember.findUniqueOrThrow({ where: { organizationId_userId: { organizationId: org.id, userId: owner.id } } })
   await prisma.organizationLocation.updateMany({ where: { organizationId: org.id }, data: { coverageEnabled: true, discussionEnabled: true } })
   const people = []
   for (let index = 0; index < 24; index++) {
-    const user = await prisma.user.create({ data: { email: `interface-${index}@example.test`, emailVerifiedAt: new Date(), firstName: index === 0 ? 'Оченьдлинноеимясотрудникабезпробелов' : 'Сотрудник', lastName: index === 0 ? 'Константинопольский-Рождественский-Архангельский' : `Тестовый ${String(index + 1).padStart(2, '0')}`, middleName: 'Александрович' } })
+    const user = await prisma.user.create({ data: { email: `interface-${index}${namespace}@example.test`, emailVerifiedAt: new Date(), firstName: index === 0 ? 'Оченьдлинноеимясотрудникабезпробелов' : 'Сотрудник', lastName: index === 0 ? 'Константинопольский-Рождественский-Архангельский' : `Тестовый ${String(index + 1).padStart(2, '0')}`, middleName: 'Александрович' } })
     const item = await prisma.organizationMember.create({ data: { organizationId: org.id, userId: user.id } })
     await prisma.locationMember.create({ data: { organizationId: org.id, locationId: org.locationId, memberId: item.id } })
     people.push(item)

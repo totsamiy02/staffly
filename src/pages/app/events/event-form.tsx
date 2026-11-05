@@ -1,4 +1,6 @@
 import MemberProfileLink from '../../../component/ui/member-profile-link.tsx'
+import { useFormSafety } from '../../../app/forms/use-form-safety.ts'
+import FormDraftNotice from '../../../component/ui/form-draft-notice.tsx'
 import MemberAvatar from '../../../component/ui/member-avatar.tsx'
 import { canAccess } from '../../../app/access/catalog.ts'
 import { useAccessRoles } from '../../../app/access/queries.ts'
@@ -20,7 +22,7 @@ import { eventTimezoneLabel } from '../../../app/events/format.ts'
 function initial(organization: OrganizationSummary, event?: StaffEvent): EventFormInput {
   const start = zonedDateAndTime(event?.startAt ?? new Date(Date.now() + 3600000).toISOString(), event?.timezone ?? organization.timezone)
   const end = event?.endAt ? zonedDateAndTime(event.endAt, event.timezone) : null
-  return { important: event?.important ?? false, title: event?.title ?? '', description: event?.description ?? '', typeLabel: event?.typeLabel ?? '', startDate: start.date, startTime: start.time, endDate: end?.date ?? null, endTime: end?.time ?? null, place: event?.place ?? '', meetingUrl: event?.meetingUrl ?? '', shared: event?.shared ?? false, locationIds: event?.locations.map(point => point.id) ?? (canAccess(organization,'events.create') && organization.locationId ? [organization.locationId] : []), audienceMode: event?.audienceMode ?? 'ALL', audienceRoles: event?.audienceRoles ?? [], audienceAccessRoleIds:event?.audienceAccessRoleIds??[], memberIds: event?.recipients.map(member => member.id) ?? [], refreshRecipients: false, ...(event ? { revision: event.revision } : {}) }
+  return { submissionKey: event?.id ?? crypto.randomUUID(), important: event?.important ?? false, title: event?.title ?? '', description: event?.description ?? '', typeLabel: event?.typeLabel ?? '', startDate: start.date, startTime: start.time, endDate: end?.date ?? null, endTime: end?.time ?? null, place: event?.place ?? '', meetingUrl: event?.meetingUrl ?? '', shared: event?.shared ?? false, locationIds: event?.locations.map(point => point.id) ?? (canAccess(organization,'events.create') && organization.locationId ? [organization.locationId] : []), audienceMode: event?.audienceMode ?? 'ALL', audienceRoles: event?.audienceRoles ?? [], audienceAccessRoleIds:event?.audienceAccessRoleIds??[], memberIds: event?.recipients.map(member => member.id) ?? [], refreshRecipients: false, ...(event ? { revision: event.revision } : {}) }
 }
 export default function EventForm({ organization, event, onClose, onSaved }: { organization: OrganizationSummary; event?: StaffEvent; onClose: () => void; onSaved: (event: StaffEvent) => void }) {
   const [form, setForm] = useState(() => initial(organization, event))
@@ -36,6 +38,8 @@ export default function EventForm({ organization, event, onClose, onSaved }: { o
   const preview = form.audienceMode === 'SELECTED' ? candidates.filter(member => form.memberIds.includes(member.id)) : form.audienceMode === 'ROLES' ? candidates.filter(member => form.audienceAccessRoleIds?.length ? member.accessRoleIds.some(role => form.audienceAccessRoleIds!.includes(role)) : member.locationRoles.some(role => form.audienceRoles.includes(role))) : candidates
   const sameSet = (left: string[], right: string[]) => [...left].sort().join() === [...right].sort().join()
   const keepsSnapshot = event && !form.refreshRecipients && form.shared === event.shared && sameSet(form.locationIds, event.locations.map(point => point.id)) && form.audienceMode === event.audienceMode && sameSet(form.audienceRoles, event.audienceRoles) && sameSet(form.audienceAccessRoleIds??[],event.audienceAccessRoleIds??[]) && (form.audienceMode !== 'SELECTED' || sameSet(form.memberIds, event.recipients.map(member => member.id)))
+  const safety = useFormSafety({ scope: 'event-v1:' + organization.id + ':' + organization.locationId + ':' + (event?.id ?? 'new'), value: { form, withEnd }, dirtyValue: { form: { ...form, submissionKey: undefined, revision: undefined }, withEnd }, busy: actions.save.isPending, draft: true, revision: event?.revision,
+    onRestore: value => { setForm(value.form); setWithEnd(value.withEnd) } })
   function field<K extends keyof EventFormInput>(key: K, value: EventFormInput[K]) { setForm(previous => ({ ...previous, [key]: value })); setError('') }
   function togglePoint(id: string) { setForm(previous => ({ ...previous, locationIds: previous.locationIds.includes(id) ? previous.locationIds.filter(point => point !== id) : [...previous.locationIds, id], memberIds: [], refreshRecipients: true })); setError('') }
   function changeScope(shared: boolean) {
@@ -47,9 +51,10 @@ export default function EventForm({ organization, event, onClose, onSaved }: { o
     if (!form.shared && !form.locationIds.length) { setError('Выберите хотя бы одну точку.'); return }
     if (form.audienceMode === 'ROLES' && !form.audienceRoles.length && !form.audienceAccessRoleIds?.length) { setError('Выберите роль получателей.'); return }
     if (form.audienceMode === 'SELECTED' && !form.memberIds.length) { setError('Выберите сотрудников.'); return }
-    try { const result = await actions.save.mutateAsync({ eventId: event?.id, input: { ...form, endDate: withEnd ? form.endDate : null, endTime: withEnd ? form.endTime : null } }); toast(event ? 'Событие обновлено' : 'Событие опубликовано', 'success'); onSaved(result.event) } catch (cause) { setError(cause instanceof Error ? cause.message : 'Не удалось сохранить событие.') }
+    try { const result = await actions.save.mutateAsync({ eventId: event?.id, input: { ...form, endDate: withEnd ? form.endDate : null, endTime: withEnd ? form.endTime : null } }); safety.markSaved(); toast(event ? 'Событие обновлено' : 'Событие опубликовано', 'success'); onSaved(result.event) } catch (cause) { setError(cause instanceof Error ? cause.message : 'Не удалось сохранить событие.') }
   }
-  return <AnimatedOverlay variant="modal" onClose={onClose} dismissible={!actions.save.isPending}>{close => <DocumentDialog title={event ? 'Редактировать событие' : 'Новое событие'} eyebrow="События" onClose={close} busy={actions.save.isPending} className="event-form-dialog">
+  return <AnimatedOverlay variant="modal" onClose={onClose} beforeClose={safety.confirmClose} dismissible={!actions.save.isPending}>{close => <DocumentDialog title={event ? 'Редактировать событие' : 'Новое событие'} eyebrow="События" onClose={close} busy={actions.save.isPending} className="event-form-dialog">
+    <FormDraftNotice form={safety} />
     <form className="event-form" onSubmit={action => void submit(action)}>
       <label><span>Название <small>*</small></span><input autoFocus required maxLength={160} value={form.title} onChange={action => field('title', action.target.value)} placeholder="Например, месячная планёрка" /></label>
       <fieldset className="event-form-scope"><legend>Для кого событие</legend>{sharedAllowed && <SegmentedNav label="Область события"><button type="button" aria-pressed={!form.shared} onClick={() => { if (form.shared) changeScope(false) }}>Выбранные точки</button><button type="button" aria-pressed={form.shared} onClick={() => { if (!form.shared) changeScope(true) }}>Вся организация</button></SegmentedNav>}

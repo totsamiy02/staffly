@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer'
+import { emailDeliveryPaused, EmailDeliveryPausedError } from './delivery-control.ts'
 
 export const appUrl = process.env.APP_ORIGIN ?? 'http://localhost:5173'
 const smtpUser = process.env.SMTP_USER
@@ -32,6 +33,7 @@ export function renderEmail(content: EmailContent) {
   return { subject, html, text }
 }
 export async function sendPreparedMail(email: string, message: ReturnType<typeof renderEmail>, id?: string) {
+  if (emailDeliveryPaused()) throw new EmailDeliveryPausedError()
   if (!transport) {
     if (!['development', 'test'].includes(process.env.NODE_ENV ?? '')) throw new Error('SMTP is not configured')
     if (process.env.NODE_ENV === 'development') console.log('SMTP disabled: message not sent; private content omitted.')

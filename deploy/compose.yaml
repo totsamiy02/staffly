@@ -1,7 +1,7 @@
 name: staffly
 x-app: &app
   build: {context: .., target: runtime}
-  image: staffly:local
+  image: ${APP_IMAGE:-staffly:local}
   environment: &app-env
     DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL}
     LIVE_DATABASE_URL: ${LIVE_DATABASE_URL:-}
@@ -32,6 +32,7 @@ x-app: &app
     S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-false}
     S3_ALLOW_INSECURE: 'false'
     DATA_PURGE_ENABLED: 'false'
+    EMAIL_DELIVERY_PAUSED: ${EMAIL_DELIVERY_PAUSED:-false}
     DB_POOL_MAX: '10'
     DB_TIMEZONE: ${DB_TIMEZONE:?Set DB_TIMEZONE}
     HTTP_SHUTDOWN_TIMEOUT_MS: '30000'
@@ -58,7 +59,7 @@ x-app: &app
 services:
   file-processor:
     build: {context: .., target: file-processor}
-    image: staffly-file-processor:local
+    image: ${FILE_PROCESSOR_IMAGE:-staffly-file-processor:local}
     network_mode: none
     read_only: true
     volumes: ['file-processing-socket:/run/file-processor']
@@ -99,7 +100,7 @@ services:
   migrate:
     <<: *app
     build: {context: .., target: build}
-    image: staffly-migrations:local
+    image: ${MIGRATION_IMAGE:-staffly-migrations:local}
     restart: 'no'
     read_only: false
     environment:
@@ -136,7 +137,7 @@ services:
     depends_on: {migrate: {condition: service_completed_successfully}}
   edge:
     build: {context: .., target: edge}
-    image: staffly-edge:local
+    image: ${EDGE_IMAGE:-staffly-edge:local}
     ports: ['${BIND_ADDRESS:-127.0.0.1}:443:443']
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro

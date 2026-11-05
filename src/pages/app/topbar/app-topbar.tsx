@@ -12,6 +12,7 @@ import type { OrganizationSummary } from '../../../app/organizations/types.ts'
 export default function AppTopbar({ organization, notificationOrganizationId }: { organization?: OrganizationSummary; notificationOrganizationId?: string }) {
   const organizationId = organization?.id ?? notificationOrganizationId
   const { user, logout } = useAuth()
+  const formSafety = useFormSafetyContext()
   const navigate = useNavigate()
   const [openPanel, setOpenPanel] = useState<'notifications' | 'profile' | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -34,6 +35,7 @@ export default function AppTopbar({ organization, notificationOrganizationId }: 
 
 
   async function signOut() {
+    if (!await formSafety.confirm([...formSafety.guards.values()].map(guard => ({ ...guard, saveDraft: undefined })))) return
     setLogoutBusy(true)
     try { await logout(); navigate('/', { replace: true }) } finally { setLogoutBusy(false) }
   }
@@ -46,3 +48,4 @@ export default function AppTopbar({ organization, notificationOrganizationId }: 
     </div>}
   </HeaderFrame>
 }
+import { useFormSafetyContext } from '../../../app/forms/form-safety-context.ts'

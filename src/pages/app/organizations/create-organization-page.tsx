@@ -1,3 +1,5 @@
+import FormDraftNotice from '../../../component/ui/form-draft-notice.tsx'
+import { useFormSafety } from '../../../app/forms/use-form-safety.ts'
 import { isPlanId } from '../../../app/subscriptions/plans.ts'
 import LocationFields, { type LocationFieldsValue } from './location-fields.tsx'
 import { useState, type FormEvent } from 'react'
@@ -21,9 +23,11 @@ export default function CreateOrganizationPage() {
   const [error, setError] = useState('')
   const create = useMutation({
     mutationFn: () => apiRequest<{ organization: OrganizationSummary }>('/organizations', { method: 'POST', body: { initialPlan: 'FREE', name, description, timezone: locations[0].timezone, firstLocation: locations[0], locations: locations.slice(1) } }),
-    onSuccess: async (result) => { await queryClient.invalidateQueries({ queryKey: ['organizations'] }); navigate(`/app/organizations/${result.organization.id}/settings?${isPlanId(selectedPlan) && selectedPlan !== 'FREE' ? `section=subscription&plan=${selectedPlan}` : `section=locations&location=${result.organization.locationId}`}`, { replace: true }) },
+    onSuccess: async (result) => { safety.markSaved(); await queryClient.invalidateQueries({ queryKey: ['organizations'] }); navigate(`/app/organizations/${result.organization.id}/settings?${isPlanId(selectedPlan) && selectedPlan !== 'FREE' ? `section=subscription&plan=${selectedPlan}` : `section=locations&location=${result.organization.locationId}`}`, { replace: true }) },
     onError: (failure) => setError(failure instanceof Error ? failure.message : 'Не удалось создать организацию.'),
   })
+
+  const safety = useFormSafety({ scope: 'create-organization', value: { name, description, locations }, busy: create.isPending, draft: true, onRestore: value => { setName(value.name); setDescription(value.description); setLocations(value.locations) } })
 
   function submit(event: FormEvent) {
     event.preventDefault()
@@ -35,6 +39,7 @@ export default function CreateOrganizationPage() {
   return <div className="app-page"><AppTopbar /><main className="organization-form-page">
     <Link className="app-back" to="/app">К организациям</Link>
     <div className="organization-form-page__intro"><p className="app-eyebrow">Новое рабочее пространство</p><h1>Создание организации</h1><p>Укажите название предприятия и основную точку. Организация начнёт работу на бесплатном тарифе.</p></div>
+    <FormDraftNotice form={safety} />
     <form className="organization-form" onSubmit={submit}>
       <label><span>Название *</span><input value={name} onChange={(event) => setName(event.target.value)} minLength={2} maxLength={120} placeholder="Например, Coffee House" autoFocus required /></label>
       <label><span>Описание</span><textarea value={description} onChange={(event) => setDescription(event.target.value)} maxLength={1000} rows={4} placeholder="Коротко расскажите о компании" /><small>{description.length}/1000</small></label>

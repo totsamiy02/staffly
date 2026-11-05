@@ -4,6 +4,7 @@ const date = z.string().refine(isCalendarDate, 'Некорректная дат�
 const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/)
 const optionalText = (limit: number) => z.string().trim().max(limit).nullable().optional().transform(value => value || null)
 export const eventBody = z.object({
+  submissionKey: z.uuid().optional(),
   important: z.boolean().default(false),
   title: z.string().trim().min(1).max(160), description: optionalText(4000), typeLabel: optionalText(80),
   startDate: date, startTime: time, endDate: date.nullable().optional(), endTime: time.nullable().optional(),

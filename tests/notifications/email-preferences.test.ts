@@ -14,6 +14,7 @@ import { createEvent } from '../../src/server/events/service.ts'
 import { eventBody } from '../../src/server/events/schemas.ts'
 import { locationContext } from '../../src/server/organizations/location-context.ts'
 import { addDays, zonedDateAndTime } from '../../src/app/schedule/date-utils.ts'
+import { EmailDeliveryPausedError } from '../../src/server/mail/delivery-control.ts'
 
 let owner: string, employee: string, standalone: string, org: string, other: string, location: string, member: string, ownerMember: string
 const ids: string[] = [], orgs: string[] = []
@@ -60,6 +61,30 @@ after(async()=>{
 })
 
 describe('personal email choices and delivery', {concurrency:false},()=>{
+  it('preserves queued mail and retry budget across an operational pause, including a claimed job',async()=>{
+    const previous=process.env.EMAIL_DELIVERY_PAUSED
+    try {
+      const key='pause-test:'+randomUUID()
+      await enqueueEmail(prisma,{userId:standalone,sourceKind:'MANDATORY',sourceKey:key,content:passwordChangedEmail()})
+      await ready()
+      const before=await prisma.emailDelivery.findUniqueOrThrow({where:{sourceKey:key}})
+      let delivered=0
+      process.env.EMAIL_DELIVERY_PAUSED='true'
+      assert.equal(await processEmailDeliveries({send:async()=>{delivered++}}),0)
+      assert.deepEqual(await prisma.emailDelivery.findUniqueOrThrow({where:{sourceKey:key}}),before)
+      process.env.EMAIL_DELIVERY_PAUSED='false'
+      // The process may be paused between claiming a row and opening SMTP.
+      await processEmailDeliveries({limit:1,send:async()=>{process.env.EMAIL_DELIVERY_PAUSED='true';throw new EmailDeliveryPausedError()}})
+      const paused=await prisma.emailDelivery.findUniqueOrThrow({where:{sourceKey:key}})
+      assert.equal(paused.status,'PENDING');assert.equal(paused.lockedUntil,null);assert.equal(paused.attempts,before.attempts)
+      assert.deepEqual(paused.payload,before.payload);assert.deepEqual(paused.availableAt,before.availableAt)
+      process.env.EMAIL_DELIVERY_PAUSED='false'
+      await processEmailDeliveries({send:async()=>{delivered++}})
+      await processEmailDeliveries({send:async()=>{delivered++}})
+      assert.equal(delivered,1)
+      assert.equal((await prisma.emailDelivery.findUniqueOrThrow({where:{sourceKey:key}})).status,'SENT')
+    } finally {if(previous===undefined)delete process.env.EMAIL_DELIVERY_PAUSED;else process.env.EMAIL_DELIVERY_PAUSED=previous}
+  })
   it('enables main employee categories for a new account without changing existing opt-outs',async()=>{
     const fresh=await prisma.user.create({data:{email:`mail-defaults-${randomUUID()}@example.test`,passwordHash:'test-only',emailVerifiedAt:new Date()}});ids.push(fresh.id)
     const defaults=await getEmailPreferences(fresh.id)

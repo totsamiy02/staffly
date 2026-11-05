@@ -1,3 +1,5 @@
+import { recordSecurityEvent } from '../../security/journal.ts'
+import { isDeepStrictEqual } from 'node:util'
 import { reserveOrganizationExport } from '../../resources/quotas.ts'
 import { createHash, randomUUID } from 'node:crypto'
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
@@ -18,7 +20,7 @@ import { stageStoredFile, deletePendingFile } from '../../storage/image-service.
 import { freshFileAccess } from '../../storage/guarded-delivery.ts'
 import { parserArguments } from '../../file-processing/runner.ts'
 
-const publicJob = (job: ReportExport) => ({ id: job.id, status: job.status,
+const publicJob = (job: ReportExport) => ({ id: job.id, status: job.status, errorId: job.status === 'FAILED' ? job.id : undefined, expiresAt: job.expiresAt,
   message: job.status === 'FAILED' ? job.errorCode === 'ORGANIZATION_STORAGE_QUOTA' ? 'Хранилище организации заполнено. Освободите место и повторите экспорт.' : 'Не удалось подготовить отчёт. Проверьте доступ и повторите попытку.' : undefined,
   statusUrl: `/organizations/${job.organizationId}/statistics/reports/exports/${job.id}` })
 const converters = new Set<ChildProcess>()
@@ -28,9 +30,9 @@ export async function authorizeExport(userId: string, organizationId: string, in
   if (!locations.length || input.locationIds.some(id => !locations.some(location => location.id === id))) throw new ApiError(403, 'INSUFFICIENT_PERMISSIONS', 'Область отчёта больше недоступна.')
   return { ...input, locationIds: input.locationIds.length ? input.locationIds : locations.map(location => location.id) }
 }
-export async function enqueueExport(userId: string, organizationId: string, input: ReportInput) {
+export async function enqueueExport(userId: string, organizationId: string, input: ReportInput, requestKey?: string) {
   const frozen = await authorizeExport(userId, organizationId, input)
-  const inputHash = createHash('sha256').update(JSON.stringify(frozen)).digest('hex')
+  const inputHash = createHash('sha256').update(requestKey ?? JSON.stringify(frozen)).digest('hex')
   return prisma.$transaction(async tx => {
     // Queue timestamps must agree with PostgreSQL's clock in any server timezone.
     // Keep UTC local to this transaction, as with the existing mail outbox.
@@ -38,14 +40,23 @@ export async function enqueueExport(userId: string, organizationId: string, inpu
     await tx.$queryRaw`SELECT pg_advisory_xact_lock(781234567::bigint)::text`
     await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${userId}, 7))::text`
     const active = { userId, status: { in: ['PENDING', 'RUNNING'] }, expiresAt: { gt: new Date() } }
-    const existing = await tx.reportExport.findFirst({ where: { ...active, organizationId, inputHash } })
-    if (existing) return publicJob(existing)
+    const existing = await tx.reportExport.findFirst({ where: { ...(requestKey ? { userId, expiresAt: { gt: new Date() } } : active), organizationId, inputHash } })
+    if (existing) {
+      if (requestKey && !isDeepStrictEqual(existing.input, JSON.parse(JSON.stringify(frozen)))) throw new ApiError(409, 'EXPORT_REQUEST_CHANGED', 'Параметры уже запущенной выгрузки изменились. Создайте новую операцию.')
+      return publicJob(existing)
+    }
     if (await tx.reportExport.count({ where: active }) >= 2) throw new ApiError(429, 'EXPORT_BUSY', 'Дождитесь подготовки предыдущих отчётов.')
     if (await tx.reportExport.count({ where: { status: { in: ['PENDING', 'RUNNING'] }, expiresAt: { gt: new Date() } } }) >= 200) throw new ApiError(503, 'EXPORT_BUSY', 'Очередь отчётов занята. Повторите попытку позже.')
     await reserveOrganizationExport(tx, organizationId)
     return publicJob(await tx.reportExport.create({ data: { userId, organizationId, input: frozen as unknown as Prisma.InputJsonValue, inputHash, expiresAt: new Date(Date.now() + 3600000) } }))
   })
 }
+export async function exportForRequest(userId: string, organizationId: string, requestKey: string) {
+  const job = await prisma.reportExport.findFirst({ where: { userId, organizationId, inputHash: createHash('sha256').update(requestKey).digest('hex'), expiresAt: { gt: new Date() } }, select: { id: true } })
+  if (!job) throw new ApiError(404, 'EXPORT_NOT_FOUND', 'Запуск выгрузки пока не подтверждён. Повторите проверку или запуск с теми же параметрами.')
+  return getExport(userId, organizationId, job.id)
+}
+
 export async function getExport(userId: string, organizationId: string, id: string) {
   const job = await prisma.$transaction(async tx => {
     await tx.$executeRaw`SET LOCAL TIME ZONE 'UTC'`
@@ -119,18 +130,33 @@ export async function processReportExport() {
   } catch (error) {
     if (stagedId) await deletePendingFile(stagedId).catch(() => undefined)
     const retry = error && typeof error === 'object' && 'code' in error && error.code === 'EXPORT_INTERRUPTED' && claimed.attempts < 3
-    await prisma.reportExport.updateMany({ where: { id: claimed.id, leaseToken: token }, data: { status: retry ? 'PENDING' : 'FAILED', leaseUntil: null, errorCode: retry ? null : error instanceof ApiError && error.code === 'ORGANIZATION_STORAGE_QUOTA' ? error.code : 'EXPORT_FAILED' } })
+    const failed = await prisma.reportExport.updateMany({ where: { id: claimed.id, leaseToken: token, status: 'RUNNING' }, data: { status: retry ? 'PENDING' : 'FAILED', leaseUntil: null, errorCode: retry ? null : error instanceof ApiError && error.code === 'ORGANIZATION_STORAGE_QUOTA' ? error.code : 'EXPORT_FAILED' } })
     console.error('Report export failed:', claimed.id, error instanceof ApiError ? error.code : 'EXPORT_FAILED')
+    if (failed.count && !retry) await recordSecurityEvent(prisma, { action: 'REPORT_EXPORT', userId: claimed.userId, organizationId: claimed.organizationId, resourceType: 'EXPORT', resourceId: claimed.id, outcome: 'FAILED', reasonCode: 'OPERATION_FAILED' })
   } finally { await rm(directory, { recursive: true, force: true }) }
   return true
 }
+export async function expireReportExports() {
+  return prisma.$transaction(async tx => {
+    await tx.$executeRaw`SET LOCAL TIME ZONE 'UTC'`
+    const now = new Date()
+    const interrupted = await tx.reportExport.findMany({ where: { status: 'RUNNING', attempts: { gte: 3 }, leaseUntil: { lt: now } }, take: 50 })
+    for (const job of interrupted) {
+      const changed = await tx.reportExport.updateMany({ where: { id: job.id, status: 'RUNNING', attempts: { gte: 3 }, leaseUntil: { lt: now } }, data: { status: 'FAILED', leaseUntil: null, errorCode: 'EXPORT_INTERRUPTED' } })
+      if (changed.count) await recordSecurityEvent(tx, { action: 'REPORT_EXPORT', userId: job.userId, organizationId: job.organizationId, resourceType: 'EXPORT', resourceId: job.id, outcome: 'FAILED', reasonCode: 'OPERATION_FAILED', count: job.attempts })
+    }
+    const expired = await tx.reportExport.findMany({ where: { expiresAt: { lt: now } }, take: 50 })
+    for (const job of expired) {
+      if (!['PENDING', 'RUNNING'].includes(job.status)) continue
+      const changed = await tx.reportExport.updateMany({ where: { id: job.id, status: { in: ['PENDING', 'RUNNING'] }, expiresAt: { lt: now } }, data: { status: 'FAILED', leaseUntil: null, errorCode: 'EXPORT_EXPIRED' } })
+      if (changed.count) await recordSecurityEvent(tx, { action: 'REPORT_EXPORT', userId: job.userId, organizationId: job.organizationId, resourceType: 'EXPORT', resourceId: job.id, outcome: 'FAILED', reasonCode: 'OPERATION_FAILED', count: job.attempts })
+    }
+    return expired
+  })
+}
 export function startReportExports() {
   const stop = startBackgroundTask({ name: 'Report exports', intervalMs: 1000, run: async shouldContinue => {
-    const expired = await prisma.$transaction(async tx => {
-      await tx.$executeRaw`SET LOCAL TIME ZONE 'UTC'`
-      await tx.reportExport.updateMany({ where: { status: 'RUNNING', attempts: { gte: 3 }, leaseUntil: { lt: new Date() } }, data: { status: 'FAILED', errorCode: 'EXPORT_INTERRUPTED' } })
-      return tx.reportExport.findMany({ where: { expiresAt: { lt: new Date() } }, take: 50 })
-    })
+    const expired = await expireReportExports()
     for (const job of expired) {
       if (job.objectKey) {
         const file = await prisma.storedFile.findUnique({ where: { objectKey: job.objectKey }, select: { id: true } })

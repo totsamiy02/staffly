@@ -1,4 +1,6 @@
 import HelpTip from '../../../../component/ui/help-tip/help-tip.tsx'
+import { useFormSafety } from '../../../../app/forms/use-form-safety.ts'
+import FormDraftNotice from '../../../../component/ui/form-draft-notice.tsx'
 import { useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
@@ -17,7 +19,7 @@ import '../requests.scss'
 import '../requests-redesign.scss'
 import './workflow.scss'
 
-const blank = () => ({ name: '', description: '', dateMode: 'NONE' as RequestDateMode, requiresComment: false, allowsAttachments: false, definition: definitionOf({}) })
+const blank = () => ({ submissionKey: crypto.randomUUID() as string, name: '', description: '', dateMode: 'NONE' as RequestDateMode, requiresComment: false, allowsAttachments: false, definition: definitionOf({}) })
 
 export default function RequestTypesSettings({ organization, onMessage, onError }: { organization: OrganizationSummary; onMessage: (value: string) => void; onError: (value: string) => void }) {
   const { apiRequest } = useAuth()
@@ -29,11 +31,12 @@ export default function RequestTypesSettings({ organization, onMessage, onError 
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [dialogError, setDialogError] = useState('')
+  const safety = useFormSafety({ scope: 'request-builder-v1:' + organization.id + ':' + (editing?.id ?? 'new'), value: form, dirtyValue: { ...form, submissionKey: undefined }, active: open, busy, draft: true, revision: editing?.version, onRestore: setForm })
   if (!canAccess(organization, 'requestTypes.manage')) return null
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['request-types', organization.id] })
   function startEdit(type?: RequestType) {
     setEditing(type ?? null)
-    setForm(type ? { name: type.name, description: type.description ?? '', dateMode: type.dateMode, requiresComment: type.requiresComment, allowsAttachments: type.allowsAttachments, definition: definitionOf(type.definition) } : blank())
+    setForm(type ? { submissionKey: type.id, name: type.name, description: type.description ?? '', dateMode: type.dateMode, requiresComment: type.requiresComment, allowsAttachments: type.allowsAttachments, definition: definitionOf(type.definition) } : blank())
     setDialogError('')
     setOpen(true)
   }
@@ -43,16 +46,16 @@ export default function RequestTypesSettings({ organization, onMessage, onError 
       if (form.definition.stages.some(stage => !stage.memberId && !stage.roleId)) throw new Error('Выберите согласующего для каждого этапа или удалите ненужный этап.')
       if (form.definition.fields.some(field => field.kind === 'SELECT' && !field.options.length)) throw new Error('Добавьте варианты ответа для каждого вопроса со списком.')
       if (['TASK', 'NOTIFY'].includes(form.definition.action) && !form.definition.recipientMemberIds.length) throw new Error(form.definition.action === 'TASK' ? 'Выберите хотя бы одного исполнителя задачи в дополнительных настройках.' : 'Выберите хотя бы одного получателя уведомления в дополнительных настройках.')
-      const body = { ...form, allowsAttachments: form.allowsAttachments || form.definition.fields.some(f => f.kind === 'FILE'), description: form.description || null, ...(editing ? { isActive: editing.isActive } : {}) }
+      const body = { ...form, allowsAttachments: form.allowsAttachments || form.definition.fields.some(f => f.kind === 'FILE'), description: form.description || null, ...(editing ? { isActive: editing.isActive, version: safety.expectedRevision } : {}) }
       await apiRequest(`/organizations/${organization.id}/request-types${editing ? `/${editing.id}` : ''}`, { method: editing ? 'PATCH' : 'POST', body })
-      await refresh(); setOpen(false); onMessage(editing ? 'Тип заявки обновлён.' : 'Тип заявки создан.')
+      safety.markSaved(); await refresh(); setOpen(false); onMessage(editing ? 'Тип заявки обновлён.' : 'Тип заявки создан.')
     } catch (failure) { setDialogError(failure instanceof Error ? failure.message : 'Не удалось сохранить тип заявки.') }
     finally { setBusy(false) }
   }
   async function toggle(type: RequestType) {
     setBusy(true); onError('')
     try {
-      await apiRequest(`/organizations/${organization.id}/request-types/${type.id}`, { method: 'PATCH', body: { name: type.name, description: type.description, dateMode: type.dateMode, requiresComment: type.requiresComment, allowsAttachments: type.allowsAttachments, isActive: !type.isActive } })
+      await apiRequest(`/organizations/${organization.id}/request-types/${type.id}`, { method: 'PATCH', body: { name: type.name, description: type.description, dateMode: type.dateMode, requiresComment: type.requiresComment, allowsAttachments: type.allowsAttachments, isActive: !type.isActive, version: type.version } })
       await refresh(); onMessage(type.isActive ? 'Подача отключена. Старые заявки сохранены.' : 'Тип снова доступен для подачи.')
     } catch (failure) { onError(failure instanceof Error ? failure.message : 'Не удалось изменить тип заявки.') }
     finally { setBusy(false) }
@@ -75,7 +78,8 @@ export default function RequestTypesSettings({ organization, onMessage, onError 
       <section><h3>Системные</h3>{system.map(type => <div className={`request-type-row${type.isActive ? '' : ' is-inactive'}`} key={type.id}><div><strong>{type.name}</strong><span>{type.description}</span></div><small>{type.isActive ? 'Доступен' : 'Подача отключена'}</small><button disabled={busy} onClick={() => void toggle(type)}>{type.isActive ? 'Отключить подачу' : 'Включить подачу'}</button></div>)}</section>
       <section><h3>Пользовательские</h3>{custom.length ? custom.map(type => <div className={`request-type-row${type.isActive ? '' : ' is-inactive'}`} key={type.id}><div><strong>{type.name}</strong><span>{type.description || 'Без описания'}</span></div><small>{type.isActive ? 'Доступен' : 'Подача отключена'}</small><button disabled={busy} onClick={() => startEdit(type)}>Изменить</button><button disabled={busy} onClick={() => void toggle(type)}>{type.isActive ? 'Отключить подачу' : 'Включить подачу'}</button><button className="request-type-delete" disabled={busy} onClick={() => { setDialogError(''); setDeleting(type) }}>Удалить</button></div>) : <p className="request-types-empty">Пользовательских типов пока нет. Создайте свой, если стандартных обращений недостаточно.</p>}</section>
     </>}
-    {open && <AnimatedOverlay variant="modal" dismissible={!busy} onClose={() => setOpen(false)}>{close => <DocumentDialog title={editing ? 'Изменить тип заявки' : 'Новый тип заявки'} eyebrow="Заявки" className="request-form-dialog request-builder-dialog" busy={busy} onClose={close}>
+    {open && <AnimatedOverlay variant="modal" dismissible={!busy} beforeClose={safety.confirmClose} onClose={() => setOpen(false)}>{close => <DocumentDialog title={editing ? 'Изменить тип заявки' : 'Новый тип заявки'} eyebrow="Заявки" className="request-form-dialog request-builder-dialog" busy={busy} onClose={close}>
+      <FormDraftNotice form={safety} />
 <div className="request-builder-intro"><span>Шаблон обращения<HelpTip label="Как работает тип заявки">Сотрудник выбирает тип, заполняет вопросы и отправляет обращение на рассмотрение. Начните с названия и нужных вопросов; дополнительные настройки можно оставить по умолчанию.</HelpTip></span><Link to="/guide/request-builder" target="_blank" rel="noreferrer" aria-label="Открыть инструкцию по конструктору">Инструкция</Link></div>
       <form onSubmit={submit}>
         <label><span>Название типа</span><input autoFocus value={form.name} placeholder="Например, Покупка рабочей формы" onChange={e => setForm({ ...form, name: e.target.value })} minLength={2} maxLength={100} required/></label>

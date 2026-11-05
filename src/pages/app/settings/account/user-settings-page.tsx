@@ -1,4 +1,5 @@
 import SecurityHistory from '../shared/security-history.tsx'
+import { useFormSafety } from '../../../../app/forms/use-form-safety.ts'
 import DataLifecycleSettings from './data-lifecycle-settings.tsx'
 import PasswordField from './password-field.tsx'
 import EmailNotificationSettings from './email-notification-settings.tsx'
@@ -56,13 +57,16 @@ export default function UserSettingsPage() {
   const [profileError, setProfileError] = useState('')
   const [passwordError, setPasswordError] = useState('')
   const [message, setMessage] = useState('')
+  const profileSafety = useFormSafety({ scope: 'account-profile', value: { firstName, lastName, middleName, phone, bio }, active: profileEditing, busy: profileBusy || imageBusy, extraDirty: avatarDraft.dirty })
+  const passwordSafety = useFormSafety({ scope: 'account-password', value: {}, dirty: !!(currentPassword || newPassword || confirmPassword), busy: passwordBusy, onDiscard: () => { setCurrentPassword(''); setNewPassword(''); setConfirmPassword('') } })
   type Section = 'profile' | 'security' | 'documents' | 'notifications'
   const requestedSection = new URLSearchParams(location.search).get('section')
   const selectedSection: Section = requestedSection === 'security' || requestedSection === 'documents' || requestedSection === 'notifications' ? requestedSection : 'profile'
   const [section, setSection] = useState<Section>(selectedSection)
   useEffect(() => { setSection(selectedSection) }, [selectedSection])
-  useEffect(() => { setProfileEditing(false); setProfileError(''); resetAvatar() }, [selectedSection, resetAvatar])
-  function selectSection(value: Section) { const params = new URLSearchParams(location.search); params.set('section', value); navigate({ pathname: location.pathname, search: params.toString() }, { replace: true, state: location.state }); setSection(value) }
+  useEffect(() => { setProfileEditing(false); setProfileError(''); resetAvatar() }, [selectedSection, resetAvatar, user?.id])
+  useEffect(() => { setCurrentPassword(''); setNewPassword(''); setConfirmPassword('') }, [user?.id])
+  function selectSection(value: Section) { const params = new URLSearchParams(location.search); params.set('section', value); navigate({ pathname: location.pathname, search: params.toString() }, { replace: true, state: location.state }) }
   const loginMethods = useQuery({ queryKey: ['auth-login-methods', user?.id], queryFn: () => apiRequest<LoginMethods>('/auth/yandex/methods'), enabled: section === 'security', staleTime: 30_000 })
   const sessions = useQuery({ ...liveQueryOptions, queryKey: ['auth-sessions'], queryFn: () => apiRequest<{ sessions: ActiveSession[] }>('/auth/sessions'), enabled: section === 'security' })
   const revokeSession = useMutation({ mutationFn: (session: ActiveSession) => apiRequest(`/auth/sessions/${session.id}`, { method: 'DELETE' }), onSuccess: async (_, session) => { if (session.current) { await logout(); navigate('/', { replace: true }) } else await queryClient.invalidateQueries({ queryKey: ['auth-sessions'] }) } })
@@ -90,6 +94,7 @@ export default function UserSettingsPage() {
       const avatarUploadId = await avatarDraft.prepare()
       const result = await apiRequest<{ user: AuthUser }>('/profile', { method: 'PATCH', body: { ...trimmed, phone, avatarUploadId } })
       updateUser(result.user)
+      profileSafety.markSaved()
       avatarDraft.reset()
       setFirstName(result.user.firstName ?? ''); setLastName(result.user.lastName ?? ''); setMiddleName(result.user.middleName ?? ''); setPhone(formatRussianPhone(result.user.phone ?? '')); setBio(result.user.bio ?? '')
       setMessage('Профиль сохранён.')
@@ -114,7 +119,7 @@ export default function UserSettingsPage() {
     setPasswordBusy(true)
     try {
       const result = await apiRequest<{ message: string }>('/auth/change-password', { method: 'POST', body: { currentPassword, newPassword } })
-      setCurrentPassword(''); setNewPassword(''); setConfirmPassword(''); setMessage(result.message)
+      passwordSafety.markSaved(); setCurrentPassword(''); setNewPassword(''); setConfirmPassword(''); setMessage(result.message)
     } catch (failure) { setPasswordError(failure instanceof Error ? failure.message : 'Не удалось изменить пароль.') }
     finally { setPasswordBusy(false) }
   }
@@ -136,7 +141,7 @@ export default function UserSettingsPage() {
     {section === 'profile' && <section className={`profile-editor${profileEditing ? '' : ' profile-editor--view'}`}>
       <aside><ImageUpload floatingControls endpoint="/profile/avatar" imageUrl={avatarDraft.url} onDraftChange={avatarDraft.change} name={user?.displayName ?? initial} avatarClassName="account-profile-card__avatar" disabled={!profileEditing || profileBusy} onBusyChange={setImageBusy} onChange={(avatarUrl) => { if (user) updateUser({ ...user, avatarUrl }); void queryClient.invalidateQueries({ queryKey: ['organization-members'] }) }} onMessage={setMessage} onError={setProfileError} /><div className="profile-editor__identity"><span>Ваша учетная запись</span><h2>{user?.displayName}</h2><p>{user?.email}</p>{organization && <div className="profile-editor__organization-role"><RoleBadge role={organization.organizationRole ?? organization.role} /><span>в «{organization.name}»</span></div>}</div></aside>
       <form onSubmit={saveProfile} noValidate>
-        <div className="profile-settings-heading"><div><h2>Личные данные</h2><p>Имя и фамилия будут использоваться в шапке и списке сотрудников.</p></div><ProfileEditActions editing={false} busy={profileEditing} onEdit={() => editProfile(true)} onCancel={() => editProfile(false)} /></div>
+        <div className="profile-settings-heading"><div><h2>Личные данные</h2><p>Имя и фамилия будут использоваться в шапке и списке сотрудников.</p></div><ProfileEditActions editing={false} busy={profileEditing} onEdit={() => editProfile(true)} onCancel={() => void profileSafety.close(() => editProfile(false))} /></div>
         <fieldset className="profile-edit-fields" disabled={profileBusy || imageBusy}><div className="profile-details-groups">
           <ProfileDetails title="Основная информация" icon="people" columns={3} editing={profileEditing} items={[
             { label: 'Фамилия', value: user?.lastName, editor: <input aria-label="Фамилия" value={lastName} onChange={e => setLastName(e.target.value)} maxLength={80} autoComplete="family-name" /> },
@@ -154,7 +159,7 @@ export default function UserSettingsPage() {
         </div></fieldset>
 
         {profileError && <p className="form-inline-error" role="alert">{profileError}</p>}
-        {profileEditing && <ProfileEditActions editing busy={profileBusy || imageBusy} onEdit={() => editProfile(true)} onCancel={() => editProfile(false)} />}
+        {profileEditing && <ProfileEditActions editing busy={profileBusy || imageBusy} onEdit={() => editProfile(true)} onCancel={() => void profileSafety.close(() => editProfile(false))} />}
       </form>
     </section>}
 

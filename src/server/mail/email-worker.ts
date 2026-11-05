@@ -2,6 +2,7 @@ import { prisma } from '../db.ts'
 import { startBackgroundTask } from '../background-task.ts'
 import { enqueueEmail, processEmailDeliveries } from './email-outbox.ts'
 import { zonedDateAndTime, addDays } from '../../app/schedule/date-utils.ts'
+import { emailDeliveryPaused } from './delivery-control.ts'
 
 export async function scheduleEmailReminders(now = new Date()) {
   const soon = new Date(+now + 86400_000)
@@ -57,6 +58,7 @@ export async function scheduleEmailReminders(now = new Date()) {
 export function startEmailNotifications() {
   let lastMaintenance=0
   return startBackgroundTask({ name: 'Email worker', intervalMs: 1_000, run: async shouldContinue => {
+      if (emailDeliveryPaused()) return
       if(Date.now()-lastMaintenance>=60_000){await scheduleEmailReminders();lastMaintenance=Date.now();await prisma.emailDelivery.deleteMany({where:{status:{in:['SENT','SKIPPED','FAILED']},createdAt:{lt:new Date(Date.now()-30*86400_000)}}})}
       if (shouldContinue()) await processEmailDeliveries({ shouldContinue })
   } })

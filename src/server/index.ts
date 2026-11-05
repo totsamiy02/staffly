@@ -1,3 +1,5 @@
+import { securityCorrelationId } from './security/journal.ts'
+import { randomUUID } from 'node:crypto'
 import { safeError } from './security/safe-error.ts'
 import { securityContext } from './security/journal.ts'
 import subscriptionRouter, { subscriptionWritePolicy } from './subscriptions/routes.ts'
@@ -130,8 +132,10 @@ app.use((error: unknown, request: express.Request, response: express.Response, _
   if (error && typeof error === 'object' && 'type' in error && ['entity.parse.failed', 'request.aborted', 'request.size.invalid'].includes(String(error.type))) {
     response.status(400).json({ code: 'INVALID_BODY', message: 'Некорректное тело запроса.' }); return
   }
+  const errorId = securityCorrelationId() ?? randomUUID()
   if (isDatabaseBusy(error)) {
-    response.set('Retry-After', '2').status(503).json({ code: 'DATABASE_BUSY', message: 'Сервис занят. Повторите попытку немного позже.' }); return
+    console.error('API error:', { errorId, ...safeError(error) })
+    response.set('Retry-After', '2').status(503).json({ errorId, code: 'DATABASE_BUSY', message: 'Сервис занят. Повторите попытку немного позже.' }); return
   }
   if (error && typeof error === 'object' && 'type' in error && error.type === 'entity.too.large') {
     if (/\/organizations\/[0-9a-f-]+\/schedule\//.test(request.path)) { response.status(413).json({code:'PLANNING_BODY_TOO_LARGE',message:'Данные планирования превышают допустимый размер.'}); return }
@@ -143,15 +147,16 @@ app.use((error: unknown, request: express.Request, response: express.Response, _
   }
   if (error instanceof ZodError) { response.status(400).json({code:'VALIDATION_ERROR',message:error.issues[0]?.message ?? 'Проверьте данные.'}); return }
   if (error instanceof ApiError) {
-    response.status(error.status).json({ code: error.code, message: error.message, ...(error.details ? { errors: error.details } : {}) })
+    if (error.status >= 500) console.error('API error:', { errorId, ...safeError(error) })
+    response.status(error.status).json({ ...(error.status >= 500 ? { errorId } : {}), code: error.code, message: error.message, ...(error.details ? { errors: error.details } : {}) })
     return
   }
   if (isTransactionConflict(error)) {
     response.status(409).json({ code: 'CONCURRENT_UPDATE', message: 'Данные уже изменились. Повторите запрос.' })
     return
   }
-  console.error('API error:', safeError(error))
-  response.status(500).json({ code: 'INTERNAL_ERROR', message: 'Внутренняя ошибка сервера.' })
+  console.error('API error:', { errorId, ...safeError(error) })
+  response.status(500).json({ errorId, code: 'INTERNAL_ERROR', message: 'Внутренняя ошибка сервера.' })
 })
 
 const port = Number(process.env.PORT || 3001)

@@ -24,7 +24,7 @@ it('rejects placeholder secrets, insecure storage and malformed production origi
   for (const patch of [
     { JWT_SECRET: 'replace-with-a-random-secret-of-at-least-32-characters' }, { JWT_SECRET: 'x'.repeat(64) }, { INVITE_CODE_SECRET: '' }, { METRICS_TOKEN: valid.JWT_SECRET },
     { APP_ORIGIN: 'http://staffly.test' }, { APP_ORIGIN: 'https://staffly.test/app' }, { APP_ORIGIN: 'https://staffly.test/' }, { APP_ORIGIN: 'https://user:pass@staffly.test' },
-    { S3_ALLOW_INSECURE: 'true' }, { S3_ENDPOINT: 'http://minio:9000' }, { STORAGE_DRIVER: 'local' }, { DB_TIMEZONE: 'Europe/Kiev' },
+    { S3_ALLOW_INSECURE: 'true' }, { S3_ENDPOINT: 'http://minio:9000' }, { STORAGE_DRIVER: 'local' }, { DB_TIMEZONE: 'Europe/Kiev' }, { EMAIL_DELIVERY_PAUSED: 'yes' },
   ]) assert.throws(() => validateProductionConfig({ ...valid, ...patch }))
 })
 

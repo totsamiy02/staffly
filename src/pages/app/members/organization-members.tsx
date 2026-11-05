@@ -1,3 +1,5 @@
+import ListContext from '../../../component/ui/list-context.tsx'
+import { useModuleFilters } from '../../../app/workspace/module-filters.ts'
 import { useSubscription } from '../../../app/subscriptions/context.ts'
 import PageHeading from '../../../component/ui/page-heading/page-heading.tsx'
 import { AccessIcon } from '../settings/access/access-elements.tsx'
@@ -13,7 +15,6 @@ import MemberInvitations from './member-invitations.tsx'
 import { locationTone } from '../../../app/organizations/format.ts'
 import DocumentActionsMenu from '../documents/document-actions-menu.tsx'
 import DocumentDialog from '../../../component/ui/modal/document-dialog.tsx'
-import { useSearchParams } from 'react-router-dom'
 import AnimatedOverlay from '../../../component/ui/modal/animated-overlay.tsx'
 import { useSchedulePlanning } from '../../../app/schedule/planning/planning.ts'
 import RoleBadge from '../../../component/ui/role-badge/role-badge.tsx'
@@ -35,15 +36,15 @@ export default function OrganizationMembers({ organization }: { organization: Or
   const subscription = useSubscription()
   const { apiRequest, user } = useAuth()
   const queryClient = useQueryClient()
-  const [search, setSearch] = useState('')
-  const [debouncedSearch, setDebouncedSearch] = useState('')
-  const [role, setRole] = useState('')
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(20)
+  const filters = useModuleFilters('employees', organization.id, { search: '', role: '', page: 1, pageSize: 20, positionId: '', pointId: '' }, { pointId: value => value !== 'all' })
+  const [search, setSearch] = filters.field('search')
+  const [debouncedSearch, setDebouncedSearch] = useState(search)
+  const [role, setRole] = filters.field('role')
+  const [page, setPage] = filters.field('page')
+  const [pageSize, setPageSize] = filters.field('pageSize')
   const [inviting, setInviting] = useState(false)
-  const [positionId, setPositionId] = useState('')
-  const [params] = useSearchParams()
-  const [pointId, setPointId] = useState(params.get('pointId') === 'all' ? '' : params.get('pointId') ?? '')
+  const [positionId, setPositionId] = filters.field('positionId')
+  const [pointId, setPointId] = filters.field('pointId')
   const accessRoles = useAccessRoles(organization.id)
   const points = useLocations(organization.id)
   const owner = organization.organizationRole === 'OWNER' || organization.role === 'OWNER'
@@ -56,7 +57,7 @@ export default function OrganizationMembers({ organization }: { organization: Or
   useEffect(() => {
     if (planning.data && positionId && positionId !== 'unassigned' && !planning.data.positions.some(item => item.id === positionId && item.isActive)) { setPositionId(''); setPage(1) }
     if (planning.data && !planning.data.positions.some(item => item.isActive) && positionId) { setPositionId(''); setPage(1) }
-  }, [planning.data, positionId])
+  }, [planning.data, positionId, setPositionId, setPage])
   const members = useOrganizationMembers(organization.id, { page, pageSize, search: debouncedSearch || undefined, accessRoleId: role || undefined, positionId: positionId || undefined, directory: true, pointId: pointId || undefined })
   const canManage = owner || ['members.invite','members.assign','members.remove','members.exclude','members.positions'].some(key => organization.permissions?.includes(key))
   const [positionMember, setPositionMember] = useState<OrganizationMember | null>(null)
@@ -76,7 +77,7 @@ export default function OrganizationMembers({ organization }: { organization: Or
     return () => { document.removeEventListener('mousedown', closeOutside); document.removeEventListener('keydown', closeEscape) }
   }, [])
   useEffect(() => {
-    const timer = window.setTimeout(() => { setDebouncedSearch(search.trim()); setPage(1) }, 300)
+    const timer = window.setTimeout(() => { setDebouncedSearch(search.trim()) }, 300)
     return () => window.clearTimeout(timer)
   }, [search])
   const refresh = () => Promise.all([
@@ -87,7 +88,8 @@ export default function OrganizationMembers({ organization }: { organization: Or
   const pagination = members.data?.pagination
   return <section className="members-page">{accessMemberId && <MemberAccessDialog org={organization.id} memberId={accessMemberId} onClose={() => setAccessMemberId(null)} />}<PageHeading title="Сотрудники" description="Управление командой, ролями и доступами." actions={canAccess(organization, 'members.invite') && <button className="app-primary" onClick={() => { const limit = subscription.subscription?.limits.members; if (limit && subscription.usage && subscription.usage.members >= limit) subscription.request({ kind: 'members', requiredPlan: subscription.subscription?.effectivePlan === 'FREE' ? 'TEAM' : subscription.subscription?.effectivePlan === 'TEAM' ? 'BUSINESS' : null, message: `Все ${limit} мест заняты. Бывшие сотрудники не занимают места.` }); else setInviting(true) }}><span aria-hidden="true">+</span> Пригласить сотрудника</button>} />
     {savedMessage && <p className="app-alert" role="status">{savedMessage}</p>}
-    <div className="members-toolbar"><label><span>Поиск сотрудника</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="ФИО или электронная почта" /></label><label><span>Роль</span><Select value={role} onChange={(event) => { setRole(event.target.value); setPage(1) }}><option value="">Все роли</option>{accessRoles.data?.roles.map(role=><option key={role.id} value={role.id}>{role.name}</option>)}</Select></label>{positions.length > 0 && <label><span>Должность</span><Select value={positionId} onChange={event => { setPositionId(event.target.value); setPage(1) }}><option value="">Все должности</option><option value="unassigned">Без должности</option>{positions.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</Select></label>}<label><span>Точка</span><Select value={pointId} onChange={event => { setPointId(event.target.value); setPage(1) }}><option value="">Все точки</option>{points.data?.locations.filter(point => !point.archivedAt).map(point => <option key={point.id} value={point.id}>{point.name}</option>)}</Select></label></div><p className="members-count">{pagination ? memberCountLabel(pagination.total) : 'Сотрудники организации'}</p>
+    <ListContext organization={organization} pointId={pointId} scope="Сотрудники организации" />
+    <div className="members-toolbar"><label><span>Поиск сотрудника</span><input type="search" value={search} onChange={(event) => { setSearch(event.target.value); setPage(1) }} placeholder="ФИО или электронная почта" /></label><label><span>Роль</span><Select value={role} onChange={(event) => { setRole(event.target.value); setPage(1) }}><option value="">Все роли</option>{accessRoles.data?.roles.map(role=><option key={role.id} value={role.id}>{role.name}</option>)}</Select></label>{positions.length > 0 && <label><span>Должность</span><Select value={positionId} onChange={event => { setPositionId(event.target.value); setPage(1) }}><option value="">Все должности</option><option value="unassigned">Без должности</option>{positions.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</Select></label>}<label><span>Точка</span><Select value={pointId} onChange={event => { setPointId(event.target.value); setPage(1) }}><option value="">Все точки</option>{points.data?.locations.filter(point => !point.archivedAt).map(point => <option key={point.id} value={point.id}>{point.name}</option>)}</Select></label></div><p className="members-count">{pagination ? memberCountLabel(pagination.total) : 'Сотрудники организации'}</p>
     <AsyncPanel pending={members.isLoading} identity={`${page}:${pageSize}:${debouncedSearch}:${role}:${positionId}:${pointId}`} minHeight={320}>{members.isLoading ? <div className="app-state"><span className="app-spinner" />Загружаем участников…</div> : members.isError ? <div className="app-state">Не удалось загрузить участников.</div> : !members.data?.members.length ? <div className="app-state">По выбранным условиям сотрудники не найдены.</div> : <><div className="members-table" role="table" aria-label="Сотрудники организации"><div className="members-table-head" role="row"><span role="columnheader">Сотрудник</span><span role="columnheader">Должности</span><span role="columnheader">Точки</span><span role="columnheader">Роль</span><span role="columnheader">Действия</span></div>{members.data.members.map((member) => {
       const isOwner = member.role === 'OWNER'
       const inCurrentPoint = member.locations?.some(point => point.locationId === organization.locationId)
@@ -131,7 +133,8 @@ export function MemberPositions({ organization, member, onClose, onSaved }: { or
   const dialog = useRef<HTMLDivElement>(null)
   useEffect(() => { const previous = document.activeElement; return () => { if (previous instanceof HTMLElement && previous.isConnected) previous.focus(); else document.getElementById('member-actions-' + member.id)?.focus() } }, [member.id])
   const [selected, setSelected] = useState(() => member.positions?.map(item => item.id) ?? [])
-  const [search, setSearch] = useState('')
+  const filters = useModuleFilters('employees', organization.id, { search: '', role: '', page: 1, pageSize: 20, positionId: '', pointId: '' }, { pointId: value => value !== 'all' })
+  const [search, setSearch] = filters.field('search')
   const positions = planning.data?.positions.filter(item => item.isActive) ?? []
   const activeSelected = selected.filter(id => positions.some(item => item.id === id))
   const initial = (member.positions ?? []).map(item => item.id).filter(id => positions.some(item => item.id === id))

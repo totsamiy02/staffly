@@ -26,7 +26,7 @@ const seconds = Number(options.seconds ?? 20)
 assert(Number.isInteger(seconds) && seconds >= 5 && seconds <= 120, '--seconds must be 5–120')
 const bin = options['pg-bin'] ?? '/Applications/Postgres.app/Contents/Versions/18/bin'
 await access(path.join(bin, 'initdb'))
-const output = await createArtifactDirectory(options.tests ? 'regression' : options.profile === 'interface' ? 'audit' : options.profile === 'scale' ? 'scale' : options.profile === 'frontend' ? 'frontend' : 'load', options.output)
+const output = await createArtifactDirectory(options.tests ? 'regression' : options.profile === 'workspace' ? 'audit' : options.profile === 'interface' ? 'audit' : options.profile === 'scale' ? 'scale' : options.profile === 'frontend' ? 'frontend' : 'load', options.output)
 const temporary = await mkdtemp(path.join(os.tmpdir(), 'staffly-load-'))
 const data = path.join(temporary, 'postgres')
 const storage = path.join(temporary, 'storage')
@@ -36,12 +36,20 @@ const env = { PATH: process.env.PATH, LANG: 'C', USER: process.env.USER, TMPDIR:
   TZ: processTimezone,
   NODE_ENV: 'test', JWT_SECRET: secret, APP_ORIGIN: origin, LOCAL_STORAGE_ROOT: storage, ISOLATED_TEST_CLUSTER: 'true', PG_BIN: bin,
   SMTP_USER: '', SMTP_APP_PASSWORD: '', YANDEX_CLIENT_ID: '', YANDEX_CLIENT_SECRET: '', STORAGE_DRIVER: 'local', LIVE_DATABASE_URL: '', TRUST_PROXY: 'false', API_WARMUP: 'false' }
+if (options['legacy-backup']) {
+  env.TIME_REHEARSAL_BACKUP = path.resolve(options['legacy-backup'])
+  env.TIME_REHEARSAL_OUTPUT = output
+}
 const results = { formatVersion: 1, status: 'running', startedAt: new Date().toISOString(), environment: { node: process.version,
   platform: `${os.platform()} ${os.arch()}`, cpu: os.cpus()[0]?.model,
   logicalCpus: os.cpus().length, memoryGiB: Math.round(os.totalmem() / 1024 ** 3), seconds,
   apiProcesses: 1, poolMax: 10, databaseTimezone, processTimezone, postgresConfig: 'initdb defaults plus explicit timezone; fsync and synchronous_commit enabled' },
   methodology: 'Real HTTP API, pre-authenticated distinct users; no browser/TLS/SMTP/login hashing. Closed-loop clients, 0.5–1s think time unless noted. All fixtures synthetic. Service bursts separately exclude HTTP middleware.', phases: [] }
 let clusterStarted = false, prisma, admin, api, metrics = [], apiLog = '', stopping = false
+if (options['legacy-backup']) {
+  results.methodology = 'Restore an explicitly supplied legacy backup only inside a fresh disposable PostgreSQL cluster; compare legacy/UTC business values, reports and Excel; test synthetic timezone boundaries and backup rollback. No working database, storage or SMTP is used.'
+  results.environment.apiProcesses = 0
+}
 const extraCleanup = []
 if (process.platform === 'darwin' && options.profile === 'scale') {
   const awake = spawn('/usr/bin/caffeinate', ['-i', '-w', String(process.pid)], { stdio: 'ignore' })
@@ -269,7 +277,7 @@ try {
   if (options.tests) {
     console.log('Running regression tests against the disposable database…')
     const testLog = await command(process.execPath, options['test-file']
-      ? ['--import', 'tsx', '--test', '--test-concurrency=1', options['test-file']]
+      ? ['--import', 'tsx', '--test', '--test-concurrency=1', ...options['test-file'].split(',')]
       : ['scripts/run-tests.mjs'], { logFile: path.join(output, 'tests.log') })
     await mkdir(output, { recursive: true })
     results.regression = Object.fromEntries(['tests', 'suites', 'pass', 'fail', 'cancelled', 'skipped'].map(key => {
@@ -278,7 +286,10 @@ try {
     }))
     console.log(testLog.slice(-2500))
   }
-  if (options.profile === 'interface') {
+  if (options.profile === 'workspace') {
+    const { runWorkspaceSafety } = await import('../interface/workspace-safety.mjs')
+    results.workspace = await runWorkspaceSafety({ prisma, env, root, temporary, output, options, startApi })
+  } else if (options.profile === 'interface') {
     const { runInterface } = await import('../interface/run-interface.mjs')
     results.interface = await runInterface({ prisma, env, root, temporary, output, options, startApi })
   } else if (options.profile === 'frontend') {

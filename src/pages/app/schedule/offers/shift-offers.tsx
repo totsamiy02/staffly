@@ -1,3 +1,4 @@
+import { useFormSafety } from '../../../../app/forms/use-form-safety.ts'
 import ActionSurface from '../../../../component/ui/action-surface.tsx'
 import AsyncPanel from '../../../../component/ui/async-panel.tsx'
 import MemberProfileLink from '../../../../component/ui/member-profile-link.tsx'
@@ -135,6 +136,7 @@ export function ShiftOffersPanel({ organization, offerId, onClose, onOffer, embe
 export function ShiftOfferSettings({ organization }: { organization: OrganizationSummary }) {
   const query = useOfferSettings(organization.id), { apiRequest } = useAuth(), cache = useQueryClient(), toast = useToast()
   const [transfer, setTransfer] = useState<OfferMode | null>(null), [swap, setSwap] = useState<OfferMode | null>(null), [busy, setBusy] = useState(false), [error, setError] = useState('')
+  useFormSafety({ scope: 'offer-settings:' + organization.id + ':' + organization.locationId, value: { transfer, swap }, busy, dirty: transfer !== null && transfer !== query.data?.transferMode || swap !== null && swap !== query.data?.swapMode, onDiscard: () => { setTransfer(null); setSwap(null) } })
   const modeOptions = <><option value="DISABLED">Выключено</option><option value="AUTO">Автоматически</option><option value="APPROVAL">С согласованием</option></>
   async function submit(event: FormEvent) {
     event.preventDefault(); setBusy(true); setError('')

@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util'
 import { Prisma } from '../../generated/prisma/client.ts'
 
 import { requirePermission } from '../organizations/access/access.ts'
@@ -36,24 +37,40 @@ export async function listRequestTypes(userId: string, organizationId: string, i
   return types
 }
 
-export async function createRequestType(userId: string, organizationId: string, input: { name: string; description?: string | null; dateMode: RequestDateMode; requiresComment: boolean; allowsAttachments: boolean; definition?: unknown }) {
-  const actor = await getMembership(userId, organizationId)
-  requirePermission(actor, 'requestTypes.manage', null)
-  const definition = await validateDefinition(prisma, organizationId, input.definition)
-  return prisma.requestType.create({ data: { definition, organizationId, name: input.name, description: input.description || null, dateMode: input.dateMode, requiresComment: input.requiresComment, allowsAttachments: input.allowsAttachments } })
+export async function createRequestType(userId: string, organizationId: string, input: { name: string; description?: string | null; dateMode: RequestDateMode; requiresComment: boolean; allowsAttachments: boolean; definition?: unknown; submissionKey?: string }) {
+  return prisma.$transaction(async tx => {
+    const actor = await getMembership(userId, organizationId, tx)
+    requirePermission(actor, 'requestTypes.manage', null)
+    const definition = await validateDefinition(tx, organizationId, input.definition)
+    const data = { definition, organizationId, name: input.name, description: input.description || null, dateMode: input.dateMode, requiresComment: input.requiresComment, allowsAttachments: input.allowsAttachments }
+    if (input.submissionKey) {
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${input.submissionKey}, 19))::text`
+      const existing = await tx.requestType.findUnique({ where: { id: input.submissionKey } })
+      if (existing) {
+        if (existing.deletedAt || !Object.entries(data).every(([key, value]) => isDeepStrictEqual((existing as unknown as Record<string, unknown>)[key], value))) throw new ApiError(409, 'REQUEST_TYPE_ALREADY_SUBMITTED', 'Тип с этим номером уже создан с другими условиями. Поля остаются в форме; проверьте список типов.')
+        return existing
+      }
+    }
+    return tx.requestType.create({ data: { ...data, ...(input.submissionKey ? { id: input.submissionKey } : {}) } })
+  })
 }
 
-export async function updateRequestType(userId: string, organizationId: string, typeId: string, input: { name: string; description?: string | null; dateMode: RequestDateMode; requiresComment: boolean; allowsAttachments: boolean; isActive: boolean; definition?: unknown }) {
+export async function updateRequestType(userId: string, organizationId: string, typeId: string, input: { name: string; description?: string | null; dateMode: RequestDateMode; requiresComment: boolean; allowsAttachments: boolean; isActive: boolean; definition?: unknown; version?: number }) {
   const actor = await getMembership(userId, organizationId)
   requirePermission(actor, 'requestTypes.manage', null)
   const type = await prisma.requestType.findFirst({ where: { id: typeId, organizationId, deletedAt: null } })
   if (!type) throw new ApiError(404, 'REQUEST_TYPE_NOT_FOUND', 'Тип заявки не найден.')
 
+  const conflict = () => new ApiError(409, 'REQUEST_TYPE_CHANGED', 'Тип заявки уже изменён. Ваши поля сохранены в форме. Откройте актуальную версию и сверьте изменения перед сохранением.')
+  if (input.version !== undefined && input.version !== type.version) throw conflict()
   if (type.systemCode) {
     if (input.name !== type.name || input.description !== type.description || input.dateMode !== type.dateMode || input.requiresComment !== type.requiresComment || input.allowsAttachments !== type.allowsAttachments) throw new ApiError(409, 'SYSTEM_REQUEST_TYPE', 'У системного типа можно менять только доступность.')
-    return prisma.requestType.update({ where: { id: type.id }, data: { isActive: input.isActive } })
+    try { return await prisma.requestType.update({ where: { id: type.id, version: type.version, deletedAt: null }, data: { isActive: input.isActive, version: { increment: 1 } } }) }
+    catch (error) { if (error && typeof error === 'object' && 'code' in error && error.code === 'P2025') throw conflict(); throw error }
   }
-  return prisma.requestType.update({ where: { id: type.id }, data: { ...input, definition: await validateDefinition(prisma, organizationId, input.definition ?? type.definition), version: {increment:1}, description: input.description || null } })
+  const definition = await validateDefinition(prisma, organizationId, input.definition ?? type.definition)
+  try { return await prisma.requestType.update({ where: { id: type.id, version: type.version, deletedAt: null }, data: { ...input, definition, version: {increment:1}, description: input.description || null } }) }
+  catch (error) { if (error && typeof error === 'object' && 'code' in error && error.code === 'P2025') throw conflict(); throw error }
 }
 
 export async function deleteRequestType(userId: string, organizationId: string, typeId: string) {

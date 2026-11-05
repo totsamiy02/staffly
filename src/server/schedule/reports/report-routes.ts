@@ -6,7 +6,7 @@ import { requireAuth, assertActiveSession, type AuthenticatedRequest } from '../
 import { ApiError } from '../../api-error.ts'
 import { reportBody, templateBody } from './report-schemas.ts'
 import { buildReport, previewReport, reportOptions, reportMembers, saveReportTemplate, deleteReportTemplate } from './report-service.ts'
-import { enqueueExport, getExport } from './export-jobs.ts'
+import { enqueueExport, getExport, exportForRequest } from './export-jobs.ts'
 import { storage } from '../../storage/provider.ts'
 import { pipeline } from 'node:stream/promises'
 import { freshFileAccess, guardFileStream } from '../../storage/guarded-delivery.ts'
@@ -25,8 +25,17 @@ router.get(base + '/options', async (request, response) => { const { organizatio
 router.post(base + '/members', heavyLimiter, async (request, response) => { const { organizationId } = parse(params, request.params); response.set('Cache-Control', 'no-store').json(await reportMembers(user(request), organizationId, parse(reportBody, request.body))) })
 router.post(base + '/preview', heavyLimiter, async (request, response) => { const { organizationId } = parse(params, request.params); response.set('Cache-Control', 'no-store').json(previewReport(await auditSensitiveAccess({ action: 'REPORT_PREVIEW', userId: user(request), organizationId }, () => buildReport(user(request), organizationId, parse(reportBody, request.body))))) })
 router.post(base + '/export', exportLimiter, async (request, response) => {
-  const { organizationId } = parse(params, request.params), input = parse(reportBody, request.body)
-  response.status(202).set('Cache-Control', 'no-store').json({ job: await auditSensitiveAccess({ action: 'REPORT_EXPORT', userId: user(request), organizationId }, () => enqueueExport(user(request), organizationId, input)) })
+  const { organizationId } = parse(params, request.params)
+  const requestKey = parse(z.uuid().optional(), request.body?.requestKey)
+  const { requestKey: _key, ...body } = request.body ?? {}
+  const input = parse(reportBody, body)
+  const event = { action: 'REPORT_EXPORT' as const, userId: user(request), organizationId, resourceType: 'EXPORT' as const, resourceId: undefined as string | undefined }
+  const job = await auditSensitiveAccess(event, async () => { const job = await enqueueExport(user(request), organizationId, input, requestKey); event.resourceId = job.id; return job })
+  response.status(202).set('Cache-Control', 'no-store').json({ job })
+})
+router.get(base + '/exports/request/:requestKey', async (request, response) => {
+  const { organizationId, requestKey } = parse(params.extend({ requestKey: z.uuid() }), request.params)
+  response.set('Cache-Control', 'no-store').json((await exportForRequest(user(request), organizationId, requestKey)).public)
 })
 router.get(base + '/exports/:jobId', async (request, response) => {
   const { organizationId, jobId } = parse(params.extend({ jobId: z.uuid() }), request.params)

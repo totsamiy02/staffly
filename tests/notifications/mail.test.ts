@@ -47,6 +47,18 @@ it('keeps mandatory codes outside subscription controls with contextual instruct
     assert.ok(!sent.at(-1)!.html.includes('Настроить уведомления'))
   }
 })
+it('pauses direct security and invitation mail before SMTP and resumes explicitly', async () => {
+  const previous = process.env.EMAIL_DELIVERY_PAUSED, count = sent.length
+  try {
+    process.env.EMAIL_DELIVERY_PAUSED = 'true'
+    await assert.rejects(mail.deliverSecurityCode('verification', 'recipient@example.test', '123456'), { code: 'EMAIL_DELIVERY_PAUSED', status: 503 })
+    await assert.rejects(mail.deliverOrganizationInvitation('recipient@example.test', 'Test', 'Test', 'test-token', new Date()), { code: 'EMAIL_DELIVERY_PAUSED' })
+    assert.equal(sent.length, count)
+    process.env.EMAIL_DELIVERY_PAUSED = 'false'
+    await mail.deliverSecurityCode('verification', 'recipient@example.test', '123456')
+    assert.equal(sent.length, count + 1)
+  } finally { if (previous === undefined) delete process.env.EMAIL_DELIVERY_PAUSED; else process.env.EMAIL_DELIVERY_PAUSED = previous }
+})
 it('renders rounded responsive working letters with readable plain text, before/after and preference link', () => {
   const message = mail.renderEmail({title:'Ваша смена изменена',intro:'Расписание обновлено',optional:true,fields:[['Было','09:00–18:00'],['Стало','11:00–20:00'],['Причина','<img onerror=bad>']],action:{label:'Открыть смену',path:'/app/organizations/test/schedule?shift=shift-id&location=point-id'}})
   assert.ok(message.html.includes('&lt;img onerror=bad&gt;'))

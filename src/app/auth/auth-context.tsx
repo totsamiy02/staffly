@@ -1,6 +1,8 @@
+import { readTabValue } from '../workspace/tab-storage.ts'
 import { documentMime } from '../file-preview/formats.ts'
+import { clearFormDrafts } from '../forms/draft-storage.ts'
 import { useLocation } from 'react-router-dom'
-import { postAuthJson as postJson, requestWithSession, readJson, refreshSession } from './session-transport.ts'
+import { postAuthJson as postJson, requestWithSession, readJson, refreshSession, connectionError } from './session-transport.ts'
 import { useQueryClient } from '@tanstack/react-query'
 import { applyLiveHints, setLiveConnected, isLiveConnected } from '../live-query.ts'
 import { startLiveStream } from '../live-stream.ts'
@@ -57,7 +59,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refreshRef = useRef<Promise<AuthResult | null> | null>(null)
 
   const accept = useCallback((result: AuthResult) => {
-    if (userIdRef.current !== result.user.id) queryClient.clear()
+    if (userIdRef.current !== result.user.id) { queryClient.clear(); clearFormDrafts(result.user.id) }
     userIdRef.current = result.user.id
     authVersion.current += 1
     tokenRef.current = result.accessToken
@@ -68,6 +70,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [queryClient])
 
   const clear = useCallback(() => {
+    clearFormDrafts()
     authVersion.current += 1
     tokenRef.current = null
     userIdRef.current = null
@@ -138,8 +141,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       headers: { ...(options.body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}),
     })
-    const response = await requestWithSession(execute, () => tokenRef.current, refresh)
-    return readJson<T>(response)
+    return requestWithSession(execute, () => tokenRef.current, refresh).then(response => readJson<T>(response)).catch(error => { if (options.signal?.aborted) throw error; throw connectionError(error, (options.method ?? 'GET') !== 'GET') })
   }, [refresh])
 
   const uploadImage = useCallback(async <T,>(path: string, file: File): Promise<T> => {
@@ -149,14 +151,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       headers: { 'Content-Type': file.type, ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: file,
     })
-    const response = await requestWithSession(execute, () => tokenRef.current, refresh)
-    return readJson<T>(response)
+    return requestWithSession(execute, () => tokenRef.current, refresh).then(response => readJson<T>(response)).catch(error => { throw connectionError(error, true) })
   }, [refresh])
 
   const uploadFile = useCallback(async <T,>(path: string, file: File): Promise<T> => {
     const execute = (token: string | null) => fetch(`/api${path}`, { method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': documentMime(file.name) || file.type || 'application/octet-stream', 'X-File-Name': encodeURIComponent(file.name), ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: file })
-    const response = await requestWithSession(execute, () => tokenRef.current, refresh)
-    return readJson<T>(response)
+    return requestWithSession(execute, () => tokenRef.current, refresh).then(response => readJson<T>(response)).catch(error => { throw connectionError(error, true) })
   }, [refresh])
 
   const downloadFile = useCallback(async (path: string, fileName: string, method: 'GET' | 'POST' = 'GET', body?: unknown) => {
@@ -239,7 +239,7 @@ export function useAuth() {
   if (!context) throw new Error('AuthProvider is missing')
   const route = useLocation()
   const organizationId = /^\/app\/organizations\/([^/]+)/.exec(route.pathname)?.[1]
-  const locationId = new URLSearchParams(route.search).get('location') ?? (organizationId ? window.sessionStorage.getItem(`staffly:location:${context.user?.id}:${organizationId}`) : null) ?? undefined
+  const locationId = new URLSearchParams(route.search).get('location') ?? (organizationId ? readTabValue(`staffly:location:${context.user?.id}:${organizationId}`) : null) ?? undefined
   return useMemo(() => {
   const scopePath = (path: string) => {
     if (!locationId || !organizationId || !path.startsWith(`/organizations/${organizationId}`)) return path

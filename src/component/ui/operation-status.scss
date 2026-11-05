@@ -1,0 +1,8 @@
+.operation-status { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 14px; border: 1px solid var(--theme-border,#ddd); border-radius: 12px; margin: 12px 0; background: var(--theme-surface,#fff);
+  > div:first-child { flex: 1 1 240px; min-width: 0; }
+  strong { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+  p { margin: 5px 0 0; overflow-wrap: anywhere; }
+  &__reference { font-size: 12px; color: var(--theme-muted,#64616c); user-select: text; }
+  code { overflow-wrap: anywhere; }
+  &__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+}

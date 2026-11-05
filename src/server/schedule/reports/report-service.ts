@@ -72,9 +72,9 @@ type Cell = string | number | Date | null
 type Row = Record<string, Cell>
 export type BuiltReport = { generatedAt: Date; metrics: ReportPreview['metrics']; warnings: ReportPreview['warnings']; rows: Record<ReportSheet, Row[]>; config: ReportConfig }
 // Repeatable read gives all sheets one database snapshot within this operation.
-export async function buildReport(userId: string, organizationId: string, input: ReportInput, now = new Date(), permission: Permission = 'reports.preview'): Promise<BuiltReport> {
+export async function buildReport(userId: string, organizationId: string, input: ReportInput, now = new Date(), permission: Permission = 'reports.preview', client: typeof prisma = prisma): Promise<BuiltReport> {
   input = { ...input, config: normalizeReportConfig(input.config) }
-  return prisma.$transaction(async db => {
+  return client.$transaction(async db => {
     const access = await reportAccess(userId, organizationId, db, permission), locations = selectedLocations(access, input.locationIds)
     const scopeError = reportScopeError(input.config, locations.length)
     if (scopeError) throw new ApiError(400, 'REPORT_LOCATION_REQUIRED', scopeError)

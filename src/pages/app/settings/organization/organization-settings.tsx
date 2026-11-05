@@ -1,4 +1,5 @@
 import SecurityHistory from '../shared/security-history.tsx'
+import { useFormSafety } from '../../../../app/forms/use-form-safety.ts'
 import SubscriptionSettings from '../../subscriptions/subscription-settings.tsx'
 import PageHeading from '../../../../component/ui/page-heading/page-heading.tsx'
 import { useImageDraft } from '../../../../component/ui/image-upload/use-image-draft.ts'
@@ -69,6 +70,7 @@ export default function OrganizationSettings({ organization }: { organization: O
   const planningAllowed = organization.organizationPermissions?.includes('schedule.settings') || ['coverage.manage','schedule.settings','schedule.templates','positions.manage','offers.settings'].some(key=>organization.owner || organization.permissions?.includes(key))
   const canEditProfile = canAccess(organization, 'organization.edit')
   const editing = profileEditing && canEditProfile
+  const profileSafety = useFormSafety({ scope: 'organization-profile:' + organization.id, value: { name, description, timezone, contactEmail, phone, website, address }, active: editing, busy: busy || imageBusy, extraDirty: logoDraft.dirty })
   useEffect(() => { setProfileEditing(false); resetLogo() }, [section, organization.id, canEditProfile, resetLogo])
 
   function editProfile(value: boolean) {
@@ -128,7 +130,7 @@ export default function OrganizationSettings({ organization }: { organization: O
       const logoUploadId = await logoDraft.prepare()
       await apiRequest(`/organizations/${organization.id}`, { method: 'PATCH', body: { name, description, timezone, contactEmail, phone, website, address, logoUploadId } })
       await Promise.all([queryClient.invalidateQueries({ queryKey: ['organization', organization.id] }), queryClient.invalidateQueries({ queryKey: ['organizations'] })])
-      logoDraft.reset()
+      profileSafety.markSaved(); logoDraft.reset()
       setMessage('Профиль организации сохранён.')
       setProfileEditing(false)
     })
@@ -142,7 +144,7 @@ export default function OrganizationSettings({ organization }: { organization: O
     {section === 'subscription' && <SubscriptionSettings organization={organization} />}
     {section === 'roles' && organization.role === 'OWNER' && <AccessSettings organization={organization} />}
     {section === 'profile' && <article className="organization-profile-editor">
-      <div className="profile-settings-heading"><div><p className="app-eyebrow">Публичная информация</p><h2>Профиль организации</h2><p>Эти данные доступны всем участникам организации.</p></div>{canEditProfile && <ProfileEditActions editing={false} busy={editing} onEdit={() => editProfile(true)} onCancel={() => editProfile(false)} />}</div>
+      <div className="profile-settings-heading"><div><p className="app-eyebrow">Публичная информация</p><h2>Профиль организации</h2><p>Эти данные доступны всем участникам организации.</p></div>{canEditProfile && <ProfileEditActions editing={false} busy={editing} onEdit={() => editProfile(true)} onCancel={() => void profileSafety.close(() => editProfile(false))} />}</div>
       <div className="organization-logo-editor"><ImageUpload floatingControls endpoint={`/organizations/${organization.id}/logo`} imageUrl={logoDraft.url} onDraftChange={logoDraft.change} name={organization.name} avatarClassName="organization-logo-editor__preview" disabled={!editing || busy} onBusyChange={setImageBusy} onChange={async () => { await Promise.all([queryClient.invalidateQueries({ queryKey: ['organization', organization.id] }), queryClient.invalidateQueries({ queryKey: ['organizations'] })]) }} onMessage={setMessage} onError={setError} /></div>
       <form onSubmit={saveOrganization} className="organization-profile-form"><fieldset className="profile-edit-fields" disabled={busy || imageBusy}><div className="profile-details-groups">
         <ProfileDetails title="Об организации" icon="building" editing={editing} items={[
@@ -158,7 +160,7 @@ export default function OrganizationSettings({ organization }: { organization: O
         <ProfileDetails title="Описание" icon="info" columns={1} prose editing={editing} items={[
           { label: 'Информация для команды', value: organization.description, editor: <OrganizationDescriptionEditor value={description} onChange={setDescription} /> },
         ]} />
-      </div></fieldset>{editing && <ProfileEditActions editing busy={busy || imageBusy} onEdit={() => editProfile(true)} onCancel={() => editProfile(false)} />}</form>
+      </div></fieldset>{editing && <ProfileEditActions editing busy={busy || imageBusy} onEdit={() => editProfile(true)} onCancel={() => void profileSafety.close(() => editProfile(false))} />}</form>
 
     </article>}
     {section === 'schedule' && planningAllowed && <PlanningSettings organization={organization} />}

@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import './dialog-shell.scss'
 import { DialogOpenerContext, dialogOpener } from './dialog-focus.ts'
+import { FormSafetyContext } from '../../../app/forms/form-safety-context.ts'
 
 const overlayStack: symbol[] = []
 
@@ -10,20 +11,29 @@ type Props = {
   className?: string
   dismissible?: boolean
   onClose: () => void
+  beforeClose?: () => boolean | Promise<boolean>
   children: (requestClose: () => void) => ReactNode
 }
 
-export default function AnimatedOverlay({ variant, className = '', dismissible = true, onClose, children }: Props) {
+export default function AnimatedOverlay({ variant, className = '', dismissible = true, onClose, beforeClose, children }: Props) {
   const [opener] = useState(dialogOpener)
+  const safety = useContext(FormSafetyContext), surface = useRef<HTMLDivElement>(null)
   const identity = useRef(Symbol())
   useEffect(() => { const id = identity.current; overlayStack.push(id); return () => { const index = overlayStack.indexOf(id); if (index >= 0) overlayStack.splice(index, 1) } }, [])
   const [closing, setClosing] = useState(false)
   const closeTimer = useRef<number | null>(null)
-  const requestClose = useCallback(() => {
-    if (closing || !dismissible) return
+  const asking = useRef(false)
+  const requestClose = useCallback(async () => {
+    if (closing || !dismissible || asking.current) return
+    asking.current = true
+    try {
+      if (beforeClose) { if (!await beforeClose()) return }
+      else if (safety && !await safety.confirm([...safety.guards.values()].filter(guard => !!guard.element && !!surface.current?.contains(guard.element)))) return
+    }
+    finally { asking.current = false }
     setClosing(true)
     closeTimer.current = window.setTimeout(() => { closeTimer.current = null; onClose() }, 180)
-  }, [closing, dismissible, onClose])
+  }, [closing, dismissible, onClose, beforeClose, safety])
 
   useEffect(() => () => { if (closeTimer.current !== null) window.clearTimeout(closeTimer.current) }, [])
 
@@ -34,5 +44,5 @@ export default function AnimatedOverlay({ variant, className = '', dismissible =
   }, [requestClose])
 
   const base = `schedule-${variant}`
-  return createPortal(<DialogOpenerContext.Provider value={opener}><div className={`${base}${className ? ` ${className}` : ''}${closing ? ' is-closing' : ''}`} onMouseDown={(event) => { if (event.target === event.currentTarget) requestClose() }}>{children(requestClose)}</div></DialogOpenerContext.Provider>, document.body)
+  return createPortal(<DialogOpenerContext.Provider value={opener}><div ref={surface} className={`${base}${className ? ` ${className}` : ''}${closing ? ' is-closing' : ''}`} onMouseDown={(event) => { if (event.target === event.currentTarget) requestClose() }}>{children(requestClose)}</div></DialogOpenerContext.Provider>, document.body)
 }

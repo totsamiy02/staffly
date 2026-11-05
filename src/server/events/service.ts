@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util'
 import { hasPermission, locationsFor, ensureAccessRoles } from '../organizations/access/access.ts'
 import type { Permission } from '../../app/access/catalog.ts'
 import { Prisma, type OrganizationEvent } from '../../generated/prisma/client.ts'
@@ -104,9 +105,18 @@ export async function createEvent(userId: string, organizationId: string, input:
     const actor = await getMembership(userId, organizationId, tx)
     const selected = await scope(tx, actor, input.shared, input.locationIds, true)
     const data = payload(input, selected.timezone)
+    if (input.submissionKey) {
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${input.submissionKey}, 17))::text`
+      const existing = await tx.organizationEvent.findUnique({ where: { id: input.submissionKey }, include })
+      if (existing) {
+        const same = existing.organizationId === organizationId && existing.createdByMemberId === actor.id && !existing.cancelledAt && Object.entries(data).every(([key, value]) => isDeepStrictEqual((existing as unknown as Record<string, unknown>)[key], value)) && isDeepStrictEqual(existing.locations.map(row => row.locationId).sort(), selected.ids) && (input.audienceMode !== 'SELECTED' || isDeepStrictEqual(existing.recipients.map(row => row.memberId).sort(), [...new Set(input.memberIds)].sort()))
+        if (!same) throw new ApiError(409, 'EVENT_ALREADY_SUBMITTED', 'Событие с этим номером уже отправлено с другими условиями. Поля остаются в форме; проверьте список событий перед новым созданием.')
+        return dto(existing, actor)
+      }
+    }
     if (data.startAt <= new Date()) throw new ApiError(400, 'EVENT_START_IN_PAST', 'Выберите будущее время начала.')
     const recipients = await resolveRecipients(tx, organizationId, input, selected.ids)
-    const event = await tx.organizationEvent.create({ data: { ...data, organizationId, createdByMemberId: actor.id, updatedByMemberId: actor.id,
+    const event = await tx.organizationEvent.create({ data: { ...(input.submissionKey ? { id: input.submissionKey } : {}), ...data, organizationId, createdByMemberId: actor.id, updatedByMemberId: actor.id,
       locations: { create: selected.ids.map(locationId => ({ locationId })) }, recipients: { create: recipients.map(memberId => ({ memberId })) } }, include })
     await recordChange(tx, event, actor, 'CREATED')
     await notify(tx, event, recipients, 'EVENT_PUBLISHED')

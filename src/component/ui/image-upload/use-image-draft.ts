@@ -14,6 +14,7 @@ export function useImageDraft(endpoint: string, savedUrl: string | null) {
     return () => URL.revokeObjectURL(url)
   }, [file])
   return {
+    dirty: file !== undefined,
     url: file === undefined ? savedUrl : file === null ? null : preview,
     change,
     reset,

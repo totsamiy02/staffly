@@ -3,10 +3,12 @@ export async function readJson<T>(response: Response): Promise<T> {
   const text = await response.text()
   let parsed: unknown = {}
   try { parsed = text ? JSON.parse(text) : {} } catch { parsed = {} }
-  const data = (parsed && typeof parsed === 'object' ? parsed : {}) as T & { message?: string; code?: string; errors?: unknown }
+  const data = (parsed && typeof parsed === 'object' ? parsed : {}) as T & { message?: string; code?: string; errors?: unknown; errorId?: string }
   if (!response.ok) {
     const fallback = response.status === 404 ? 'Запрошенные данные не найдены.' : response.status >= 500 ? 'Сервис временно недоступен. Попробуйте позже.' : 'Не удалось выполнить запрос.'
-    const error = new Error(data.message || fallback) as Error & { code?: string; status?: number; errors?: unknown; retryAfterMs?: number }
+    const errorId = typeof data.errorId === 'string' && /^[0-9a-f-]{36}$/i.test(data.errorId) ? data.errorId : undefined
+    const error = new Error((data.message || fallback) + (errorId ? ' Код для поддержки: ' + errorId : '')) as Error & { code?: string; status?: number; errors?: unknown; retryAfterMs?: number; errorId?: string }
+    error.errorId = errorId
     error.code = data.code
     error.status = response.status
     error.errors = data.errors
@@ -82,4 +84,10 @@ export async function requestWithSession(
 export async function refreshSession<T>(): Promise<T | null> {
   const response = await postAuthJson('refresh', {})
   return [401, 403].includes(response.status) ? null : readJson<T>(response)
+}
+export function connectionError(error: unknown, mutation = false) {
+  if (error instanceof TypeError || error instanceof DOMException && ['TimeoutError', 'AbortError', 'NetworkError'].includes(error.name)) {
+    return Object.assign(new Error(mutation ? 'Не удалось получить подтверждение от сервера. Введённые данные остаются в форме. Проверьте результат операции перед повторной отправкой.' : 'Не удалось связаться с сервером. Проверьте соединение и повторите попытку.'), { code: 'NETWORK_ERROR', status: 0 })
+  }
+  return error instanceof Error ? error : new Error('Не удалось выполнить запрос.')
 }

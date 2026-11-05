@@ -1,4 +1,5 @@
 import { useEffect, useId, useState, type FormEvent } from 'react'
+import { useFormSafety } from '../../../../app/forms/use-form-safety.ts'
 import { Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '../../../../app/auth/auth-context.tsx'
@@ -12,6 +13,7 @@ export default function VacationSettings({ organizationId, canCollect, onMessage
   const [holidays, setHolidays] = useState<string[]>([])
   const [pickedDate, setPickedDate] = useState(''), [dirty, setDirty] = useState(false)
   const [busy, setBusy] = useState(false), [holidaysOpen, setHolidaysOpen] = useState(false)
+  useFormSafety({ scope: 'vacation-settings:' + organizationId, value: { days, holidays }, dirty, busy })
   const holidaysId = useId()
   const settings = useQuery({ queryKey: ['vacation-settings', organizationId], queryFn: () => apiRequest<{ standardDays: number; holidays: string[] }>(`/organizations/${organizationId}/vacation-settings`) })
   useEffect(() => { if (settings.data && !dirty) { setDays(settings.data.standardDays); setHolidays(settings.data.holidays) } }, [settings.data, dirty])

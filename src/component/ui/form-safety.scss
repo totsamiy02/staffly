@@ -1,0 +1,6 @@
+.form-draft-notice { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 14px; border: 1px solid var(--theme-border,#ddd); border-radius: 12px; background: var(--theme-surface,#fff); margin: 12px 0;
+  > div:first-child { flex: 1 1 240px; min-width: 0; }
+  p { margin: 4px 0 0; overflow-wrap: anywhere; }
+  &__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+}
+.form-draft-status { color: var(--theme-muted,#64616c); font-size: 13px; margin: 8px 0; }

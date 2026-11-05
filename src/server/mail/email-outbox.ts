@@ -5,6 +5,7 @@ import type { Prisma, EmailDelivery } from '../../generated/prisma/client.ts'
 import { prisma } from '../db.ts'
 import { normalizeEmailCategories, type EmailCategory } from '../../app/notifications/email-preferences.ts'
 import { renderEmail, sendPreparedMail, type EmailContent } from './transport.ts'
+import { emailDeliveryPaused, EmailDeliveryPausedError } from './delivery-control.ts'
 
 export async function enqueueEmail(tx: Prisma.TransactionClient | typeof prisma, data: { userId: string; organizationId?: string; sourceKey: string; sourceKind: string; sourceId?: string; category?: EmailCategory; content?: EmailContent; availableAt?: Date; recipientEmail?: string }) {
   if (data.recipientEmail && (data.sourceKind !== 'MANDATORY' || data.category)) throw new Error('A fixed recipient is only allowed for mandatory security mail')
@@ -63,10 +64,11 @@ export async function claimEmailDelivery(now = new Date()) {
 }
 
 export async function processEmailDeliveries(options: { now?: Date; send?: typeof sendPreparedMail; limit?: number; shouldContinue?: () => boolean } = {}) {
+  if (emailDeliveryPaused()) return 0
   const send = options.send ?? sendPreparedMail
   // Reclaim leases after a worker crash; SKIP LOCKED prevents simultaneous workers claiming a row.
   let processed = 0
-  while (processed < (options.limit ?? 100) && (options.shouldContinue?.() ?? true)) {
+  while (!emailDeliveryPaused() && processed < (options.limit ?? 100) && (options.shouldContinue?.() ?? true)) {
     const now = options.now ?? new Date()
     const job = await claimEmailDelivery(now)
     const jobs = job ? [job] : []
@@ -83,10 +85,12 @@ export async function processEmailDeliveries(options: { now?: Date; send?: typeo
         // An opt-out in another tab also cancels already claimed work before SMTP starts.
         const current = await prisma.emailDelivery.findUnique({ where: { id: job.id }, select: { status: true } })
         if (current?.status !== 'PENDING') continue
+        if (emailDeliveryPaused() || !(options.shouldContinue?.() ?? true)) { await releasePausedDelivery(job); return processed }
         const recipient = job.sourceKind === 'MANDATORY' && !job.category && job.recipientEmail ? job.recipientEmail : user.email
         await send(recipient, renderEmail(content), job.id)
         await finish(job, 'SENT', now)
       } catch (error) {
+        if (error instanceof EmailDeliveryPausedError) { await releasePausedDelivery(job); return processed }
         // Do not store mail content, addresses, credentials or provider responses in the queue log.
         console.error('Email delivery attempt failed:', job.id, safeError(error))
         const status = job.attempts >= 7 || +now - +job.createdAt > 86400_000 ? 'FAILED' : 'PENDING'
@@ -96,6 +100,10 @@ export async function processEmailDeliveries(options: { now?: Date; send?: typeo
     }
   }
   return processed
+}
+async function releasePausedDelivery(job: EmailDelivery) {
+  await prisma.$executeRaw`UPDATE email_deliveries SET locked_until=NULL,attempts=GREATEST(attempts-1,0)
+    WHERE id=${job.id}::uuid AND status='PENDING' AND locked_until=${job.lockedUntil}::timestamptz`
 }
 async function finish(job: EmailDelivery, status: string, now?: Date) {
   if (now) await prisma.$executeRaw`UPDATE email_deliveries SET status=${status},locked_until=NULL,delivered_at=${now.toISOString()}::timestamptz WHERE id=${job.id}::uuid AND status='PENDING'`

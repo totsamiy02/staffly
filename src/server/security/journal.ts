@@ -11,6 +11,7 @@ export const securityContext: RequestHandler = (_req, _res, next) => {
   else context.run({ correlationId: randomUUID() }, next)
 }
 export function bindSecuritySession(sessionId: string) { const value = context.getStore(); if (value) value.sessionId = sessionId }
+export function securityCorrelationId() { return context.getStore()?.correlationId }
 type Event = { action: SecurityAction; userId?: string | null; organizationId?: string | null; sessionId?: string; resourceType?: 'SESSION' | 'ACCOUNT' | 'ORGANIZATION' | 'LOCATION' | 'MEMBER' | 'DOCUMENT' | 'ATTACHMENT' | 'EXPORT' | 'ACCESS' | 'JOURNAL'; resourceId?: string; outcome?: 'SUCCEEDED' | 'DENIED' | 'FAILED'; reasonCode?: 'INVALID_CREDENTIALS' | 'TOKEN_REUSE' | 'INVALID_CONFIRMATION' | 'ACCESS_DENIED' | 'RESOURCE_UNAVAILABLE' | 'OPERATION_FAILED'; count?: number }
 export async function recordSecurityEvent(db: Prisma.TransactionClient = prisma, event: Event) {
   const request = context.getStore(), now = new Date()
