@@ -68,9 +68,9 @@ export default function UserSettingsPage() {
   function selectSection(value: Section) { const params = new URLSearchParams(location.search); params.set('section', value); navigate({ pathname: location.pathname, search: params.toString() }, { replace: true, state: location.state }) }
   const loginMethods = useQuery({ queryKey: ['auth-login-methods', user?.id], queryFn: () => apiRequest<LoginMethods>('/auth/yandex/methods'), enabled: section === 'security', staleTime: 30_000 })
   const sessions = useQuery({ ...liveQueryOptions, queryKey: ['auth-sessions'], queryFn: () => apiRequest<{ sessions: ActiveSession[] }>('/auth/sessions'), enabled: section === 'security' })
-  const revokeSession = useMutation({ mutationFn: (session: ActiveSession) => apiRequest(`/auth/sessions/${session.id}`, { method: 'DELETE' }), onSuccess: async (_, session) => { if (session.current) { await logout(); navigate('/', { replace: true }) } else await queryClient.invalidateQueries({ queryKey: ['auth-sessions'] }) } })
+  const revokeSession = useMutation({ mutationFn: (session: ActiveSession) => apiRequest(`/auth/sessions/${session.id}`, { method: 'DELETE' }), onSuccess: async (_, session) => { if (session.current) { await logout({ sessionRevoked: true }); navigate('/', { replace: true }) } else await queryClient.invalidateQueries({ queryKey: ['auth-sessions'] }) } })
   const revokeOthers = useMutation({ mutationFn: () => apiRequest('/auth/sessions/revoke-others', { method: 'POST', body: {} }), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['auth-sessions'] }) })
-  const revokeAll = useMutation({ mutationFn: () => apiRequest('/auth/logout-all', { method: 'POST', body: {} }), onSuccess: async () => { await logout(); navigate('/', { replace: true }) } })
+  const revokeAll = useMutation({ mutationFn: () => apiRequest('/auth/logout-all', { method: 'POST', body: {} }), onSuccess: async () => { await logout({ sessionRevoked: true }); navigate('/', { replace: true }) } })
 
   useToastFeedback(message, profileError || passwordError)
   useEffect(() => {

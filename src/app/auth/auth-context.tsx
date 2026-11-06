@@ -2,11 +2,13 @@ import { readTabValue } from '../workspace/tab-storage.ts'
 import { documentMime } from '../file-preview/formats.ts'
 import { clearFormDrafts } from '../forms/draft-storage.ts'
 import { useLocation } from 'react-router-dom'
-import { postAuthJson as postJson, requestWithSession, readJson, refreshSession, connectionError } from './session-transport.ts'
+import { authPost, requestWithSession, readJson, refreshSession } from './session-transport.ts'
+import { guardRequest, invalidResponseError, requestSignal } from './request-errors.ts'
 import { useQueryClient } from '@tanstack/react-query'
 import { applyLiveHints, setLiveConnected, isLiveConnected } from '../live-query.ts'
 import { startLiveStream } from '../live-stream.ts'
 /* oxlint-disable react/only-export-components -- The provider and its hook share one context. */
+export { authPost, authGet } from './session-transport.ts'
 import { createContext, useCallback, useContext, useEffect, useRef, useState, useMemo, type ReactNode } from 'react'
 
 export type AuthUser = { id: string; email: string; displayName: string; firstName: string | null; lastName: string | null; middleName: string | null; phone: string | null; bio: string | null; avatarUrl: string | null }
@@ -21,7 +23,7 @@ type AuthContextValue = {
   login: (email: string, password: string) => Promise<void>
   verifyEmail: (body: VerifyEmailBody) => Promise<void>
   completeYandex: (body: { currentPassword?: string; consentData?: boolean; consentTerms?: boolean }) => Promise<{ returnTo: string }>
-  logout: () => Promise<void>
+  logout: (options?: { sessionRevoked: true }) => Promise<void>
   updateUser: (user: AuthUser) => void
   apiRequest: <T>(path: string, options?: ApiOptions) => Promise<T>
   uploadImage: <T>(path: string, file: File) => Promise<T>
@@ -32,14 +34,6 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | null>(null)
 let bootstrapRequest: Promise<AuthResult | null> | null = null
-
-export async function authPost<T>(path: string, body: unknown): Promise<T> {
-  return readJson<T>(await postJson(path, body))
-}
-
-export async function authGet<T>(path: string): Promise<T> {
-  return readJson<T>(await fetch(`/api/auth/${path}`, { credentials: 'same-origin', cache: 'no-store' }))
-}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const route = useLocation()
@@ -59,6 +53,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refreshRef = useRef<Promise<AuthResult | null> | null>(null)
 
   const accept = useCallback((result: AuthResult) => {
+    if (!result || typeof result.accessToken !== 'string' || !result.accessToken || !result.user || typeof result.user.id !== 'string' || !result.user.id || typeof result.user.displayName !== 'string') throw invalidResponseError()
     if (userIdRef.current !== result.user.id) { queryClient.clear(); clearFormDrafts(result.user.id) }
     userIdRef.current = result.user.id
     authVersion.current += 1
@@ -128,8 +123,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { returnTo: result.returnTo }
   }, [accept])
 
-  async function logout() {
-    try { await postJson('logout', {}) } finally { clear() }
+  async function logout(options?: { sessionRevoked: true }) {
+    // A failed request cannot confirm cookie/session revocation. Callers that
+    // already revoked the session (password reset, account deletion) clear locally.
+    if (!options?.sessionRevoked) await authPost('logout', {})
+    clear()
   }
 
   const apiRequest = useCallback(async <T,>(path: string, options: ApiOptions = {}): Promise<T> => {
@@ -137,30 +135,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       method: options.method ?? 'GET',
       credentials: 'same-origin',
       cache: 'no-store',
-      signal: options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
+      signal: requestSignal(options.signal),
       headers: { ...(options.body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}),
     })
-    return requestWithSession(execute, () => tokenRef.current, refresh).then(response => readJson<T>(response)).catch(error => { if (options.signal?.aborted) throw error; throw connectionError(error, (options.method ?? 'GET') !== 'GET') })
+    return guardRequest(async () => readJson<T>(await requestWithSession(execute, () => tokenRef.current, refresh)), { mutation: (options.method ?? 'GET') !== 'GET', signal: options.signal })
   }, [refresh])
 
   const uploadImage = useCallback(async <T,>(path: string, file: File): Promise<T> => {
     const execute = (token: string | null) => fetch(`/api${path}`, {
       method: 'PUT',
       credentials: 'same-origin',
+      signal: requestSignal(undefined, 120000),
       headers: { 'Content-Type': file.type, ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: file,
     })
-    return requestWithSession(execute, () => tokenRef.current, refresh).then(response => readJson<T>(response)).catch(error => { throw connectionError(error, true) })
+    return guardRequest(async () => readJson<T>(await requestWithSession(execute, () => tokenRef.current, refresh)), { mutation: true })
   }, [refresh])
 
   const uploadFile = useCallback(async <T,>(path: string, file: File): Promise<T> => {
-    const execute = (token: string | null) => fetch(`/api${path}`, { method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': documentMime(file.name) || file.type || 'application/octet-stream', 'X-File-Name': encodeURIComponent(file.name), ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: file })
-    return requestWithSession(execute, () => tokenRef.current, refresh).then(response => readJson<T>(response)).catch(error => { throw connectionError(error, true) })
+    const execute = (token: string | null) => fetch(`/api${path}`, { method: 'PUT', signal: requestSignal(undefined, 120000), credentials: 'same-origin', headers: { 'Content-Type': documentMime(file.name) || file.type || 'application/octet-stream', 'X-File-Name': encodeURIComponent(file.name), ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: file })
+    return guardRequest(async () => readJson<T>(await requestWithSession(execute, () => tokenRef.current, refresh)), { mutation: true })
   }, [refresh])
 
-  const downloadFile = useCallback(async (path: string, fileName: string, method: 'GET' | 'POST' = 'GET', body?: unknown) => {
-    const execute = (token: string | null) => fetch(`/api${path}`, { method, credentials: 'same-origin', headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}) }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) })
+  const downloadFile = useCallback((path: string, fileName: string, method: 'GET' | 'POST' = 'GET', body?: unknown) => guardRequest(async () => {
+    const execute = (token: string | null) => fetch(`/api${path}`, { method, signal: requestSignal(undefined, 120000), credentials: 'same-origin', headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}) }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) })
     let response = await requestWithSession(execute, () => tokenRef.current, refresh)
     if (response.status === 202) {
       const result = await readJson<{ job: { statusUrl: string } }>(response)
@@ -175,19 +174,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await new Promise(resolve => setTimeout(resolve, 1500))
       }
       if (!ready) throw new Error('Подготовка отчёта заняла слишком много времени. Попробуйте позже.')
-      response = await requestWithSession(token => fetch(`/api${statusPath}/content`, { credentials: 'same-origin', cache: 'no-store', headers: token ? { Authorization: `Bearer ${token}` } : {} }), () => tokenRef.current, refresh)
+      response = await requestWithSession(token => fetch(`/api${statusPath}/content`, { signal: requestSignal(undefined, 120000), credentials: 'same-origin', cache: 'no-store', headers: token ? { Authorization: `Bearer ${token}` } : {} }), () => tokenRef.current, refresh)
     }
     if (!response.ok) { await readJson(response); return }
+    if (response.headers.get('content-type')?.includes('text/html')) throw invalidResponseError()
     const url = URL.createObjectURL(await response.blob())
     const anchor = document.createElement('a'); anchor.href = url; anchor.download = fileName; anchor.click(); URL.revokeObjectURL(url)
-  }, [refresh, apiRequest])
+  }, { mutation: method !== 'GET' }), [refresh, apiRequest])
 
-  const previewFile = useCallback(async (path: string, method: 'GET' | 'POST' = 'GET', signal?: AbortSignal) => {
-    const execute = (token: string | null) => fetch(`/api${path}`, { method, signal, credentials: 'same-origin', cache: 'no-store', headers: token ? { Authorization: `Bearer ${token}` } : {} })
+  const previewFile = useCallback((path: string, method: 'GET' | 'POST' = 'GET', signal?: AbortSignal) => guardRequest(async () => {
+    const execute = (token: string | null) => fetch(`/api${path}`, { method, signal: requestSignal(signal, 120000), credentials: 'same-origin', cache: 'no-store', headers: token ? { Authorization: `Bearer ${token}` } : {} })
     const response = await requestWithSession(execute, () => tokenRef.current, refresh)
     if (!response.ok) { await readJson(response); throw new Error('Не удалось открыть файл.') }
     return response.blob()
-  }, [refresh])
+  }, { signal }), [refresh])
 
   const presenceUserId = user?.id
   useEffect(() => {

@@ -69,7 +69,7 @@ export default function OfficePreview({ blob, slides }: { blob: Blob; slides: bo
       if (!active) { cleanup?.(); return }
       if (!pages.current.length) throw new Error('В документе нет доступных страниц.')
       setCount(pages.current.length)
-    })().catch(failure => { if (active) setError(failure instanceof Error ? failure.message : 'Не удалось прочитать документ.') })
+    })().catch(() => { if (active) setError('Не удалось прочитать документ. Файл может быть повреждён. Попробуйте скачать его или открыть просмотр повторно.') })
     return () => { active = false; cleanup?.(); pages.current = [] }
   }, [blob, slides, loaded])
   useEffect(() => {

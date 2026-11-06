@@ -1,15 +1,35 @@
+import { guardRequest, invalidResponseError, supportIdPattern, type RequestFailure } from './request-errors.ts'
+export { connectionError } from './request-errors.ts'
+
+const serviceMessages: Record<string, string> = {
+  DATABASE_BUSY: 'Сервис занят. Повторите попытку немного позже.',
+  AUTH_BUSY: 'Сервис входа занят. Повторите попытку немного позже.',
+  PREVIEW_BUSY: 'Сервис просмотра занят. Повторите попытку немного позже.',
+  FILE_VALIDATION_BUSY: 'Сервис обработки файлов занят. Повторите попытку позже.',
+  FILE_PROCESSOR_UNAVAILABLE: 'Обработка файлов временно недоступна.',
+  EXPORT_BUSY: 'Очередь отчётов занята. Повторите попытку немного позже.',
+  SECURITY_EMAIL_UNAVAILABLE: 'Письмо не отправлено. Повторите запрос позже.',
+  EMAIL_SEND_FAILED: 'Не удалось отправить код. Попробуйте начать изменение почты заново.',
+  YANDEX_UNAVAILABLE: 'Не удалось подтвердить вход у Яндекса. Попробуйте ещё раз.',
+  YANDEX_DISABLED: 'Вход через Яндекс пока недоступен.',
+}
+
 export async function readJson<T>(response: Response): Promise<T> {
   if (response.status === 204) return undefined as T
   const text = await response.text()
-  let parsed: unknown = {}
-  try { parsed = text ? JSON.parse(text) : {} } catch { parsed = {} }
+  let parsed: unknown
+  try { parsed = JSON.parse(text) } catch { /* Gateway HTML and truncated JSON are not successful API results. */ }
   const data = (parsed && typeof parsed === 'object' ? parsed : {}) as T & { message?: string; code?: string; errors?: unknown; errorId?: string }
   if (!response.ok) {
-    const fallback = response.status === 404 ? 'Запрошенные данные не найдены.' : response.status >= 500 ? 'Сервис временно недоступен. Попробуйте позже.' : 'Не удалось выполнить запрос.'
-    const errorId = typeof data.errorId === 'string' && /^[0-9a-f-]{36}$/i.test(data.errorId) ? data.errorId : undefined
-    const error = new Error((data.message || fallback) + (errorId ? ' Код для поддержки: ' + errorId : '')) as Error & { code?: string; status?: number; errors?: unknown; retryAfterMs?: number; errorId?: string }
+    const fallback = response.status === 401 ? 'Сессия завершена. Войдите в аккаунт снова.' : response.status === 403 ? 'Недостаточно прав для этого действия.' : response.status === 404 ? 'Запрошенные данные не найдены.' : response.status === 429 ? 'Слишком много запросов. Подождите немного и повторите попытку.' : response.status >= 500 ? 'Сервис временно недоступен. Попробуйте немного позже.' : 'Не удалось выполнить запрос.'
+    const errorId = typeof data.errorId === 'string' && supportIdPattern.test(data.errorId) ? data.errorId : undefined
+    const code = typeof data.code === 'string' && /^[A-Z][A-Z0-9_]{0,79}$/.test(data.code) ? data.code : undefined
+    // Only known service messages may replace the generic 5xx message. Never show
+    // an upstream exception, SQL, stack trace, or proxy response to the user.
+    const message = response.status >= 500 ? (code && Object.hasOwn(serviceMessages, code) ? serviceMessages[code] : fallback) : typeof data.message === 'string' && data.message.trim() && data.message.length <= 1000 && !/[<>]/.test(data.message) && !Array.from(data.message).some(char => char.charCodeAt(0) < 32) ? data.message : fallback
+    const error: RequestFailure = new Error(message + (errorId ? ' Код для поддержки: ' + errorId : ''))
     error.errorId = errorId
-    error.code = data.code
+    error.code = code
     error.status = response.status
     error.errors = data.errors
     const retryAfter = response.headers.get('retry-after')
@@ -20,7 +40,16 @@ export async function readJson<T>(response: Response): Promise<T> {
     }
     throw error
   }
-  return data
+  if (parsed === null || typeof parsed !== 'object') throw invalidResponseError(response.status)
+  return parsed as T
+}
+
+export function authPost<T>(path: string, body: unknown): Promise<T> {
+  return guardRequest(async () => readJson<T>(await postAuthJson(path, body)), { mutation: true })
+}
+
+export function authGet<T>(path: string): Promise<T> {
+  return guardRequest(async () => readJson<T>(await fetch(`/api/auth/${path}`, { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(10000) })))
 }
 
 export async function postAuthJson(path: string, body: unknown): Promise<Response> {
@@ -41,8 +70,10 @@ export async function postAuthJson(path: string, body: unknown): Promise<Respons
     }
   }
   // Refresh cookies are shared by tabs. Serialize rotation and account changes by origin.
-  if (['refresh', 'login', 'verify-email', 'yandex/complete', 'logout', 'reset-password'].includes(path) && navigator.locks) return navigator.locks.request('staffly-auth-cookie', { signal: AbortSignal.timeout(25000) }, execute)
-  return execute()
+  return guardRequest(() => {
+    if (['refresh', 'login', 'verify-email', 'yandex/complete', 'logout', 'reset-password'].includes(path) && navigator.locks) return navigator.locks.request('staffly-auth-cookie', { signal: AbortSignal.timeout(25000) }, execute)
+    return execute()
+  }, { mutation: path !== 'refresh' })
 }
 
 // JWT claims are used only to schedule refresh; the server still verifies every token.
@@ -82,12 +113,8 @@ export async function requestWithSession(
 // Only an explicit authentication rejection ends a session. Temporary HTTP and
 // transport failures propagate to query retry without clearing the current user.
 export async function refreshSession<T>(): Promise<T | null> {
-  const response = await postAuthJson('refresh', {})
-  return [401, 403].includes(response.status) ? null : readJson<T>(response)
-}
-export function connectionError(error: unknown, mutation = false) {
-  if (error instanceof TypeError || error instanceof DOMException && ['TimeoutError', 'AbortError', 'NetworkError'].includes(error.name)) {
-    return Object.assign(new Error(mutation ? 'Не удалось получить подтверждение от сервера. Введённые данные остаются в форме. Проверьте результат операции перед повторной отправкой.' : 'Не удалось связаться с сервером. Проверьте соединение и повторите попытку.'), { code: 'NETWORK_ERROR', status: 0 })
-  }
-  return error instanceof Error ? error : new Error('Не удалось выполнить запрос.')
+  return guardRequest(async () => {
+    const response = await postAuthJson('refresh', {})
+    return [401, 403].includes(response.status) ? null : readJson<T>(response)
+  })
 }

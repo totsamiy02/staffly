@@ -1,3 +1,4 @@
+import RequestErrorMessage from '../../component/ui/request-error-message.tsx'
 import { useState, type FormEvent } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
@@ -136,7 +137,7 @@ function AuthPage() {
             </button>
           )}
         </div>
-        {showError && <p className="auth__error" id={`${name}-error`}>{error}</p>}
+        {showError && <p className="auth__error" id={`${name}-error`}><RequestErrorMessage error={error} /></p>}
       </div>
     )
   }
@@ -171,7 +172,7 @@ function AuthPage() {
               </div>
             )}
 
-            {serverError && <p className="auth__error" role="alert">{serverError}</p>}
+            {serverError && <p className="auth__error" role="alert"><RequestErrorMessage error={serverError} /></p>}
             {serverError.includes('Подтвердите email') && <><button className="auth__text-button" type="button" onClick={() => { void resendVerification() }} disabled={submitting}>Отправить код повторно</button><br /><Link className="auth__text-button" to="/verify-email" state={{ email: email.trim().toLowerCase(), returnTo }}>Ввести код</Link></>}
             {notice && <p className="auth__notice" role="status">{notice}</p>}
             <button className="auth__submit" type="submit" disabled={submitting || yandexBusy}>{submitting ? 'Подождите…' : mode === 'login' ? 'Войти' : 'Получить код'}</button>

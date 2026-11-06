@@ -1,6 +1,6 @@
 import { securityCorrelationId } from './security/journal.ts'
 import { randomUUID } from 'node:crypto'
-import { safeError } from './security/safe-error.ts'
+import { safeError, safeApiError } from './security/safe-error.ts'
 import { securityContext } from './security/journal.ts'
 import subscriptionRouter, { subscriptionWritePolicy } from './subscriptions/routes.ts'
 import teamPlanningRouter from './schedule/planning/team-planning-routes.ts'
@@ -134,7 +134,7 @@ app.use((error: unknown, request: express.Request, response: express.Response, _
   }
   const errorId = securityCorrelationId() ?? randomUUID()
   if (isDatabaseBusy(error)) {
-    console.error('API error:', { errorId, ...safeError(error) })
+    console.error('API error:', JSON.stringify(safeApiError(error, request, errorId)))
     response.set('Retry-After', '2').status(503).json({ errorId, code: 'DATABASE_BUSY', message: 'Сервис занят. Повторите попытку немного позже.' }); return
   }
   if (error && typeof error === 'object' && 'type' in error && error.type === 'entity.too.large') {
@@ -147,7 +147,7 @@ app.use((error: unknown, request: express.Request, response: express.Response, _
   }
   if (error instanceof ZodError) { response.status(400).json({code:'VALIDATION_ERROR',message:error.issues[0]?.message ?? 'Проверьте данные.'}); return }
   if (error instanceof ApiError) {
-    if (error.status >= 500) console.error('API error:', { errorId, ...safeError(error) })
+    if (error.status >= 500) console.error('API error:', JSON.stringify(safeApiError(error, request, errorId)))
     response.status(error.status).json({ ...(error.status >= 500 ? { errorId } : {}), code: error.code, message: error.message, ...(error.details ? { errors: error.details } : {}) })
     return
   }
@@ -155,8 +155,8 @@ app.use((error: unknown, request: express.Request, response: express.Response, _
     response.status(409).json({ code: 'CONCURRENT_UPDATE', message: 'Данные уже изменились. Повторите запрос.' })
     return
   }
-  console.error('API error:', { errorId, ...safeError(error) })
-  response.status(500).json({ errorId, code: 'INTERNAL_ERROR', message: 'Внутренняя ошибка сервера.' })
+  console.error('API error:', JSON.stringify(safeApiError(error, request, errorId)))
+  response.status(500).json({ errorId, code: 'INTERNAL_ERROR', message: 'Не удалось выполнить действие. Попробуйте немного позже.' })
 })
 
 const port = Number(process.env.PORT || 3001)

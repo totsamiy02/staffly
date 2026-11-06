@@ -18,7 +18,7 @@ export default function DataLifecycleSettings() {
   async function confirm() {
     if (!challenge) return
     setBusy(true); setError('')
-    try { await apiRequest('/profile/delete/confirm', { method: 'POST', body: { challengeId: challenge.challengeId, code, confirm: true } }); await logout(); navigate('/', { replace: true }) }
+    try { await apiRequest('/profile/delete/confirm', { method: 'POST', body: { challengeId: challenge.challengeId, code, confirm: true } }); await logout({ sessionRevoked: true }); navigate('/', { replace: true }) }
     catch (failure) { setError(failure instanceof Error ? failure.message : 'Не удалось удалить аккаунт.') }
     finally { setBusy(false) }
   }

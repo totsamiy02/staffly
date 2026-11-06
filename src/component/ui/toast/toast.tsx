@@ -4,6 +4,7 @@ import { ToastContext, FloatingMessagesContext, type FloatingMessage } from './t
 import { enqueueMessage } from './message-queue.ts'
 import './toast.scss'
 import { useAuth } from '../../../app/auth/auth-context.tsx'
+import RequestErrorMessage from '../request-error-message.tsx'
 
 type Kind = 'success' | 'error' | 'info'
 export default function ToastProvider({ children }: { children: ReactNode }) {
@@ -11,6 +12,7 @@ export default function ToastProvider({ children }: { children: ReactNode }) {
   const [queue, setQueue] = useState<FloatingMessage[]>([])
   const [phase, setPhase] = useState<'show' | 'closing' | 'gap'>('show')
   const [pageVisible, setPageVisible] = useState(document.visibilityState === 'visible')
+  const [hovered, setHovered] = useState(false), [focused, setFocused] = useState(false)
   const sequence = useRef(0)
   const active = queue[0]
   const activeId = useRef<string | undefined>(undefined)
@@ -24,16 +26,17 @@ export default function ToastProvider({ children }: { children: ReactNode }) {
   const remove = useCallback((id: string) => setQueue(current => current.filter(item => item.id !== id)), [])
   const duration = active?.duration, currentId = active?.id
   useEffect(() => { setQueue([]); setPhase('show') }, [user?.id])
+  useEffect(() => { setHovered(false); setFocused(false) }, [currentId])
   useEffect(() => {
     const update = () => setPageVisible(document.visibilityState === 'visible')
     document.addEventListener('visibilitychange', update)
     return () => document.removeEventListener('visibilitychange', update)
   }, [])
   useEffect(() => {
-    if (!currentId || !pageVisible || phase !== 'show') return
+    if (!currentId || !pageVisible || hovered || focused || phase !== 'show') return
     const timer = window.setTimeout(() => dismiss(currentId), duration)
     return () => window.clearTimeout(timer)
-  }, [currentId, duration, pageVisible, phase, dismiss])
+  }, [currentId, duration, pageVisible, hovered, focused, phase, dismiss])
   useEffect(() => {
     if (phase === 'show') return
     const timer = window.setTimeout(() => {
@@ -44,7 +47,7 @@ export default function ToastProvider({ children }: { children: ReactNode }) {
   }, [phase])
   const toast = useCallback((message: string, kind: Kind = 'info') => {
     const id = `toast:${++sequence.current}`
-    enqueue({ id, duration: kind === 'error' ? 6500 : 4000, className: `staffly-toast staffly-toast--${kind}`, content: <><span aria-hidden="true">{kind === 'success' ? '✓' : kind === 'error' ? '!' : 'i'}</span><p>{message}</p><button aria-label="Закрыть сообщение" onClick={() => dismiss(id)}>×</button></> })
+    enqueue({ id, duration: kind === 'error' ? 12000 : 4000, className: `staffly-toast staffly-toast--${kind}`, content: <><span aria-hidden="true">{kind === 'success' ? '✓' : kind === 'error' ? '!' : 'i'}</span><p>{kind === 'error' ? <RequestErrorMessage error={message} /> : message}</p><button aria-label="Закрыть сообщение" onClick={() => dismiss(id)}>×</button></> })
   }, [enqueue, dismiss])
-  return <ToastContext.Provider value={toast}><FloatingMessagesContext.Provider value={{enqueue,dismiss,remove}}>{children}{createPortal(<div className="staffly-notification-stack" role="region" aria-label="Уведомления">{active && phase !== 'gap' && <div key={active.id} className={`${active.className}${phase === 'closing' ? ' is-closing' : ''}`} role="status">{active.content}</div>}</div>, document.body)}</FloatingMessagesContext.Provider></ToastContext.Provider>
+  return <ToastContext.Provider value={toast}><FloatingMessagesContext.Provider value={{enqueue,dismiss,remove}}>{children}{createPortal(<div className="staffly-notification-stack" role="region" aria-label="Уведомления">{active && phase !== 'gap' && <div key={active.id} className={`${active.className}${phase === 'closing' ? ' is-closing' : ''}`} role="status" onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)} onFocusCapture={() => setFocused(true)} onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocused(false) }}>{active.content}</div>}</div>, document.body)}</FloatingMessagesContext.Provider></ToastContext.Provider>
 }

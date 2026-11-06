@@ -45,7 +45,7 @@ it('distinguishes a rejected session from temporary refresh failures and preserv
     }
     const offline = new TypeError('Network unavailable')
     globalThis.fetch = async () => { throw offline }
-    await assert.rejects(refreshSession(), error => error === offline)
+    await assert.rejects(refreshSession(), (error: Error & { code?: string }) => error.code === 'NETWORK_ERROR' && !error.message.includes(offline.message))
     const fresh = { accessToken: jwt(Math.floor(Date.now() / 1000) + 900), user: { id: 'current-user' } }
     globalThis.fetch = async () => Response.json(fresh)
     assert.deepEqual(await refreshSession(), fresh)

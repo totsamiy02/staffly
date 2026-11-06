@@ -2,6 +2,8 @@ import { Component, lazy, Suspense, useEffect, useRef, useState, type ReactNode 
 import { fileExtension, isPresentation } from '../../../app/file-preview/formats.ts'
 import { LEGACY_PREVIEW_MIME, SHEET_PREVIEW_MIME, type LegacyPreview, type WorkbookPreview } from '../../../app/file-preview/types.ts'
 import './file-preview.scss'
+import RequestErrorMessage from '../request-error-message.tsx'
+import { connectionError } from '../../../app/auth/request-errors.ts'
 const PdfPreview = lazy(() => import('./pdf-preview.tsx'))
 const TablePreview = lazy(() => import('./table-preview.tsx'))
 const TextPreview = lazy(() => import('./text-preview.tsx'))
@@ -31,12 +33,12 @@ export default function FilePreview({ sourceKey, name, load, onLoaded }: { sourc
       else if (blob.type.startsWith('text/')) next.text = await blob.text()
       else if (blob.type !== 'application/pdf' && !blob.type.startsWith('image/')) throw new Error('Сервер вернул неизвестный формат просмотра.')
       if (active) { setContent(next); ready.current?.() }
-    }).catch(failure => { if (active) setError(failure instanceof Error ? failure.message : 'Не удалось открыть файл.') })
+    }).catch(failure => { if (active) setError(failure instanceof SyntaxError ? 'Не удалось прочитать данные просмотра. Повторите попытку.' : connectionError(failure).message) })
     return () => { active = false }
   }, [sourceKey, name, retry])
   useEffect(() => { const change = () => setFull(document.fullscreenElement === root.current); document.addEventListener('fullscreenchange', change); return () => document.removeEventListener('fullscreenchange', change) }, [])
   return <div className="file-preview" ref={root} onKeyDownCapture={event => { if (event.key === 'Escape' && document.fullscreenElement === root.current) event.stopPropagation() }}>
     <div className="file-preview-topbar"><span>Только чтение</span>{document.fullscreenEnabled && <button type="button" className="file-preview-expand" onClick={() => { void (full ? document.exitFullscreen() : root.current?.requestFullscreen())?.catch(() => setError('Полноэкранный режим недоступен в этом браузере.')) }}>{full ? 'Свернуть' : 'На весь экран'}</button>}</div>
-    {error ? <div className="file-preview-state" role="alert"><strong>Не удалось открыть просмотр</strong><p>{error}</p><button type="button" className="app-secondary" onClick={() => setRetry(value => value + 1)}>Повторить</button></div> : !content ? <div className="file-preview-state" role="status"><span className="app-spinner" /><strong>Подготавливаем просмотр…</strong><p>Большой документ может открываться немного дольше.</p></div> : <PreviewBoundary key={`${sourceKey}:${retry}`}><Suspense fallback={<div className="file-preview-state" role="status">Загружаем просмотрщик…</div>}>{content.office ? <OfficePreview blob={content.blob} slides={isPresentation(name)} /> : content.legacy ? <LegacyReader value={content.legacy} /> : content.workbook ? <TablePreview workbook={content.workbook} /> : content.text !== undefined ? <TextPreview value={content.text} markdown={fileExtension(name) === 'md'} /> : content.blob.type === 'application/pdf' ? <PdfPreview blob={content.blob} slides={isPresentation(name)} /> : <ImagePreview blob={content.blob} name={name} />}</Suspense></PreviewBoundary>}
+    {error ? <div className="file-preview-state" role="alert"><strong>Не удалось открыть просмотр</strong><p><RequestErrorMessage error={error} /></p><button type="button" className="app-secondary" onClick={() => setRetry(value => value + 1)}>Повторить</button></div> : !content ? <div className="file-preview-state" role="status"><span className="app-spinner" /><strong>Подготавливаем просмотр…</strong><p>Большой документ может открываться немного дольше.</p></div> : <PreviewBoundary key={`${sourceKey}:${retry}`}><Suspense fallback={<div className="file-preview-state" role="status">Загружаем просмотрщик…</div>}>{content.office ? <OfficePreview blob={content.blob} slides={isPresentation(name)} /> : content.legacy ? <LegacyReader value={content.legacy} /> : content.workbook ? <TablePreview workbook={content.workbook} /> : content.text !== undefined ? <TextPreview value={content.text} markdown={fileExtension(name) === 'md'} /> : content.blob.type === 'application/pdf' ? <PdfPreview blob={content.blob} slides={isPresentation(name)} /> : <ImagePreview blob={content.blob} name={name} />}</Suspense></PreviewBoundary>}
   </div>
 }

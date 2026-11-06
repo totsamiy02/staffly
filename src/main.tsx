@@ -11,7 +11,8 @@ import ThemeController from './app/theme/theme-controller.tsx'
 import { retryQuery, queryRetryDelay } from './app/query-retry.ts'
 import FormSafetyProvider from './app/forms/form-safety-provider.tsx'
 
-const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 15_000, retry: retryQuery, retryDelay: queryRetryDelay, refetchOnWindowFocus: false }, mutations: { retry: false } } })
+// Fail visibly when offline; do not queue writes that would silently resume later.
+const queryClient = new QueryClient({ defaultOptions: { queries: { networkMode: 'always', staleTime: 15_000, retry: retryQuery, retryDelay: queryRetryDelay, refetchOnWindowFocus: false }, mutations: { networkMode: 'always', retry: false } } })
 const router = createBrowserRouter([{ path: '*', element: <QueryClientProvider client={queryClient}><RootErrorBoundary><AuthProvider><ToastProvider><FormSafetyProvider><App /></FormSafetyProvider></ToastProvider></AuthProvider></RootErrorBoundary></QueryClientProvider> }])
 
 createRoot(document.getElementById('root')!).render(

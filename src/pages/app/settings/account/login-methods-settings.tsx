@@ -70,7 +70,7 @@ export default function LoginMethodsSettings({ methods, pending, failed, onReloa
       }
       if (dialog === 'email-code') {
         const result = await apiRequest<{ message: string }>('/auth/email-change/confirm', { method: 'POST', body: { challengeId: challenge?.challengeId, code } })
-        await logout(); navigate('/auth?mode=login', { replace: true }); toast(result.message, 'success'); return
+        await logout({ sessionRevoked: true }); navigate('/auth?mode=login', { replace: true }); toast(result.message, 'success'); return
       }
       const result = await apiRequest<{ message: string }>(`/auth/yandex/${dialog === 'password' ? 'password/complete' : 'unlink'}`, { method: 'POST', body: dialog === 'password' ? { password, confirmPassword } : { currentPassword } })
       setDialog(null); setCurrentPassword(''); setPassword(''); setConfirmPassword(''); toast(result.message, 'success'); onReload()

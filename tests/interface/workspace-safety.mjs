@@ -6,6 +6,7 @@ import { createServer as netServer } from 'node:net'
 import path from 'node:path'
 import { createServer } from 'vite'
 import react from '@vitejs/plugin-react'
+import { checkNetworkFailures } from './network-failures.mjs'
 
 export async function runWorkspaceSafety({ prisma, env, root, temporary, output, options, startApi }) {
   process.env.PLAYWRIGHT_BROWSERS_PATH ??= path.join(root, 'artifacts/browser-binaries')
@@ -67,6 +68,7 @@ export async function runWorkspaceSafety({ prisma, env, root, temporary, output,
           try {
             await page.goto(origin + base + '/events' + location)
             await expect(page.getByRole('button', { name: 'Открыть профиль', exact: true })).toBeVisible({ timeout: 20000 })
+            await checkNetworkFailures({ browser, page, context, origin, base, location, fixture, prisma, check, expect, result, output, name, viewport })
             await check('modal close protection and draft restore after reload', async () => {
               await openEvent()
               await dialog().getByRole('textbox', { name: /^Название/ }).fill('Несохранённый текст ' + name)

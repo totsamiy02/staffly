@@ -1,3 +1,4 @@
+import RequestErrorMessage from '../../component/ui/request-error-message.tsx'
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { authPost, useAuth } from '../../app/auth/auth-context.tsx'
@@ -37,7 +38,7 @@ function ResetPasswordPage() {
     setError('')
     try {
       await authPost('reset-password', { email, code, password, confirmPassword })
-      await logout().catch(() => undefined)
+      await logout({ sessionRevoked: true })
       setDone(true)
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'Не удалось обновить пароль.')
@@ -71,7 +72,7 @@ function ResetPasswordPage() {
           <div className="auth__password-requirements">{passwordRequirements.map((requirement) => <span className={password && requirement.test(password) ? 'auth__password-rule auth__password-rule--valid' : 'auth__password-rule'} key={requirement.label}>{requirement.label}</span>)}</div>
           <div className="auth__field"><input type="password" aria-label="Повторите пароль" placeholder="Повторите пароль" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} required /></div>
         </div>
-        {error && <p className="auth__error" role="alert">{error}</p>}
+        {error && <p className="auth__error" role="alert"><RequestErrorMessage error={error} /></p>}
         {notice && <p className="auth__notice" role="status">{notice}</p>}
         <button className="auth__submit" type="submit" disabled={busy}>Сохранить пароль</button>
       </form>

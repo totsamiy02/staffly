@@ -3,13 +3,23 @@ import HeaderFrame from './header-frame.tsx'
 import { Link } from 'react-router-dom'
 import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../../app/auth/auth-context.tsx'
+import RequestErrorMessage from '../ui/request-error-message.tsx'
 import Avatar from '../ui/avatar/avatar.tsx'
 import ThemeToggle from '../ui/theme-toggle/theme-toggle.tsx'
 
 function Header() {
   const { user, loading, logout } = useAuth()
+  const [logoutBusy, setLogoutBusy] = useState(false)
+  const [logoutError, setLogoutError] = useState('')
   const [profileOpen, setProfileOpen] = useState(false)
   const profileRef = useRef<HTMLDivElement>(null)
+  async function signOut() {
+    setLogoutBusy(true)
+    setLogoutError('')
+    try { await logout(); setProfileOpen(false) }
+    catch (error) { setLogoutError(error instanceof Error ? error.message : 'Не удалось выйти из аккаунта. Повторите попытку.') }
+    finally { setLogoutBusy(false) }
+  }
 
   useEffect(() => {
     function close(event: MouseEvent) {
@@ -37,7 +47,8 @@ function Header() {
             {profileOpen && <div className="header__profile-menu">
               <div><Avatar url={user.avatarUrl} name={user.displayName} className="header__profile-menu-avatar" eager /><p><strong>{user.displayName}</strong><small>{user.email}</small></p></div>
               <nav><Link to="/app/settings" onClick={() => setProfileOpen(false)}>Настройки профиля</Link></nav>
-              <button type="button" onClick={() => { setProfileOpen(false); void logout() }}>Выйти из аккаунта</button>
+              {logoutError && <p className="header__logout-error" role="alert"><RequestErrorMessage error={logoutError} /></p>}
+              <button type="button" disabled={logoutBusy} onClick={() => void signOut()}>{logoutBusy ? 'Выходим…' : 'Выйти из аккаунта'}</button>
             </div>}
           </div>
         ) : (

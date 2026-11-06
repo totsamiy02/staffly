@@ -1,3 +1,4 @@
+import RequestErrorMessage from '../../component/ui/request-error-message.tsx'
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { authPost, useAuth } from '../../app/auth/auth-context.tsx'
@@ -75,7 +76,7 @@ function VerifyEmailPage() {
         <div className="auth__field"><input type="password" name="confirm-password" aria-label="Повторите пароль" placeholder="Повторите пароль" autoComplete="new-password" value={confirmPassword} onChange={event => setConfirmPassword(event.target.value)} required /></div>
       </div>
       <AuthConsents consentData={consentData} consentTerms={consentTerms} onData={setConsentData} onTerms={setConsentTerms} attempted={attempted} />
-      {error && <p className="auth__error" role="alert">{error}</p>}
+      {error && <p className="auth__error" role="alert"><RequestErrorMessage error={error} /></p>}
       {notice && <p className="auth__notice" role="status">{notice}</p>}
       <button className="auth__submit" type="submit" disabled={busy}>Создать аккаунт</button>
     </form>

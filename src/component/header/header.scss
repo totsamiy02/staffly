@@ -66,6 +66,7 @@
 .header__profile-menu nav a, .header__profile-menu > button { padding: 11px 12px; border-radius: 9px; color: var(--theme-text,#555); cursor: pointer; font-size: 12px; text-align: left; }
 .header__profile-menu nav a:hover, .header__profile-menu > button:hover { background: var(--theme-surface-muted,#f2f2f2); color: var(--theme-text-strong,#111); }
 .header__profile-menu > button { width: calc(100% - 14px); margin: 7px; color: var(--theme-danger,#843f3f); }
+.header__logout-error { margin: 12px 19px; color: var(--theme-danger,#843f3f); font-size: 12px; line-height: 1.5; }
 
 @media (max-width: 600px) {
   .header__container {

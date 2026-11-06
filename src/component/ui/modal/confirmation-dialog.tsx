@@ -1,3 +1,4 @@
+import RequestErrorMessage from '../request-error-message.tsx'
 import { useState, type ReactNode } from 'react'
 import DocumentDialog from './document-dialog.tsx'
 import './confirmation-dialog.scss'
@@ -12,7 +13,7 @@ export default function ConfirmationDialog({ title, description, resource, child
       {description && <p>{description}</p>}
       {children}
       {requiredText && <label className="confirmation-dialog__field"><span>Для подтверждения введите название</span><input autoComplete="off" value={confirmation} disabled={busy} onChange={event => setConfirmation(event.target.value)} /></label>}
-      {error && <p className="form-inline-error" role="alert">{error}</p>}
+      {error && <p className="form-inline-error" role="alert"><RequestErrorMessage error={error} /></p>}
     </div>
     <footer><button type="button" className="app-secondary" disabled={busy} onClick={onClose}>{cancelLabel}</button><button type="button" className={tone === 'danger' ? 'app-danger' : 'app-primary'} disabled={busy || disabled || !!requiredText && confirmation !== requiredText} onClick={onConfirm}>{busy ? pendingLabel : confirmLabel}</button></footer>
   </DocumentDialog>

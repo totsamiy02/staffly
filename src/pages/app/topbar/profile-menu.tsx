@@ -4,6 +4,7 @@ import { Link, useLocation } from 'react-router-dom'
 import type { AuthUser } from '../../../app/auth/auth-context.tsx'
 import type { OrganizationSummary } from '../../../app/organizations/types.ts'
 import Avatar from '../../../component/ui/avatar/avatar.tsx'
+import RequestErrorMessage from '../../../component/ui/request-error-message.tsx'
 
 function ChevronIcon() {
   return <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m6 8 4 4 4-4" /></svg>
@@ -14,13 +15,14 @@ type ProfileMenuProps = {
   organization?: OrganizationSummary
   open: boolean
   busy: boolean
+  error?: string
   onToggle: () => void
   onClose: () => void
   onLogout: () => void
 }
 
 
-export default function ProfileMenu({ user, organization, open, busy, onToggle, onClose, onLogout }: ProfileMenuProps) {
+export default function ProfileMenu({ user, organization, open, busy, error, onToggle, onClose, onLogout }: ProfileMenuProps) {
   const profile = useMemberProfile()
   const location = useLocation()
   const initial = user.displayName.slice(0, 1).toUpperCase()
@@ -33,6 +35,7 @@ export default function ProfileMenu({ user, organization, open, busy, onToggle, 
     {open && <section className="topbar-popover topbar-popover--profile" aria-label="Профиль пользователя">
       <div className="profile-preview">{organization?.viewerMemberId ? <MemberAvatar memberId={organization.viewerMemberId} url={user.avatarUrl} name={user.displayName} className="app-avatar profile-preview__avatar" eager /> : <Avatar url={user.avatarUrl} name={initial} className="app-avatar profile-preview__avatar" eager />}<div><strong>{user.displayName}</strong><span>{user.email}</span>{organization && <small>{organization.name}</small>}</div></div>
       <nav>{organization?.viewerMemberId && profile && <button type="button" className="profile-menu-member" onClick={() => { onClose(); profile.open(organization.viewerMemberId!) }}><span>Мой профиль в организации</span><small>{organization.name} · смены, документы и заявки</small></button>}{organization && <Link to={`/app/organizations/${organization.id}/documents`} state={{ returnTo: location.pathname + location.search }} onClick={onClose}><span>Документы организации</span><small>Доступные папки и файлы</small></Link>}<Link to="/app/settings" state={{ returnTo: location.pathname + location.search }} onClick={onClose}><span>Настройки профиля</span><small>Данные, безопасность и уведомления</small></Link></nav>
+      {error && <p className="form-inline-error" role="alert"><RequestErrorMessage error={error} /></p>}
       <button className="profile-preview__logout" type="button" disabled={busy} onClick={onLogout}>{busy ? 'Выходим…' : 'Выйти из аккаунта'}</button>
     </section>}
   </div>

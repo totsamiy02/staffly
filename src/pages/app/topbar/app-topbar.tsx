@@ -17,6 +17,7 @@ export default function AppTopbar({ organization, notificationOrganizationId }: 
   const [openPanel, setOpenPanel] = useState<'notifications' | 'profile' | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [logoutBusy, setLogoutBusy] = useState(false)
+  const [logoutError, setLogoutError] = useState('')
   const controlsRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => { setOpenPanel(null); setHistoryOpen(false) }, [organizationId])
@@ -37,14 +38,17 @@ export default function AppTopbar({ organization, notificationOrganizationId }: 
   async function signOut() {
     if (!await formSafety.confirm([...formSafety.guards.values()].map(guard => ({ ...guard, saveDraft: undefined })))) return
     setLogoutBusy(true)
-    try { await logout(); navigate('/', { replace: true }) } finally { setLogoutBusy(false) }
+    setLogoutError('')
+    try { await logout(); navigate('/', { replace: true }) }
+    catch (error) { setLogoutError(error instanceof Error ? error.message : 'Не удалось выйти из аккаунта. Повторите попытку.') }
+    finally { setLogoutBusy(false) }
   }
 
   return <HeaderFrame variant={organization ? 'workspace' : 'app'} afterContent={<><NotificationAlerts key={organizationId ?? 'global'} organizationId={organizationId} suppressed={openPanel === 'notifications' || historyOpen} /><PasswordSetupReminder key={user?.id} /></>}>
     {user && <div className="app-topbar__controls" ref={controlsRef}>
       <ThemeToggle />
       <InvitationCenter key={organizationId ?? 'global'} organizationId={organizationId} onHistoryChange={setHistoryOpen} open={openPanel === 'notifications'} onToggle={() => setOpenPanel((current) => current === 'notifications' ? null : 'notifications')} onClose={() => setOpenPanel(null)} />
-      <ProfileMenu user={user} organization={organization} open={openPanel === 'profile'} busy={logoutBusy} onToggle={() => setOpenPanel((current) => current === 'profile' ? null : 'profile')} onClose={() => setOpenPanel(null)} onLogout={() => void signOut()} />
+      <ProfileMenu user={user} organization={organization} open={openPanel === 'profile'} busy={logoutBusy} error={logoutError} onToggle={() => setOpenPanel((current) => current === 'profile' ? null : 'profile')} onClose={() => setOpenPanel(null)} onLogout={() => void signOut()} />
     </div>}
   </HeaderFrame>
 }

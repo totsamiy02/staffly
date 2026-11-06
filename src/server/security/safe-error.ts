@@ -8,3 +8,9 @@ export function safeError(error: unknown) {
   const value = 'code' in error && typeof error.code === 'string' ? error.code : ''
   return { name, ...(codes.has(value) || /^P\d{4}$/.test(value) ? { code: value } : {}) }
 }
+
+export function safeApiError(error: unknown, request: { method: string; route?: { path?: unknown } }, errorId: string) {
+  // A declared route template has no query values, emails or filenames.
+  const route = typeof request.route?.path === 'string' ? request.route.path.slice(0, 200) : 'unmatched'
+  return { errorId, at: new Date().toISOString(), method: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'].includes(request.method) ? request.method : 'OTHER', route, ...safeError(error) }
+}

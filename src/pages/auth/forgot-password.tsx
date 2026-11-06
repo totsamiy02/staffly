@@ -1,3 +1,4 @@
+import RequestErrorMessage from '../../component/ui/request-error-message.tsx'
 import { useState, type FormEvent } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { authPost } from '../../app/auth/auth-context.tsx'
@@ -36,7 +37,7 @@ function ForgotPasswordPage() {
         <p>Это работает и после регистрации через Яндекс, даже если пароля ещё нет. Если вы потеряли доступ и к Яндексу, и к этой почте, сначала восстановите доступ к почтовому ящику.</p>
         <form onSubmit={submit}>
           <div className="auth__field"><input type="email" name="email" autoComplete="email" aria-label="Электронная почта" placeholder="Электронная почта" value={email} onChange={(event) => setEmail(event.target.value)} required /></div>
-          {error && <p className="auth__error" role="alert">{error}</p>}
+          {error && <p className="auth__error" role="alert"><RequestErrorMessage error={error} /></p>}
           <button className="auth__submit" type="submit" disabled={busy}>Отправить код</button>
         </form>
         <Link className="auth__text-button" to={`/auth?mode=login&returnTo=${encodeURIComponent(returnTo)}`}>Вернуться ко входу</Link>
