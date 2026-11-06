@@ -12,7 +12,7 @@ import { ApiError } from '../api-error.ts'
 import { assignSchema, folderSchema, listSchema, metadataSchema, paramsSchema } from './schemas.ts'
 import { MAX_DOCUMENT_BYTES } from './file-validation.ts'
 import { listRequestFiles } from './request-files.ts'
-import { previewDocumentAudience, acknowledgeDocument, assignAcknowledgements, cancelAcknowledgement, deleteDocument, purgeDocumentFile, deleteFolder, deliverDocument, documentMembers, documentProgress, getDocument, listDocuments, personalDocuments, recordDocumentOpened, saveFolder, setFolderPinned, updateDocument, uploadDocument } from './service.ts'
+import { restoreDocument, previewDocumentAudience, acknowledgeDocument, assignAcknowledgements, cancelAcknowledgement, deleteDocument, purgeDocumentFile, deleteFolder, deliverDocument, documentMembers, documentProgress, getDocument, listDocuments, personalDocuments, recordDocumentOpened, saveFolder, setFolderPinned, updateDocument, uploadDocument } from './service.ts'
 const router = Router()
 const mutate = accountRateLimit('documents', 60, 60000)
 const upload = accountRateLimit('document-uploads', 20, 900000)
@@ -38,6 +38,7 @@ router.put(base, upload, body, async (request, response) => {
 })
 router.get(`${base}/:documentId`, async (request, response) => { const { organizationId, documentId } = parse(paramsSchema, request.params); response.json({ document: await getDocument(user(request), organizationId, documentId!) }) })
 router.patch(`${base}/:documentId`, mutate, async (request, response) => { const { organizationId, documentId } = parse(paramsSchema, request.params); await updateDocument(user(request), organizationId, documentId!, parse(metadataSchema, request.body)); response.status(204).end() })
+router.post(`${base}/:documentId/restore`, mutate, async (request, response) => { const { organizationId, documentId } = parse(paramsSchema, request.params); await restoreDocument(user(request), organizationId, documentId!); response.status(204).end() })
 router.delete(`${base}/:documentId`, mutate, async (request, response) => { const { organizationId, documentId } = parse(paramsSchema, request.params); await deleteDocument(user(request), organizationId, documentId!); response.status(204).end() })
 router.post(`${base}/:documentId/content`, mutate, async (request, response) => {
   const { organizationId, documentId } = parse(paramsSchema, request.params)

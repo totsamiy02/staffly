@@ -52,10 +52,10 @@ export default function FormSafetyProvider({ children }: { children: ReactNode }
     const current = pending; pendingRef.current = null; setPending(null); current.resolve(choice)
   }
   const canDraft = pending && !pending.guards.some(item => item.busy) && pending.guards.every(item => !item.dirty || !!item.saveDraft)
-  return <Context.Provider value={{ guards, confirm, notify }}>{children}{pending && <AnimatedOverlay variant="modal" onClose={() => choose('stay')}>{close => <DocumentDialog title="Есть несохранённые изменения" eyebrow="Изменения формы" onClose={close}>
-    <p>{pending.guards.some(item => item.busy) ? 'Запрос ещё выполняется. Если уйти сейчас, операция может завершиться на сервере. Лучше дождаться результата.' : 'Изменения ещё не отправлены на сервер. При выходе без сохранения они будут удалены.'}</p>
+  return <Context.Provider value={{ guards, confirm, notify }}>{children}{pending && <AnimatedOverlay variant="modal" onClose={() => choose('stay')}>{close => <DocumentDialog className="confirmation-dialog" title="Есть несохранённые изменения" eyebrow="Изменения формы" onClose={close}>
+    <div className="confirmation-dialog__content"><p>{pending.guards.some(item => item.busy) ? 'Запрос ещё выполняется. Если уйти сейчас, операция может завершиться на сервере. Лучше дождаться результата.' : 'Изменения ещё не отправлены на сервер. При выходе без сохранения они будут удалены.'}</p>
     {canDraft && <p>Можно оставить черновик на 24 часа в этой вкладке браузера. Он будет удалён при выходе из аккаунта.</p>}
     {error && <p className="form-inline-error" role="alert">{error}</p>}
-    <footer><button className="app-secondary" type="button" onClick={() => choose('stay')}>Продолжить редактирование</button><button className="app-secondary" type="button" onClick={() => choose('discard')}>Выйти без сохранения</button>{canDraft && <button className="app-primary" type="button" onClick={() => choose('draft')}>Сохранить черновик и выйти</button>}</footer>
+    </div><footer><button className="app-secondary" type="button" onClick={() => choose('stay')}>Продолжить редактирование</button><button className="app-secondary" type="button" onClick={() => choose('discard')}>Выйти без сохранения</button>{canDraft && <button className="app-primary" type="button" onClick={() => choose('draft')}>Сохранить черновик и выйти</button>}</footer>
   </DocumentDialog>}</AnimatedOverlay>}</Context.Provider>
 }

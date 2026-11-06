@@ -33,6 +33,7 @@ COPY --from=build --chown=node:node /app/src ./src
 COPY --from=build --chown=node:node /app/dist ./dist
 COPY --from=build --chown=node:node /app/prisma ./prisma
 COPY --from=build --chown=node:node /app/prisma7.config.ts ./prisma7.config.ts
+RUN mkdir -p /var/lib/staffly/storage && chown node:node /var/lib/staffly/storage
 USER node
 EXPOSE 3001
 CMD ["node", "--import", "tsx", "src/server/index.ts"]

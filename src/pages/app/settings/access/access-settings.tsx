@@ -1,3 +1,4 @@
+import ConfirmationDialog from '../../../../component/ui/modal/confirmation-dialog.tsx'
 import { useSubscription } from '../../../../app/subscriptions/context.ts'
 import { LockBadge } from '../../subscriptions/plan-ui.tsx'
 import { accessGroups, accessModules, permissionHints } from './access-presentation.ts'
@@ -83,13 +84,10 @@ export default function AccessSettings({ organization }: { organization: Organiz
       {showAudit && <div className="access-audit">{audit.isLoading ? <p className="access-empty">Загрузка…</p> : audit.isError ? <p className="form-inline-error">{errorText(audit.error)}</p> : !audit.data?.entries.length ? <p className="access-empty">Изменений пока нет.</p> : audit.data.entries.map(entry => <div key={entry.id}><span className="access-audit__dot" /><div><strong>{auditLabels[entry.action] ?? entry.action}</strong>{entry.details.name && <span>{entry.details.name}</span>}</div><time dateTime={entry.createdAt}>{new Date(entry.createdAt).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', year: 'numeric' })}</time></div>)}</div>}
     </section>
 
-    {deleting && <AnimatedOverlay variant="modal" dismissible={!remove.isPending} onClose={() => setDeleting(null)}>{close => <DocumentDialog title={`Удалить роль «${deleting.name}»`} eyebrow="Роли и доступ" className="access-dialog access-delete-dialog" onClose={close} busy={remove.isPending}>
-      <AccessNote><strong>Назначения нужно заменить</strong><p>Сотрудников с этой ролью: {deleting.memberCount}. Выберите роль, которую они получат вместо неё.</p></AccessNote>
+    {deleting && <AnimatedOverlay variant="modal" dismissible={!remove.isPending} onClose={() => setDeleting(null)}>{close => <ConfirmationDialog title="Удалить роль?" resource={deleting.name} eyebrow="Роли и доступ" className="access-dialog" onClose={close} busy={remove.isPending} error={remove.error ? errorText(remove.error) : undefined} disabled={!replacement} confirmLabel="Заменить и удалить" pendingLabel="Удаляем…" onConfirm={() => remove.mutate()}><AccessNote><strong>Назначения нужно заменить</strong><p>Сотрудников с этой ролью: {deleting.memberCount}. Выберите роль, которую они получат вместо неё.</p></AccessNote>
       <label className="access-field"><span>Заменить на</span><Select value={replacement} onChange={event => setReplacement(event.target.value)}><option value="">Выберите роль</option>{allRoles.filter(role => role.id !== deleting.id && role.systemCode !== 'OWNER').map(role => <option key={role.id} value={role.id}>{role.name}</option>)}</Select></label>
       <p className="access-caption">Если роль используется в доступе к документам или событиям, сначала уберите её из их аудитории.</p>
-      {remove.error && <p className="form-inline-error">{errorText(remove.error)}</p>}
-      <footer><button className="app-secondary" disabled={remove.isPending} onClick={close}>Отмена</button><button className="app-danger" disabled={!replacement || remove.isPending} onClick={() => remove.mutate()}><AccessIcon name="trash" />{remove.isPending ? 'Удаляем…' : 'Заменить и удалить'}</button></footer>
-    </DocumentDialog>}</AnimatedOverlay>}
+      </ConfirmationDialog>}</AnimatedOverlay>}
   </div>
 }
 

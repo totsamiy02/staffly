@@ -976,6 +976,7 @@ enum DocumentVisibility {
 }
 
 model DocumentFolder {
+  systemKey String? @map("system_key") @db.VarChar(180)
   audienceRoleIds String[] @default([]) @map("audience_role_ids") @db.Uuid
   audienceMemberIds String[] @default([]) @map("audience_member_ids") @db.Uuid
   inheritAccess Boolean @default(false) @map("inherit_access")
@@ -994,6 +995,7 @@ model DocumentFolder {
   documents Document[]
   pins DocumentFolderPin[]
   @@index([organizationId, parentId])
+  @@unique([organizationId, systemKey])
   @@map("document_folders")
   @@index([organizationId, locationId])
 }

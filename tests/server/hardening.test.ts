@@ -17,10 +17,14 @@ import { drainHttpServer } from '../../src/server/http-drain.ts'
 import { getSmtpOptions } from '../../src/server/mail/transport.ts'
 import { PrismaClient } from '../../src/generated/prisma/client.ts'
 import { SequentialPrismaPg } from '../../src/server/prisma-pg.ts'
+import { syncSubscriptionStorageLimit } from '../../src/server/subscriptions/storage-limit.ts'
 
 it('rejects placeholder secrets, insecure storage and malformed production origins before serving requests', () => {
   const valid = { NODE_ENV: 'production', DB_TIMEZONE: 'UTC', JWT_SECRET: randomBytes(32).toString('hex'), INVITE_CODE_SECRET: randomBytes(32).toString('hex'), METRICS_TOKEN: randomBytes(32).toString('hex'), APP_ORIGIN: 'https://staffly.test', STORAGE_DRIVER: 's3', SMTP_USER: 'test', SMTP_APP_PASSWORD: 'test' }
   assert.doesNotThrow(() => validateProductionConfig(valid))
+  const sharedLocal = { ...valid, STORAGE_DRIVER: 'local', LOCAL_STORAGE_SHARED: 'true', LOCAL_STORAGE_ROOT: '/var/lib/staffly/storage' }
+  assert.doesNotThrow(() => validateProductionConfig(sharedLocal))
+  for (const patch of [{ LOCAL_STORAGE_SHARED: 'false' }, { LOCAL_STORAGE_ROOT: '' }, { LOCAL_STORAGE_ROOT: './storage' }, { LOCAL_STORAGE_ROOT: '/' }]) assert.throws(() => validateProductionConfig({ ...sharedLocal, ...patch }))
   for (const patch of [
     { JWT_SECRET: 'replace-with-a-random-secret-of-at-least-32-characters' }, { JWT_SECRET: 'x'.repeat(64) }, { INVITE_CODE_SECRET: '' }, { METRICS_TOKEN: valid.JWT_SECRET },
     { APP_ORIGIN: 'http://staffly.test' }, { APP_ORIGIN: 'https://staffly.test/app' }, { APP_ORIGIN: 'https://staffly.test/' }, { APP_ORIGIN: 'https://user:pass@staffly.test' },
@@ -117,6 +121,12 @@ it('runs real migrations as a schema owner, grants runtime CRUD and denies DDL, 
     for (const sql of ['CREATE TABLE public.forbidden (id int)', 'ALTER TABLE public.users ADD COLUMN forbidden int', 'DROP TABLE public.users CASCADE', 'TRUNCATE public.users CASCADE', 'DELETE FROM public._prisma_migrations', 'CREATE ROLE forbidden', 'SET ROLE staffly_migrator', 'UPDATE organization_resource_budgets SET storage_limit_bytes=999999999999', 'UPDATE organization_resource_budgets SET storage_bytes=0', 'UPDATE organization_resource_budgets SET email_queue_limit=100000', 'DELETE FROM organization_resource_budgets']) await assert.rejects(app.query(sql), { code: '42501' })
     // Exercise quota triggers with the actual restricted runtime role as well.
     const org = await client.organization.create({ data: { name: 'Runtime quotas', timezone: 'Europe/Moscow', createdByUserId: id } })
+    await client.$transaction(async tx => {
+      await tx.organizationSubscription.update({ where: { organizationId: org.id }, data: { plan: 'BUSINESS', periodStart: new Date(), periodEnd: new Date(Date.now()+86400000) } })
+      await syncSubscriptionStorageLimit(tx,org.id)
+    })
+    assert.equal(Number((await client.organizationResourceBudget.findUniqueOrThrow({where:{organizationId:org.id}})).storageLimitBytes),10*1024**3)
+    await assert.rejects(app.query('UPDATE organization_resource_budgets SET storage_limit_bytes=999999999999'),{code:'42501'})
     await migrated.query('UPDATE organization_resource_budgets SET storage_limit_bytes=12,email_queue_limit=1 WHERE organization_id=$1', [org.id])
     const fileData = { organizationId: org.id, uploadedByUserId: id, purpose: 'DOCUMENT' as const, size: 12, mimeType: 'text/plain', checksumSha256: '0'.repeat(64) }
     const file = await client.storedFile.create({ data: { ...fileData, objectKey: `runtime/${randomUUID()}` } })

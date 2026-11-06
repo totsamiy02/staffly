@@ -3,8 +3,9 @@ import { after, before, it } from 'node:test'
 import { randomUUID } from 'node:crypto'
 import { prisma } from '../../src/server/db.ts'
 import { createBusinessOrganization } from '../support/business-organization.ts'
-import { createRequestType } from '../../src/server/requests/type-service.ts'
+import { createRequestType, deleteRequestType } from '../../src/server/requests/type-service.ts'
 import { createRequest, submitRequest } from '../../src/server/requests/request-submission.ts'
+import { resolveRequest, cancelRequest } from '../../src/server/requests/request-transitions.ts'
 import { addRequestAttachment, deleteRequestAttachment, downloadRequestAttachment } from '../../src/server/requests/attachment-service.ts'
 import { listRequestFiles } from '../../src/server/documents/request-files.ts'
 import { organizationResources } from '../../src/server/resources/quotas.ts'
@@ -39,6 +40,7 @@ it('shows original request files automatically, preserves source permissions and
   for (const result of [owner, self, admin]) { assert.equal(result.pagination.total, 1); assert.equal(result.totalBytes, pdf.length); assert.equal(result.files[0].fileName, 'расходы.pdf'); assert.ok(result.files[0].downloadPath.endsWith(`?locationId=${point}`)) }
   assert.equal((await list(1, 'расходы')).pagination.total, 1)
   assert.equal((await list(1, '%')).pagination.total, 0, 'Search escapes SQL wildcards')
+  assert.equal(owner.files[0].canDelete, false); assert.equal(self.files[0].canDelete, true); assert.equal(admin.files[0].canDelete, false)
   const file = self.files[0]
   assert.deepEqual((await downloadRequestAttachment(users[1], org, r.id, file.id)).contents, pdf)
   assert.equal((await organizationResources(users[0], org)).storage.usedBytes, before.storage.usedBytes)
@@ -99,4 +101,39 @@ it('lists accessible files across points and scopes each source download to its 
   await assert.rejects(locationContext.run({ organizationId: org, locationId: point }, () => downloadRequestAttachment(users[0], org, request.id, result.files[0].id)), code('REQUEST_NOT_FOUND'))
   const download = await locationContext.run({ organizationId: org, locationId: second.id }, () => downloadRequestAttachment(users[0], org, request.id, result.files[0].id))
   assert.deepEqual(download.contents, pdf)
+})
+
+it('includes required file fields from custom workflows and preserves attachments after approval and type deletion', async () => {
+  const custom = await createRequestType(users[0], org, { name: 'Пользовательская заявка с файлом', dateMode: 'NONE', requiresComment: false, allowsAttachments: true,
+    definition: definitionOf({ fields: [{ key: 'proof', label: 'Подтверждение', kind: 'FILE', required: true }] }) })
+  const request = await createRequest(users[1], org, { requestTypeId: custom.id, draft: true })
+  await assert.rejects(submitRequest(users[1], org, request.id), code('FILE_REQUIRED'))
+  const attachment = await addRequestAttachment(users[1], org, request.id, pdf, 'application/pdf', 'custom-field.pdf')
+  await submitRequest(users[1], org, request.id)
+  await resolveRequest(users[0], org, request.id, 'APPROVED', null)
+  await deleteRequestType(users[0], org, custom.id)
+  const usage = (await organizationResources(users[0], org)).storage.usedBytes
+  const folderCount = await prisma.documentFolder.count({ where: { organizationId: org } })
+  const result = await list(0, 'custom-field')
+  assert.equal(result.pagination.total, 1); assert.equal(result.totalBytes, pdf.length)
+  assert.equal(result.files[0].id, attachment.id)
+  assert.equal(result.files[0].typeName, custom.name)
+  assert.equal(result.files[0].status, 'APPROVED'); assert.equal(result.files[0].canDelete, false)
+  assert.equal((await list(1, custom.name)).files.filter(file => file.id === attachment.id).length, 1)
+  assert.deepEqual((await downloadRequestAttachment(users[1], org, request.id, attachment.id)).contents, pdf)
+  assert.equal((await organizationResources(users[0], org)).storage.usedBytes, usage)
+  assert.equal(await prisma.documentFolder.count({ where: { organizationId: org } }), folderCount)
+  assert.equal(await prisma.document.count({ where: { organizationId: org } }), 0)
+})
+
+it('includes built-in request attachments and keeps their source visible after cancellation', async () => {
+  const builtin = await prisma.requestType.findFirstOrThrow({ where: { organizationId: org, systemCode: 'OTHER' } })
+  const request = await createRequest(users[1], org, { requestTypeId: builtin.id, comment: 'Системная заявка', draft: true })
+  const attachment = await addRequestAttachment(users[1], org, request.id, pdf, 'application/pdf', 'builtin-proof.pdf')
+  await submitRequest(users[1], org, request.id)
+  await cancelRequest(users[1], org, request.id)
+  const result = await list(0, 'builtin-proof')
+  assert.equal(result.pagination.total, 1)
+  assert.equal(result.files[0].id, attachment.id); assert.equal(result.files[0].typeName, builtin.name)
+  assert.equal(result.files[0].status, 'CANCELLED')
 })

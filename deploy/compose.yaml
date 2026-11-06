@@ -12,9 +12,9 @@ x-app: &app
     SMTP_PORT: ${SMTP_PORT:-465}
     SMTP_USER: ${SMTP_USER:?Set SMTP_USER}
     SMTP_APP_PASSWORD: ${SMTP_APP_PASSWORD:?Set SMTP_APP_PASSWORD}
-    S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:?Set S3_ACCESS_KEY_ID}
-    S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?Set S3_SECRET_ACCESS_KEY}
-    S3_BUCKET: ${S3_BUCKET:?Set S3_BUCKET}
+    S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+    S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+    S3_BUCKET: ${S3_BUCKET:-}
     S3_REGION: ${S3_REGION:-us-east-1}
     METRICS_TOKEN: ${METRICS_TOKEN:?Set METRICS_TOKEN}
     YANDEX_CLIENT_ID: ${YANDEX_CLIENT_ID:-}
@@ -25,8 +25,10 @@ x-app: &app
     PORT: '3001'
     RUN_BACKGROUND_WORKERS: 'false'
     API_WARMUP: 'true'
-    TRUST_PROXY: 172.30.40.10/32
-    STORAGE_DRIVER: s3
+    TRUST_PROXY: ${EDGE_INTERNAL_IP:-172.30.40.10}/32
+    STORAGE_DRIVER: ${STORAGE_DRIVER:-s3}
+    LOCAL_STORAGE_SHARED: ${LOCAL_STORAGE_SHARED:-false}
+    LOCAL_STORAGE_ROOT: /var/lib/staffly/storage
     FILE_PROCESSOR_SOCKET: /run/file-processor/processor.sock
     S3_ENDPOINT: ${S3_ENDPOINT:-}
     S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-false}
@@ -138,7 +140,13 @@ services:
   edge:
     build: {context: .., target: edge}
     image: ${EDGE_IMAGE:-staffly-edge:local}
-    ports: ['${BIND_ADDRESS:-127.0.0.1}:443:443']
+    user: nginx
+    read_only: true
+    tmpfs: ['/tmp:size=16m,mode=1777', '/run:size=1m,mode=1777', '/var/cache/nginx:size=128m,mode=1777']
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    sysctls: {net.ipv4.ip_unprivileged_port_start: '0'}
+    ports: ['${BIND_ADDRESS:-127.0.0.1}:${HTTPS_PORT:-443}:443']
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
       - ./proxy.conf:/etc/nginx/staffly-proxy.conf:ro
@@ -152,9 +160,9 @@ services:
       api4: {condition: service_healthy}
     restart: unless-stopped
     networks:
-      backend: {ipv4_address: 172.30.40.10}
+      backend: {ipv4_address: '${EDGE_INTERNAL_IP:-172.30.40.10}'}
 networks:
-  backend: {ipam: {config: [{subnet: 172.30.40.0/24}]}}
+  backend: {ipam: {config: [{subnet: '${BACKEND_SUBNET:-172.30.40.0/24}'}]}}
 volumes:
   postgres:
   file-processing-socket:

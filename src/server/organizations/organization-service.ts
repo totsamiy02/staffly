@@ -1,6 +1,7 @@
 import { recordSecurityEvent } from '../security/journal.ts'
 import { requireCapacity, subscriptionSnapshot } from '../subscriptions/access.ts'
-import { effectiveSubscription, plans, TRIAL_DAYS } from '../../app/subscriptions/plans.ts'
+import { effectiveSubscription, TRIAL_DAYS } from '../../app/subscriptions/plans.ts'
+import { syncSubscriptionStorageLimit } from '../subscriptions/storage-limit.ts'
 import { hasPermission, requirePermission, ensureAccessRoles, locationsFor } from './access/access.ts'
 import { locationMemberWhere, scopedLocationId } from './location-context.ts'
 import { listNotificationHistory } from './notification-service.ts'
@@ -22,7 +23,7 @@ export async function createOrganization(userId: string, input: CreateOrganizati
     if (input.initialPlan === 'TRIAL') {
       const now = new Date(), until = new Date(+now + TRIAL_DAYS * 86400000)
       await tx.organizationSubscription.update({ where: { organizationId: organization.id }, data: { plan: 'BUSINESS', periodStart: now, periodEnd: until, trialStartedAt: now, trialEndsAt: until } })
-      await tx.organizationResourceBudget.update({ where: { organizationId: organization.id }, data: { storageLimitBytes: plans.BUSINESS.storageBytes } })
+      await syncSubscriptionStorageLimit(tx, organization.id)
     }
     await ensureAccessRoles(tx, organization.id)
     const owner = await tx.organizationMember.create({ data: { organizationId: organization.id, userId, role: 'OWNER' } })
@@ -36,7 +37,7 @@ export async function createOrganization(userId: string, input: CreateOrganizati
       locations.push({ ...location, role: 'OWNER' as const })
     }
     await seedSystemRequestTypes(tx, organization.id)
-    await tx.documentFolder.createMany({ data: [{ organizationId: organization.id, name: 'Главная' }, { organizationId: organization.id, name: 'Документы сотрудников' }] })
+    await tx.documentFolder.createMany({ data: [{ organizationId: organization.id, name: 'Главная' }, { organizationId: organization.id, name: 'Документы сотрудников', systemKey: 'employees:shared' }] })
     return { ...organization, logoUrl: null, role: 'OWNER' as const, organizationRole: 'OWNER' as const, locations, locationId: locations[0].id, memberCount: 1 }
   })
 }

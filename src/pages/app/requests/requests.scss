@@ -126,3 +126,5 @@
 .staffing-response { display: flex; align-items: center; gap: 12px; padding: 12px 0; color: var(--theme-text-strong,#333); text-decoration: none; border-bottom: 1px solid var(--theme-border,#e5e5e5); > span:nth-child(2) { display: grid; gap: 4px; flex: 1; } small { color: var(--theme-muted,#777); font-size: 11px; } }
 .request-card .location-badge { width: fit-content; }
 .request-detail-block > label { display: grid; gap: 8px; margin-bottom: 12px; font-size: 12px; textarea { border: 1px solid var(--theme-border,#d7d7d7); border-radius: 10px; padding: 12px; font: inherit; } }
+
+.request-removed-attachments { display: grid; gap: 8px; margin-top: 12px; p { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; color: var(--theme-muted,#777); font-size: 12px; overflow-wrap: anywhere; } span { color: var(--theme-danger,#b83e43); font-weight: 600; } }

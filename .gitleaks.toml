@@ -1,0 +1,13 @@
+title = "Staffly secret scanning"
+
+[extend]
+useDefault = true
+
+# The generic rule spans an empty key and the next literal template setting.
+# Match only this exact example; real credentials and other files stay scanned.
+[[allowlists]]
+description = "Empty S3 key followed by the literal example bucket"
+condition = "AND"
+paths = ['''(^|/)deploy/\.env\.example$''']
+regexTarget = "match"
+regexes = ['''(?m)^S3_SECRET_ACCESS_KEY=\r?\nS3_BUCKET=staffly-private$''']

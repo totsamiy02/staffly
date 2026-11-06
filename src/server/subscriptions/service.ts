@@ -1,5 +1,6 @@
 import { prisma } from '../db.ts'
 import { syncSubscriptionNotices } from './notifications.ts'
+import { syncSubscriptionStorageLimit } from './storage-limit.ts'
 import { ApiError } from '../api-error.ts'
 import { getMembership } from '../organizations/access/permissions.ts'
 import { effectiveSubscription, nextMonth, plans, PLAN_VERSION, TRIAL_DAYS, type PlanId, type PaidPlanId } from '../../app/subscriptions/plans.ts'
@@ -42,7 +43,7 @@ export async function startBusinessTrial(userId: string, organizationId: string)
     if (!effectiveSubscription(record).trialAvailable) throw new ApiError(409, 'SUBSCRIPTION_TRIAL_UNAVAILABLE', 'Пробный период можно включить на бесплатном тарифе или после завершения подписки.')
     const now = new Date(), until = new Date(+now + TRIAL_DAYS * 86400000)
     const saved = await db.organizationSubscription.update({ where: { organizationId }, data: { plan: 'BUSINESS', version: PLAN_VERSION, periodStart: now, periodEnd: until, trialStartedAt: now, trialEndsAt: until, nextPlan: null, nextStartsAt: null, nextEndsAt: null, revision: { increment: 1 } } })
-    await db.organizationResourceBudget.update({ where: { organizationId }, data: { storageLimitBytes: plans.BUSINESS.storageBytes } })
+    await syncSubscriptionStorageLimit(db, organizationId)
     await db.accessAudit.create({ data: { organizationId, actorMemberId: actor.id, action: 'SUBSCRIPTION_TRIAL_STARTED', details: { until: until.toISOString() } } })
     await syncSubscriptionNotices(userId, organizationId, undefined, true, db)
     return effectiveSubscription(saved)
@@ -84,7 +85,7 @@ export async function activateTestPurchase(userId: string, organizationId: strin
     if (order.kind === 'DOWNGRADE') await fits(db, organizationId, plan)
     const saved = await db.organizationSubscription.update({ where: { organizationId }, data: { version: order.version, revision: { increment: 1 }, ...(order.kind === 'DOWNGRADE' ? { nextPlan: plan, nextStartsAt: order.periodStart, nextEndsAt: order.periodEnd } : { plan, periodStart: order.kind === 'RENEW' ? record.periodStart : order.periodStart, periodEnd: order.periodEnd, trialEndsAt: null, nextPlan: null, nextStartsAt: null, nextEndsAt: null }) } })
     const snapshot = effectiveSubscription(saved, now)
-    await db.organizationResourceBudget.update({ where: { organizationId }, data: { storageLimitBytes: snapshot.limits.storageBytes } })
+    await syncSubscriptionStorageLimit(db, organizationId)
     const purchased = await db.subscriptionPurchase.update({ where: { id: order.id }, data: { status: 'SUCCEEDED', activatedAt: now, email } })
     await db.accessAudit.create({ data: { organizationId, actorMemberId: (await getMembership(userId, organizationId, db)).id, action: 'SUBSCRIPTION_TEST_PURCHASE', details: { orderId, plan, kind: order.kind, amountMinor: order.amountMinor, mode: 'test' } } })
     await syncSubscriptionNotices(userId, organizationId, undefined, true, db)
@@ -100,7 +101,7 @@ export async function selectFreePlan(userId: string, organizationId: string, imm
     const scheduled = !immediate && current.phase === 'active' && !current.trialEndsAt && record.periodEnd && record.periodEnd > new Date()
     const saved = await db.organizationSubscription.update({ where: { organizationId }, data: { revision: { increment: 1 }, ...(scheduled ? { nextPlan: 'FREE', nextStartsAt: record.periodEnd, nextEndsAt: null } : { plan: 'FREE', periodStart: null, periodEnd: null, trialEndsAt: null, nextPlan: null, nextStartsAt: null, nextEndsAt: null }) } })
     const result = effectiveSubscription(saved)
-    await db.organizationResourceBudget.update({ where: { organizationId }, data: { storageLimitBytes: result.limits.storageBytes } })
+    await syncSubscriptionStorageLimit(db, organizationId)
     return result
   })
 }

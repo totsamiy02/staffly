@@ -1,0 +1,59 @@
+name: Production smoke
+
+on:
+  pull_request:
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - deploy/**
+      - tests/production/**
+      - src/server/production-config.ts
+      - src/server/database-policy.ts
+      - src/server/file-processing/**
+      - src/server/file-preview/**
+      - src/server/storage/**
+      - src/server/schedule/reports/**
+      - src/server/worker*.ts
+      - prisma/**
+      - package*.json
+      - .github/workflows/production.yml
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  production:
+    name: Production containers
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: artifacts/browser-binaries
+      - run: npm run test:production
+      - name: Save container diagnostics
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: production-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            artifacts/tests/**/production-*/report.json
+            artifacts/tests/**/production-*/*.log
+            artifacts/tests/**/production-*/*.png
+          retention-days: 7
+          if-no-files-found: warn

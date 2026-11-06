@@ -30,8 +30,8 @@ export function canReadDocument(actor: DocumentActor, doc: Pick<Document, 'organ
   if (doc.visibility === 'PRIVATE_MEMBER') return doc.targetMemberId === actor.id || docPermission(actor, 'documents.personal.view', doc.locationId)
   return audienceReadable(actor, doc)
 }
-export function folderReadable(actor: DocumentActor, folder: { locationId: string | null; visibility: string; audienceRoleIds?: string[]; audienceMemberIds?: string[]; inheritAccess?: boolean }) {
-  return actor.role === 'OWNER' || docPermission(actor, 'documents.view', folder.locationId) && audienceReadable(actor, folder)
+export function folderReadable(actor: DocumentActor, folder: { locationId: string | null; visibility: string; audienceRoleIds?: string[]; audienceMemberIds?: string[]; inheritAccess?: boolean; systemKey?: string | null }) {
+  return actor.role === 'OWNER' || docPermission(actor, 'documents.view', folder.locationId) && (audienceReadable(actor, folder) || !!folder.systemKey?.startsWith('employee:') && docPermission(actor, 'documents.personal.view', folder.locationId))
 }
 
 function permissionSql(actor: DocumentActor, key: Permission, location: Prisma.Sql) {
@@ -41,10 +41,11 @@ function permissionSql(actor: DocumentActor, key: Permission, location: Prisma.S
 }
 function audienceSql(actor: DocumentActor, alias: string) {
   const d = Prisma.raw(alias)
+  const employeeManager = alias === 'f' ? Prisma.sql`OR (${d}.system_key LIKE 'employee:%' AND ${permissionSql(actor,'documents.personal.view',Prisma.sql`${d}.location_id`)})` : Prisma.empty
   const roleBindings = (actor.accessAssignments ?? []).map(a => Prisma.sql`(${d}.location_id = ${a.locationId}::uuid AND ${a.roleId}::uuid = ANY(${d}.audience_role_ids))`)
   return Prisma.sql`(${d}.inherit_access OR ${d}.visibility = 'ORGANIZATION' OR
     (${d}.visibility = 'SELECTED' AND (${actor.id}::uuid = ANY(${d}.audience_member_ids) OR ${actor.accessRoleId ?? null}::uuid = ANY(${d}.audience_role_ids) ${roleBindings.length ? Prisma.sql`OR ${Prisma.join(roleBindings,' OR ')}` : Prisma.empty})) OR
-    (${d}.visibility = 'ADMINS' AND (CASE WHEN ${d}.location_id IS NULL THEN ${actor.accessSystemCode === 'ADMIN' || !actor.accessConfigured && actor.organizationRole === 'ADMIN'} ELSE ${d}.location_id = ANY(${actor.managedLocationIds ?? []}::uuid[]) END)))`
+    (${d}.visibility = 'ADMINS' AND (CASE WHEN ${d}.location_id IS NULL THEN ${actor.accessSystemCode === 'ADMIN' || !actor.accessConfigured && actor.organizationRole === 'ADMIN'} ELSE ${d}.location_id = ANY(${actor.managedLocationIds ?? []}::uuid[]) END)) ${employeeManager})`
 }
 // The same predicate is used for object reads and notification rows. Ancestors
 // are checked in SQL; no document archive or folder ID deny-list is materialized.

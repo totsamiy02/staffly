@@ -6,7 +6,6 @@ import EmailNotificationSettings from './email-notification-settings.tsx'
 import LoginMethodsSettings from './login-methods-settings.tsx'
 import type { LoginMethods } from '../../../../app/auth/yandex.ts'
 import SegmentedNav from '../../../../component/ui/segmented-nav/segmented-nav.tsx'
-import PersonalDocuments from '../../documents/personal-documents.tsx'
 import { useToastFeedback } from '../../../../component/ui/toast/toast-context.ts'
 import { liveQueryOptions } from '../../../../app/live-query.ts'
 import { useEffect, useState, type FormEvent } from 'react'
@@ -59,9 +58,9 @@ export default function UserSettingsPage() {
   const [message, setMessage] = useState('')
   const profileSafety = useFormSafety({ scope: 'account-profile', value: { firstName, lastName, middleName, phone, bio }, active: profileEditing, busy: profileBusy || imageBusy, extraDirty: avatarDraft.dirty })
   const passwordSafety = useFormSafety({ scope: 'account-password', value: {}, dirty: !!(currentPassword || newPassword || confirmPassword), busy: passwordBusy, onDiscard: () => { setCurrentPassword(''); setNewPassword(''); setConfirmPassword('') } })
-  type Section = 'profile' | 'security' | 'documents' | 'notifications'
+  type Section = 'profile' | 'security' | 'notifications'
   const requestedSection = new URLSearchParams(location.search).get('section')
-  const selectedSection: Section = requestedSection === 'security' || requestedSection === 'documents' || requestedSection === 'notifications' ? requestedSection : 'profile'
+  const selectedSection: Section = requestedSection === 'security' || requestedSection === 'notifications' ? requestedSection : 'profile'
   const [section, setSection] = useState<Section>(selectedSection)
   useEffect(() => { setSection(selectedSection) }, [selectedSection])
   useEffect(() => { setProfileEditing(false); setProfileError(''); resetAvatar() }, [selectedSection, resetAvatar, user?.id])
@@ -134,10 +133,9 @@ export default function UserSettingsPage() {
   return <div className="app-page"><AppTopbar /><main className="account-settings-page">
     <Link className="app-back" to={returnTo}>{returnLabel}</Link>
     <header><p className="app-eyebrow">Личный профиль</p><h1>Настройки</h1><p>Личные данные, безопасность и настройки вашего аккаунта.</p></header>
-    <SegmentedNav label="Разделы настроек"><button className={section === 'profile' ? 'active' : ''} onClick={() => selectSection('profile')}>Профиль</button><button className={section === 'security' ? 'active' : ''} onClick={() => selectSection('security')}>Безопасность</button><button className={section === 'documents' ? 'active' : ''} onClick={() => selectSection('documents')}>Документы</button><button className={section === 'notifications' ? 'active' : ''} onClick={() => selectSection('notifications')}>Уведомления</button></SegmentedNav>
+    <SegmentedNav label="Разделы настроек"><button className={section === 'profile' ? 'active' : ''} onClick={() => selectSection('profile')}>Профиль</button><button className={section === 'security' ? 'active' : ''} onClick={() => selectSection('security')}>Безопасность</button><button className={section === 'notifications' ? 'active' : ''} onClick={() => selectSection('notifications')}>Уведомления</button></SegmentedNav>
     <div className="account-settings-content">
     {section === 'notifications' && <EmailNotificationSettings />}
-    {section === 'documents' && <PersonalDocuments organizationId={organizationId} />}
     {section === 'profile' && <section className={`profile-editor${profileEditing ? '' : ' profile-editor--view'}`}>
       <aside><ImageUpload floatingControls endpoint="/profile/avatar" imageUrl={avatarDraft.url} onDraftChange={avatarDraft.change} name={user?.displayName ?? initial} avatarClassName="account-profile-card__avatar" disabled={!profileEditing || profileBusy} onBusyChange={setImageBusy} onChange={(avatarUrl) => { if (user) updateUser({ ...user, avatarUrl }); void queryClient.invalidateQueries({ queryKey: ['organization-members'] }) }} onMessage={setMessage} onError={setProfileError} /><div className="profile-editor__identity"><span>Ваша учетная запись</span><h2>{user?.displayName}</h2><p>{user?.email}</p>{organization && <div className="profile-editor__organization-role"><RoleBadge role={organization.organizationRole ?? organization.role} /><span>в «{organization.name}»</span></div>}</div></aside>
       <form onSubmit={saveProfile} noValidate>

@@ -1,3 +1,4 @@
+import ConfirmationDialog from '../../../../component/ui/modal/confirmation-dialog.tsx'
 import HelpTip from '../../../../component/ui/help-tip/help-tip.tsx'
 import { useFormSafety } from '../../../../app/forms/use-form-safety.ts'
 import FormDraftNotice from '../../../../component/ui/form-draft-notice.tsx'
@@ -90,6 +91,6 @@ export default function RequestTypesSettings({ organization, onMessage, onError 
         <footer><button type="button" className="app-secondary" disabled={busy} onClick={close}>Отмена</button><button className="app-primary" disabled={busy}>{busy ? 'Сохраняем…' : editing ? 'Сохранить изменения' : 'Создать тип'}</button></footer>
       </form>
     </DocumentDialog>}</AnimatedOverlay>}
-    {deleting && <AnimatedOverlay variant="modal" dismissible={!busy} onClose={() => setDeleting(null)}>{close => <DocumentDialog title={`Удалить тип «${deleting.name}»?`} eyebrow="Заявки" className="request-form-dialog request-type-delete-dialog" busy={busy} onClose={close}><p>Тип исчезнет из настроек и из формы подачи. Ранее созданные заявки, их файлы и история сохранятся; их можно будет обработать.</p><p>Чтобы временно скрыть тип и позже вернуть его, используйте «Отключить подачу».</p>{dialogError && <p className="form-inline-error" role="alert">{dialogError}</p>}<footer><button className="app-secondary" disabled={busy} onClick={close}>Отмена</button><button className="app-primary" disabled={busy} onClick={() => void remove()}>{busy ? 'Удаляем…' : 'Удалить тип'}</button></footer></DocumentDialog>}</AnimatedOverlay>}
+    {deleting && <AnimatedOverlay variant="modal" dismissible={!busy} onClose={() => setDeleting(null)}>{close => <ConfirmationDialog title="Удалить тип заявки?" resource={deleting.name} eyebrow="Заявки" busy={busy} onClose={close} description="Тип исчезнет из формы подачи. Созданные заявки, файлы и история сохранятся." error={dialogError} confirmLabel="Удалить тип" pendingLabel="Удаляем…" onConfirm={() => void remove()}><p>Для временного отключения используйте «Отключить подачу».</p></ConfirmationDialog>}</AnimatedOverlay>}
   </article>
 }

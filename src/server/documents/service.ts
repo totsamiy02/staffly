@@ -1,3 +1,4 @@
+import { assertCustomFolder, employeeFolder } from './system-folders.ts'
 import { documentReadSql, docPermission, canReadDocument, folderReadable, type DocumentActor } from '../access/document-policy.ts'
 export { canReadDocument } from '../access/document-policy.ts'
 import { hasPermission, requirePermission, locationsFor, ensureAccessRoles, auditAccess, type PermissionActor } from '../organizations/access/access.ts'
@@ -38,7 +39,7 @@ async function allowedFolders(tx: Prisma.TransactionClient | typeof prisma, acto
 function accessVisibility(visibility: Document['visibility'], folderId: string | null, folders: Array<{ id: string; parentId: string | null; visibility: string }>) {
   if (visibility !== 'ORGANIZATION') return visibility
   const tree = new Map(folders.map(folder => [folder.id, folder])), seen = new Set<string>()
-  while (folderId && !seen.has(folderId)) { seen.add(folderId); const folder = tree.get(folderId); if (!folder) break; if (folder.visibility === 'ADMINS') return 'ADMINS'; folderId = folder.parentId }
+  while (folderId && !seen.has(folderId)) { seen.add(folderId); const folder = tree.get(folderId); if (!folder) break; if (folder.visibility === 'ADMINS' || folder.visibility === 'SELECTED') return folder.visibility; folderId = folder.parentId }
   return visibility
 }
 function metadataLocation(org: string, data: { pointId?: string | null; shared?: boolean }) { return data.pointId !== undefined ? data.pointId : data.shared ? null : scopedLocationId(org) ?? null }
@@ -54,7 +55,7 @@ const acknowledgementInclude = { assignedBy: { include: { user: { select: { emai
 function ackDto(item: DocumentAcknowledgement & { assignedBy?: { user: { email: string; firstName: string | null; lastName: string | null; middleName: string | null } } }, timezone: string) { return { id: item.id, assignedBy: item.assignedBy ? memberName(item.assignedBy.user) : null, assignedAt: item.assignedAt, openedAt: item.openedAt, acknowledgedAt: item.acknowledgedAt, cancelledAt: item.cancelledAt, deadline: item.deadline?.toISOString().slice(0, 10) ?? null, comment: item.comment, ...acknowledgementState(item, timezone) } }
 function documentDto(item: Prisma.DocumentGetPayload<{ include: typeof include }> & { acknowledgements: Array<DocumentAcknowledgement & { assignedBy?: { user: { email: string; firstName: string | null; lastName: string | null; middleName: string | null } } }> }, actor: DocumentActor, timezone: string, folders: Array<{ id: string; parentId: string | null; visibility: string }> = []) {
   const own = item.acknowledgements.find(ack => ack.memberId === actor.id)
-  const result = { id: item.id, organizationId: item.organizationId, locationId: item.locationId, locationName: item.location?.name ?? null, canManage: documentManager(actor, item.locationId), canEdit: docPermission(actor, 'documents.edit', item.locationId), canDelete: docPermission(actor, 'documents.delete', item.locationId), canAssign: docPermission(actor, 'documents.assign', item.locationId), canControl: docPermission(actor, 'documents.control', item.locationId), canDownload: !item.storedFile.purgedAt && !item.storedFile.pendingDeletionAt && docPermission(actor, 'documents.download', item.locationId), fileRemovedAt: item.storedFile.purgedAt, filePurgePending: !!item.storedFile.pendingDeletionAt, canPurge: !!item.deletedAt && !item.storedFile.purgedAt && !item.storedFile.pendingDeletionAt && docPermission(actor, 'documents.delete', item.locationId), canAccess: docPermission(actor, 'documents.access', item.locationId), canUpload: docPermission(actor, 'documents.upload', item.locationId), audienceRoleIds: item.audienceRoleIds, audienceMemberIds: item.audienceMemberIds, inheritAccess: item.inheritAccess, folderId: item.folderId, displayName: item.displayName, fileName: item.fileName, visibility: item.visibility, accessVisibility: accessVisibility(item.visibility, item.folderId, folders), targetMemberId: item.targetMemberId, createdAt: item.createdAt, updatedAt: item.updatedAt, deletedAt: item.deletedAt, mimeType: item.storedFile.mimeType, size: item.storedFile.size, previewable: !item.storedFile.purgedAt && !item.storedFile.pendingDeletionAt && supportsPreview(item.storedFile.mimeType, item.storedFile.size), uploadedBy: { name: memberName(item.uploadedBy.user), avatarUrl: mediaUrl(item.uploadedBy.user.avatarFileId) }, targetMember: item.targetMember ? { id: item.targetMember.id, name: memberName(item.targetMember.user), avatarUrl: mediaUrl(item.targetMember.user.avatarFileId), former: Boolean(item.targetMember.leftAt) } : null, acknowledgement: own ? ackDto(own, timezone) : null }
+  const result = { id: item.id, organizationId: item.organizationId, locationId: item.locationId, locationName: item.location?.name ?? null, canManage: documentManager(actor, item.locationId), canEdit: docPermission(actor, 'documents.edit', item.locationId), canDelete: docPermission(actor, 'documents.delete', item.locationId), canAssign: docPermission(actor, 'documents.assign', item.locationId), canControl: docPermission(actor, 'documents.control', item.locationId), canDownload: !item.storedFile.purgedAt && !item.storedFile.pendingDeletionAt && docPermission(actor, 'documents.download', item.locationId), fileRemovedAt: item.storedFile.purgedAt, filePurgePending: !!item.storedFile.pendingDeletionAt, canRestore: !!item.deletedAt && !item.storedFile.purgedAt && !item.storedFile.pendingDeletionAt && docPermission(actor, 'documents.delete', item.locationId), canPurge: !!item.deletedAt && !item.storedFile.purgedAt && !item.storedFile.pendingDeletionAt && docPermission(actor, 'documents.delete', item.locationId), canAccess: docPermission(actor, 'documents.access', item.locationId), canUpload: docPermission(actor, 'documents.upload', item.locationId), audienceRoleIds: item.audienceRoleIds, audienceMemberIds: item.audienceMemberIds, inheritAccess: item.inheritAccess, folderId: item.folderId, displayName: item.displayName, fileName: item.fileName, visibility: item.visibility, accessVisibility: accessVisibility(item.visibility, item.folderId, folders), targetMemberId: item.targetMemberId, createdAt: item.createdAt, updatedAt: item.updatedAt, deletedAt: item.deletedAt, mimeType: item.storedFile.mimeType, size: item.storedFile.size, previewable: !item.storedFile.purgedAt && !item.storedFile.pendingDeletionAt && supportsPreview(item.storedFile.mimeType, item.storedFile.size), uploadedBy: { name: memberName(item.uploadedBy.user), avatarUrl: mediaUrl(item.uploadedBy.user.avatarFileId) }, targetMember: item.targetMember ? { id: item.targetMember.id, name: memberName(item.targetMember.user), avatarUrl: mediaUrl(item.targetMember.user.avatarFileId), former: Boolean(item.targetMember.leftAt) } : null, acknowledgement: own ? ackDto(own, timezone) : null }
   if (!docPermission(actor, 'documents.control', item.locationId)) return result
   const active = item.acknowledgements.filter(ack => !ack.cancelledAt)
   return { ...result, progress: { total: active.length, acknowledged: active.filter(ack => ack.acknowledgedAt).length, unopened: active.filter(ack => !ack.openedAt && !ack.acknowledgedAt).length, opened: active.filter(ack => ack.openedAt && !ack.acknowledgedAt).length, overdue: active.filter(ack => acknowledgementState(ack, timezone).overdue).length, cancelled: item.acknowledgements.length - active.length } }
@@ -115,7 +116,7 @@ export async function listDocuments(userId: string, organizationId: string, opti
   if (options.scope === 'mine') { where.visibility = 'PRIVATE_MEMBER'; where.targetMemberId = actor.id }
   else if (options.scope === 'personal') { where.visibility = 'PRIVATE_MEMBER'; where.targetMemberId = options.targetMemberId ?? (manager ? undefined : actor.id) }
   else if (options.targetMemberId) { where.visibility = 'PRIVATE_MEMBER'; where.targetMemberId = options.targetMemberId }
-  else if (!manager && !options.visibility && options.scope === 'workspace') where.visibility = {not:'PRIVATE_MEMBER'}
+
 
   if (options.fileType) {
     const types = { pdf: ['application/pdf'], office: ['application/msword', 'application/vnd.ms-excel', 'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'], image: ['image/jpeg', 'image/png', 'image/webp'], text: ['text/plain', 'text/csv', 'text/markdown'] }
@@ -130,13 +131,13 @@ export async function listDocuments(userId: string, organizationId: string, opti
   const pins = await prisma.documentFolderPin.findMany({ where: { userId, folder: { organizationId } }, select: { folderId: true } })
   const pinnedIds = new Set(pins.map(pin => pin.folderId))
   // Counts use the same library permissions, never private files visible only in another scope.
-  const grouped = await prisma.document.groupBy({ by: ['folderId'], where: { organizationId, AND: [libraryWhere(actor), visibleWhere(actor), { folderId: { in: folderIds } }], deletedAt: null, ...(!manager ? {visibility:{not:'PRIVATE_MEMBER' as const}} : {}), folderId: { not: null } }, _count: { _all: true } })
+  const grouped = await prisma.document.groupBy({ by: ['folderId'], where: { organizationId, AND: [libraryWhere(actor), visibleWhere(actor), { folderId: { in: folderIds } }], deletedAt: null, folderId: { not: null } }, _count: { _all: true } })
   const counts = new Map<string, number>(), parents = new Map(allFolders.map(folder => [folder.id, folder.parentId]))
   for (const group of grouped) {
     let id = group.folderId; const seen = new Set<string>()
     while (id && !seen.has(id)) { seen.add(id); counts.set(id, (counts.get(id) ?? 0) + group._count._all); id = parents.get(id) ?? null }
   }
-  return { documents: items.map(item => documentDto(item, actor, actor.organization.timezone, permittedFolders)), folders: allFolders.map(folder => ({ ...folder, accessVisibility: accessVisibility(folder.visibility, folder.parentId, permittedFolders), locationName: folder.location?.name ?? null, canManage: documentManager(actor, folder.locationId), canEdit:docPermission(actor,'documents.edit',folder.locationId),canDelete:docPermission(actor,'documents.delete',folder.locationId),canAccess:docPermission(actor,'documents.access',folder.locationId), pinned: pinnedIds.has(folder.id), documentCount: counts.get(folder.id) ?? 0 })), uploadMaxBytes: MAX_DOCUMENT_BYTES, pagination: { page: options.page, pageSize: options.pageSize, total, pages: Math.max(1, Math.ceil(total / options.pageSize)) } }
+  return { documents: items.map(item => documentDto(item, actor, actor.organization.timezone, permittedFolders)), folders: allFolders.map(folder => ({ ...folder, accessVisibility: accessVisibility(folder.visibility, folder.parentId, permittedFolders), locationName: folder.location?.name ?? null, canManage: documentManager(actor, folder.locationId), canEdit:!folder.systemKey && docPermission(actor,'documents.edit',folder.locationId),canDelete:!folder.systemKey && docPermission(actor,'documents.delete',folder.locationId),canAccess:docPermission(actor,'documents.access',folder.locationId), pinned: pinnedIds.has(folder.id), documentCount: counts.get(folder.id) ?? 0 })), uploadMaxBytes: MAX_DOCUMENT_BYTES, pagination: { page: options.page, pageSize: options.pageSize, total, pages: Math.max(1, Math.ceil(total / options.pageSize)) } }
 }
 export async function getDocument(userId: string, organizationId: string, documentId: string) {
   return transaction(userId, organizationId, async (tx, actor) => {
@@ -154,13 +155,9 @@ export async function uploadDocument(userId: string, organizationId: string, inp
     return await transaction(userId, organizationId, async (tx, current) => {
        assertDocumentManager(current, metadataLocation(organizationId, data), 'documents.upload'); if (data.visibility === 'PRIVATE_MEMBER') assertDocumentManager(current, metadataLocation(organizationId,data),'documents.personal.edit'); await validateMetadata(tx, organizationId, data); if (data.folderId && !await folderAncestorsReadable(tx,current,data.folderId)) throw new ApiError(404,'FOLDER_NOT_FOUND','Папка не найдена.')
       if (data.visibility === 'PRIVATE_MEMBER' && data.targetMemberId && !data.folderId) {
-        let root = await tx.documentFolder.findFirst({ where: { organizationId, locationId: metadataLocation(organizationId, data), parentId: null, name: 'Документы сотрудников' } })
-        if (!root) root = await tx.documentFolder.create({ data: { organizationId, locationId: metadataLocation(organizationId, data), name: 'Документы сотрудников' } })
-        const employee = await tx.organizationMember.findFirstOrThrow({ where: { organizationId, id: data.targetMemberId }, include: { user: { select: { email: true, firstName: true, lastName: true, middleName: true } } } })
-        const employeeName = memberName(employee.user)
-        let employeeFolder = await tx.documentFolder.findFirst({ where: { organizationId, locationId: root.locationId, parentId: root.id, name: employeeName } })
-        if (!employeeFolder) employeeFolder = await tx.documentFolder.create({ data: { organizationId, locationId: root.locationId, parentId: root.id, name: employeeName } })
-        data = { ...data, folderId: employeeFolder.id }
+        const folder = await employeeFolder(tx, organizationId, metadataLocation(organizationId, data), data.targetMemberId)
+        data = { ...data, folderId: folder.id }
+        await validateMetadata(tx, organizationId, data)
       }
       await tx.storedFile.update({ where: { id: staged.id }, data: { pendingDeletionAt: null } })
       const { shared: _shared, pointId: _pointId, ...metadata } = data
@@ -199,6 +196,18 @@ export async function deleteDocument(userId: string, organizationId: string, doc
     await tx.documentAcknowledgement.updateMany({ where: { documentId, cancelledAt: null, acknowledgedAt: null }, data: { cancelledAt: now } })
     await tx.document.update({ where: { id: documentId }, data: { deletedAt: now } })
     // Bytes and file binding remain retained for manager history. Cleanup is separate.
+  })
+}
+export async function restoreDocument(userId: string, organizationId: string, documentId: string) {
+  return transaction(userId, organizationId, async (tx, actor) => {
+    const doc = await accessible(tx, actor, documentId)
+    assertDocumentManager(actor, doc.locationId, 'documents.delete')
+    const file = await tx.storedFile.findUniqueOrThrow({ where: { id: doc.storedFileId } })
+    if (file.purgedAt || file.pendingDeletionAt) throw new ApiError(409, 'DOCUMENT_FILE_REMOVED', 'Файл уже удалён или поставлен на очистку. Восстановление невозможно.')
+    if (!doc.deletedAt) return
+    if (doc.folderId && !await folderAncestorsReadable(tx, actor, doc.folderId)) throw new ApiError(409, 'FOLDER_NOT_FOUND', 'Папка документа недоступна.')
+    await tx.document.update({ where: { id: doc.id }, data: { deletedAt: null } })
+    await auditAccess(tx, actor, 'DOCUMENT_RESTORE', { documentId: doc.id })
   })
 }
 /** Remove an archived document's bytes while retaining its metadata and acknowledgement history. */
@@ -296,6 +305,7 @@ export async function setFolderPinned(userId: string, organizationId: string, fo
   return transaction(userId, organizationId, async (tx, actor) => {
     const folder = await tx.documentFolder.findFirst({ where: { id: folderId, organizationId, ...libraryWhere(actor) } })
     if (!folder || !(await allowedFolders(tx, actor)).some(item => item.id === folderId)) throw new ApiError(404, 'FOLDER_NOT_FOUND', 'Папка не найдена.')
+    assertCustomFolder(folder)
     if (!isManager(actor)) {
       const folders = await tx.documentFolder.findMany({ where: { organizationId, ...libraryWhere(actor) }, select: { id: true, parentId: true } })
       const descendants = new Set([folderId])
@@ -321,8 +331,10 @@ export async function saveFolder(userId: string, organizationId: string, folderI
     if (current && (current.visibility !== data.visibility || current.audienceRoleIds.join() !== (data.audienceRoleIds ?? []).join() || current.audienceMemberIds.join() !== (data.audienceMemberIds ?? []).join() || current.inheritAccess !== !!data.inheritAccess)) assertDocumentManager(actor, current.locationId, 'documents.access')
     await validateAudience(tx, organizationId, data)
     const structuralChange = !current || current.name !== data.name || current.parentId !== data.parentId || current.locationId !== locationId
+    if (current?.systemKey && structuralChange) { assertDocumentManager(actor, current.locationId, 'documents.edit'); assertCustomFolder(current) }
     if (current && structuralChange) assertDocumentManager(actor, current.locationId, 'documents.edit')
     assertDocumentManager(actor, locationId, current ? structuralChange || docPermission(actor,'documents.edit',locationId) ? 'documents.edit' : 'documents.access' : 'documents.folders')
+    if (data.parentId && (!current || current.parentId !== data.parentId)) { const parentFolder = await tx.documentFolder.findFirst({ where: { id: data.parentId, organizationId } }); if (parentFolder?.systemKey) assertCustomFolder(parentFolder) }
     if (data.parentId && !await folderAncestorsReadable(tx,actor,data.parentId)) throw new ApiError(404,'FOLDER_NOT_FOUND','Папка не найдена.')
     let parent = data.parentId; const visited = new Set<string>()
     while (parent) {
@@ -361,11 +373,11 @@ export async function saveFolder(userId: string, organizationId: string, folderI
 export async function deleteFolder(userId: string, organizationId: string, folderId: string) {
   return transaction(userId, organizationId, async (tx, actor) => {
 
-    const folder = await tx.documentFolder.findFirst({ where: { id: folderId, organizationId, ...libraryWhere(actor) }, include: { _count: { select: { children: true, documents: { where: { deletedAt: null } } } } } })
+    const folder = await tx.documentFolder.findFirst({ where: { id: folderId, organizationId, ...libraryWhere(actor) }, include: { _count: { select: { children: true, documents: true } } } })
     if (!folder || !await folderAncestorsReadable(tx,actor,folderId)) throw new ApiError(404, 'FOLDER_NOT_FOUND', 'Папка не найдена.')
     assertDocumentManager(actor, folder.locationId, 'documents.delete')
-    if (folder._count.children || folder._count.documents) throw new ApiError(409, 'FOLDER_NOT_EMPTY', 'Сначала переместите документы и вложенные папки.')
-    await tx.document.updateMany({ where: { folderId, organizationId }, data: { folderId: null } })
+    assertCustomFolder(folder)
+    if (folder._count.children || folder._count.documents) throw new ApiError(409, 'FOLDER_NOT_EMPTY', 'В папке есть документы или вложенные папки, в том числе сохранённые в журнале удалений. Сначала восстановите и переместите их.')
     await tx.documentFolder.delete({ where: { id: folderId } })
   })
 }

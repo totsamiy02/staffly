@@ -1,6 +1,7 @@
 import { useRef, type ReactNode } from 'react'
 import '../../../pages/app/documents/documents.scss'
 import './dialog-shell.scss'
+import './confirmation-dialog.scss'
 import { useDialogFocus } from './dialog-focus.ts'
 // Shared focus handling, scroll locking and shell for centered app dialogs.
 export default function DocumentDialog({ title, onClose, children, scrollBody = false, description, busy = false, viewer = false, className = '', eyebrow = 'Документы', headerContent, onEscape, formRef }: { title: string; onClose: () => void; children: ReactNode; scrollBody?: boolean; description?: string; busy?: boolean; viewer?: boolean; className?: string; eyebrow?: string; headerContent?: ReactNode; onEscape?: () => void; formRef?: (element: HTMLDivElement | null) => void }) {

@@ -3,7 +3,7 @@ import { processFile } from '../file-processing/client.ts'
 import { definitionOf } from '../../app/requests/workflow.ts'
 import { ApiError } from '../api-error.ts'
 import { prisma } from '../db.ts'
-import { requirePermission } from '../organizations/access/access.ts'
+import { hasPermission, requirePermission } from '../organizations/access/access.ts'
 import { deletePendingFile,stageStoredFile } from '../storage/image-service.ts'
 import { storage } from '../storage/provider.ts'
 import { lockRequest } from './request-lock.ts'
@@ -14,6 +14,11 @@ import { getMembership } from '../organizations/access/permissions.ts'
 
 export const MAX_REQUEST_FILE_BYTES = 10 * 1024 * 1024
 const allowed = new Map([['application/pdf', 'pdf'], ['image/jpeg', 'jpg'], ['image/png', 'png'], ['image/webp', 'webp']])
+
+export function canDeleteRequestAttachment(actor: Awaited<ReturnType<typeof getMembership>>, item: { createdByMemberId: string; authorMemberId: string | null; locationId: string; status: string }) {
+  return ['PENDING', 'DRAFT', 'RETURNED'].includes(item.status) && (item.createdByMemberId === actor.id || item.authorMemberId === actor.id)
+    && hasPermission(actor, 'requests.edit', item.locationId) && (item.createdByMemberId === actor.id || hasPermission(actor, 'requests.onBehalf', item.locationId))
+}
 
 function safeName(value: string | undefined, extension: string) {
   let decoded = `attachment.${extension}`
@@ -100,6 +105,9 @@ export async function deleteRequestAttachment(userId: string, organizationId: st
     await lockRequest(tx,requestId)
     const request = await tx.organizationRequest.findFirst({ where: { id: requestId, organizationId, OR:[{createdByMemberId:actor.id},{authorMemberId:actor.id}], status: {in:['PENDING','DRAFT','RETURNED']} }, select: { id: true } })
     if (!request) throw new ApiError(409, 'REQUEST_ALREADY_RESOLVED', 'Обработанную заявку нельзя изменить.')
+    const current = await getMembership(userId, organizationId, tx)
+    const fresh = await tx.organizationRequest.findUniqueOrThrow({ where: { id: request.id }, select: { createdByMemberId: true, authorMemberId: true, locationId: true, status: true } })
+    if (!canDeleteRequestAttachment(current, fresh)) throw new ApiError(403, 'ATTACHMENT_FORBIDDEN', 'Недостаточно прав для удаления вложения.')
     const attachment = await tx.requestAttachment.findFirst({ where: { id: attachmentId, requestId }, select: { storedFileId: true,fileName:true } })
     if (!attachment) throw new ApiError(404, 'ATTACHMENT_NOT_FOUND', 'Вложение не найдено.')
     await tx.requestAttachment.delete({ where: { id: attachmentId } })

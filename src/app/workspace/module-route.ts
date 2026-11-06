@@ -1,5 +1,5 @@
 import { readTabValue, writeTabValue } from './tab-storage.ts'
-const fields = new Set(['tab', 'section', 'view', 'pointId', 'dashboardPoint', 'month', 'day', 'from', 'to', 'page', 'search', 'sort', 'status', 'member', 'memberId', 'typeId', 'role', 'folder', 'system'])
+const fields = new Set(['tab', 'section', 'view', 'pointId', 'dashboardPoint', 'month', 'day', 'from', 'to', 'page', 'search', 'sort', 'status', 'member', 'memberId', 'typeId', 'role', 'folder', 'system', 'attachmentSearch', 'attachmentPage'])
 const key = (userId: string, org: string, module: string) => 'staffly:module-route:' + userId + ':' + org + ':' + module
 export function rememberModuleRoute(userId: string, org: string, module: string, query: string) {
   const params = new URLSearchParams(query), saved = new URLSearchParams()

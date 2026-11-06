@@ -1,0 +1,42 @@
+name: Security audit
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 5 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    name: Secrets and dependencies
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Install checksum-pinned Gitleaks
+        run: bash scripts/ci/install-gitleaks.sh
+      - name: Scan Git history and current source tree
+        run: |
+          npm run ci:secrets:verify
+          npm run ci:secrets
+      - name: Audit locked dependencies
+        if: ${{ !cancelled() }}
+        run: npm run ci:dependencies
+      - name: Save redacted security reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: security-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/ci/security/
+          retention-days: 7
+          if-no-files-found: warn

@@ -1,0 +1,15 @@
+# One host only: every API and the worker mount the same private named volume.
+# Use together with compose.yaml and set STORAGE_DRIVER=local, LOCAL_STORAGE_SHARED=true.
+services:
+  api1:
+    volumes: &files ['local-files:/var/lib/staffly/storage']
+  api2:
+    volumes: *files
+  api3:
+    volumes: *files
+  api4:
+    volumes: *files
+  worker:
+    volumes: *files
+volumes:
+  local-files:

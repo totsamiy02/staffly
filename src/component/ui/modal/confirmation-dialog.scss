@@ -1,0 +1,9 @@
+.request-modal.document-dialog.confirmation-dialog {
+  width: min(480px, 100%);
+  > header { margin-bottom: 20px; h2 { margin: 4px 0 0; font-size: 20px; } .app-eyebrow { margin: 0; font-size: 10px; letter-spacing: .1em; } }
+  .confirmation-dialog__content { display: grid; gap: 12px; font-size: 13px; line-height: 1.6; color: var(--theme-text,#444); p { margin: 0; } }
+  .confirmation-dialog__resource { padding: 12px 14px; border: 1px solid var(--theme-border,#e4e4e8); border-radius: 9px; background: var(--theme-surface-muted,#f7f7f9); font-weight: 600; color: var(--theme-text-strong,#222); overflow-wrap: anywhere; }
+  .confirmation-dialog__field { display: grid; gap: 6px; input { width: 100%; min-width: 0; border: 1px solid var(--theme-border,#ddd); border-radius: 8px; padding: 10px 12px; font: inherit; color: var(--theme-text-strong,#222); background: var(--theme-surface,#fff); } }
+  > footer { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 10px; padding-top: 18px; margin-top: 20px; border-top: 1px solid var(--theme-border,#e6e6ea); }
+}
+@media (max-width: 480px) { .request-modal.document-dialog.confirmation-dialog > footer { flex-direction: column-reverse; > button { width: 100%; } } }

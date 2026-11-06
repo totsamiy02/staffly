@@ -3,6 +3,7 @@ import { prisma } from '../db.ts'
 import { getMembership } from '../organizations/access/permissions.ts'
 import { requirePermission } from '../organizations/access/access.ts'
 import { permissionSql, requestReadSql } from '../access/request-policy.ts'
+import { canDeleteRequestAttachment } from '../requests/attachment-service.ts'
 
 // A system folder is a live view over original attachments, never a second
 // document/file copy. The same request + attachment permissions protect rows,
@@ -24,11 +25,11 @@ export async function listRequestFiles(userId: string, organizationId: string, o
   return prisma.$transaction(async db => {
     const [count] = await db.$queryRaw<Array<{ total: bigint; bytes: bigint }>>(Prisma.sql`SELECT count(*) AS total, COALESCE(sum(f.size),0)::bigint AS bytes ${source}`)
     const pageSize = 20, pages = Math.max(1, Math.ceil(Number(count.total) / pageSize)), page = Math.min(options.page, pages)
-    const rows = await db.$queryRaw<Array<{ id: string; requestId: string; fileName: string; mimeType: string; size: number; createdAt: Date; locationId: string; locationName: string; typeName: string; status: string; creatorName: string }>>(Prisma.sql`
+    const rows = await db.$queryRaw<Array<{ id: string; requestId: string; fileName: string; mimeType: string; size: number; createdAt: Date; locationId: string; locationName: string; typeName: string; status: string; creatorName: string; createdByMemberId: string; authorMemberId: string | null }>>(Prisma.sql`
       SELECT a.id,a.request_id AS "requestId",a.file_name AS "fileName",f.mime_type AS "mimeType",f.size,a.created_at AS "createdAt",
-      r.location_id AS "locationId",l.name AS "locationName",r.type_name_snapshot AS "typeName",r.status::text AS status,
+      r.location_id AS "locationId",l.name AS "locationName",r.type_name_snapshot AS "typeName",r.status::text AS status,r.created_by_member_id AS "createdByMemberId",r.author_member_id AS "authorMemberId",
       COALESCE(NULLIF(trim(concat_ws(' ',u.last_name,u.first_name,u.middle_name)),''),u.email) AS "creatorName"
       ${source} ORDER BY a.created_at DESC,a.id DESC LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}`)
-    return { files: rows.map(row => ({ ...row, requestHref: `/app/organizations/${organizationId}/requests?tab=mine&request=${row.requestId}&location=${row.locationId}`, downloadPath: `/organizations/${organizationId}/requests/${row.requestId}/attachments/${row.id}?locationId=${row.locationId}` })), totalBytes: Number(count.bytes), pagination: { page, pageSize, total: Number(count.total), pages } }
+    return { files: rows.map(({ createdByMemberId, authorMemberId, ...row }) => ({ ...row, canDelete: canDeleteRequestAttachment(actor, { ...row, createdByMemberId, authorMemberId }), requestHref: `/app/organizations/${organizationId}/requests?tab=mine&request=${row.requestId}&location=${row.locationId}`, downloadPath: `/organizations/${organizationId}/requests/${row.requestId}/attachments/${row.id}?locationId=${row.locationId}` })), totalBytes: Number(count.bytes), pagination: { page, pageSize, total: Number(count.total), pages } }
   }, { isolationLevel: 'RepeatableRead' })
 }

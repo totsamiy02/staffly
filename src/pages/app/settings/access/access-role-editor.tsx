@@ -1,3 +1,4 @@
+import ConfirmationDialog from '../../../../component/ui/modal/confirmation-dialog.tsx'
 import FormDraftNotice from '../../../../component/ui/form-draft-notice.tsx'
 import { useFormSafety } from '../../../../app/forms/use-form-safety.ts'
 import { useEffect, useRef, useState } from 'react'
@@ -8,7 +9,6 @@ import { useAccessRoles, type AccessRole } from '../../../../app/access/queries.
 import Select from '../../../../component/ui/select/select.tsx'
 import { useToast } from '../../../../component/ui/toast/toast-context.ts'
 import AnimatedOverlay from '../../../../component/ui/modal/animated-overlay.tsx'
-import DocumentDialog from '../../../../component/ui/modal/document-dialog.tsx'
 import { AccessIcon, AccessNote, AccessPermission } from './access-elements.tsx'
 import { accessGroups as groups, accessModules, permissionHints } from './access-presentation.ts'
 
@@ -104,11 +104,8 @@ export default function RoleEditor({ org, role, onClose }: { org: string; role?:
       <footer className="access-editor-footer"><div className="access-actions">{role && !protectedRole && <button className="access-text-button" disabled={mutation.isPending} onClick={createCopy}><AccessIcon name="copy" />Создать копию</button>}{role?.systemCode && !protectedRole && !copy && <button className="access-text-button" disabled={mutation.isPending} onClick={() => { setPermissions(recommendedPermissions[role.systemCode!]); mutation.reset() }}><AccessIcon name="history" />Рекомендуемые права</button>}</div><div className="access-actions"><button className="app-secondary" disabled={mutation.isPending} onClick={() => void safety.close(onClose)}>{protectedRole ? 'Закрыть' : 'Отмена'}</button>{!protectedRole && <button className="app-primary" disabled={name.trim().length < 2 || mutation.isPending} onClick={() => existing ? setConfirm(true) : mutation.mutate()}>{mutation.isPending ? 'Сохраняем…' : 'Сохранить роль'}</button>}</div></footer>
     </section>
 
-    {confirm && <AnimatedOverlay variant="modal" dismissible={!mutation.isPending} onClose={() => setConfirm(false)}>{close => <DocumentDialog title="Применить изменения роли?" eyebrow={role?.name} className="access-dialog access-confirm-dialog" onClose={close} busy={mutation.isPending}>
-      <AccessNote><strong>Изменится доступ {affectedMembers} {employeeWord}</strong><p>Изменения вступят в силу во всех назначениях этой роли.</p></AccessNote>
+    {confirm && <AnimatedOverlay variant="modal" dismissible={!mutation.isPending} onClose={() => setConfirm(false)}>{close => <ConfirmationDialog title="Применить изменения роли?" resource={role?.name} eyebrow="Роли и доступ" className="access-dialog" tone="primary" confirmLabel="Применить изменения" cancelLabel="Вернуться к настройке" onConfirm={() => mutation.mutate()} onClose={close} busy={mutation.isPending} error={mutation.error instanceof Error ? mutation.error.message : undefined}><AccessNote><strong>Изменится доступ {affectedMembers} {employeeWord}</strong><p>Изменения вступят в силу во всех назначениях этой роли.</p></AccessNote>
       <div className="access-change-list">{added.map(permission => <div className="access-change access-change--added" key={permission}><span>+</span><strong>{label(permission)}</strong><small>Будет добавлено</small></div>)}{removed.map(permission => <div className="access-change access-change--removed" key={permission}><span>−</span><strong>{label(permission)}</strong><small>Будет убрано</small></div>)}{!added.length && !removed.length && <p className="access-caption">Набор прав не меняется. Будет сохранено описание роли.</p>}</div>
-      {mutation.error && <p className="form-inline-error">{mutation.error instanceof Error ? mutation.error.message : 'Не удалось сохранить роль.'}</p>}
-      <footer><button className="app-secondary" disabled={mutation.isPending} onClick={close}>Вернуться к настройке</button><button className="app-primary" disabled={mutation.isPending} onClick={() => mutation.mutate()}>{mutation.isPending ? 'Сохраняем…' : 'Применить изменения'}</button></footer>
-    </DocumentDialog>}</AnimatedOverlay>}
+      </ConfirmationDialog>}</AnimatedOverlay>}
   </div>
 }
