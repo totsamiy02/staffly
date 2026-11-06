@@ -1,4 +1,7 @@
 import { securityCorrelationId } from './security/journal.ts'
+import adminRouter from './admin/routes.ts'
+import { closeAdminDatabase } from './admin/database.ts'
+import { recordFeature } from './admin/collection.ts'
 import { randomUUID } from 'node:crypto'
 import { safeError, safeApiError } from './security/safe-error.ts'
 import { securityContext } from './security/journal.ts'
@@ -114,6 +117,13 @@ app.use('/api/organizations/:organizationId', (request, response, next) => {
   if (!['GET', 'HEAD'].includes(request.method)) response.once('finish', () => { if (response.statusCode < 400) readCache.invalidate(String(request.params.organizationId)) })
   next()
 }, requireAuth, selectLocation, subscriptionWritePolicy)
+app.use('/api/admin', adminRouter)
+app.use('/api/organizations/:organizationId', (request, response, next) => {
+  const id=String(request.params.organizationId)
+  const feature=request.path.startsWith('/statistics/reports')?'reports':request.path.startsWith('/schedule')?'planning':request.path.startsWith('/shifts')?'schedule':request.path.startsWith('/requests')?'requests':request.path.startsWith('/documents')?'documents':null
+  if(feature)response.once('finish',()=>{if(response.statusCode<400)void recordFeature(id,feature).catch(error=>console.warn('Monitoring activity unavailable:',safeError(error)))})
+  next()
+})
 app.use('/api', (_q,s,next)=>{s.set('Cache-Control','no-store');next()}, accessRouter)
 app.use('/api', subscriptionRouter)
 app.use('/api', storageRouter)
@@ -172,13 +182,15 @@ let shuttingDown = false
 async function shutdown() {
   if (shuttingDown) return
   shuttingDown = true
-  // tsx watch allows five seconds; production drains admitted work for 30 seconds.
-  const timeout = positiveInteger('HTTP_SHUTDOWN_TIMEOUT_MS', process.env.NODE_ENV === 'production' ? 30000 : 4000, 120000)
+  // The dev supervisor also waits for this budget. DB statements may take 15s;
+  // the old 4s deadline killed admitted work during an ordinary hot reload.
+  const timeout = positiveInteger('HTTP_SHUTDOWN_TIMEOUT_MS', 30000, 120000)
   const deadline = setTimeout(() => { console.error('API drain deadline exceeded'); server.closeAllConnections(); process.exit(1) }, timeout)
   deadline.unref()
   try {
     const closed = drainHttpServer(server)
     await Promise.all([closed, live.stop(), stopWorkers(), warming])
+    await closeAdminDatabase()
     await prisma.$disconnect()
     clearTimeout(deadline)
   } catch (error) {

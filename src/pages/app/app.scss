@@ -806,3 +806,8 @@
 .organization-grid .organization-card__participants{font-size:12px;}.organization-grid .organization-card__meta{gap:6px;margin-top:2px;}.organization-grid .organization-card__meta :is(.role-badge,.plan-badge){font-size:10px;}
 @media(max-width:800px){.organization-grid>.organization-card{flex-basis:330px;}}
 @media(max-width:640px){.organization-grid{gap:16px;}.organization-grid>.organization-card{min-height:238px;padding:22px;gap:14px;}.organization-grid .organization-card strong{font-size:17px;}}
+
+
+.app-topbar__admin-link{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:42px;padding:10px 13px;border:1px solid var(--theme-border,#dedede);border-radius:12px;background:var(--theme-surface,#fff);color:var(--theme-text,#444);font-size:12px;font-weight:500;white-space:nowrap;transition:border-color .2s,background .2s;svg{flex:none;}&:hover{background:var(--theme-accent-bg,#f1ebf6);border-color:var(--theme-accent-border,#bda8d0);}&:focus-visible{outline:2px solid var(--theme-focus,#80638f);outline-offset:3px;}}
+@media(max-width:800px){.app-topbar__admin-link{width:42px;min-width:42px;padding:0;}.app-topbar__admin-label{display:none;}}
+@media(max-width:380px){.app-topbar:has(.app-topbar__admin-link) .app-topbar__inner{width:100%;gap:8px;}.app-topbar:has(.app-topbar__admin-link) .app-topbar__logo img{width:88px;}}

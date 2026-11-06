@@ -36,13 +36,13 @@ it('keeps mandatory codes outside subscription controls with contextual instruct
   for (const kind of ['verification','reset'] as const) {
     await mail.deliverSecurityCode(kind, 'recipient@example.test', '123456')
     const message = sent.at(-1)!
-    assert.ok(message.html.includes('123 456'))
+    assert.ok(message.html.includes('>123456</span>'))
     assert.ok(message.text.includes('10 минут'))
     assert.ok(!message.html.includes('Настроить уведомления'))
   }
   for (const kind of ['ownership','deletion','location'] as const) {
     await mail.deliverSensitiveActionCode(kind,'recipient@example.test','Север','654321','Анна Петрова')
-    assert.ok(sent.at(-1)!.html.includes('654 321'))
+    assert.ok(sent.at(-1)!.html.includes('>654321</span>'))
     assert.ok(sent.at(-1)!.text.includes('Не запрашивали'))
     assert.ok(!sent.at(-1)!.html.includes('Настроить уведомления'))
   }
@@ -70,4 +70,13 @@ it('renders rounded responsive working letters with readable plain text, before/
   assert.ok(message.text.includes('Стало: 11:00–20:00'))
   assert.ok(message.html.includes('shift=shift-id&amp;location=point-id'))
   assert.throws(()=>mail.renderEmail({title:'Test',intro:'Test',action:{label:'Open',path:'https://evil.example'}}),/Invalid email action URL/)
+})
+
+it('renders a continuous selectable code without links or navigation',()=>{
+ for(const code of ['012345','654321']){
+  const message=mail.renderEmail({title:'Code',intro:'Confirm',code,codeMinutes:5})
+  assert.match(message.html,new RegExp('<span class="email-code-value"[^>]*>'+code+'</span>'))
+  assert(message.text.includes('Код: '+code+'\n'));assert(message.html.includes('user-select:all'));assert(message.html.includes('5 минут'))
+  assert(!message.html.includes('<a '));assert(!message.html.includes('/auth/code'));assert(!message.html.includes('onclick='));assert(!message.html.includes('javascript:'));assert(!message.html.includes('?code='));assert(!message.html.includes('Нажмите на него'))
+ }
 })

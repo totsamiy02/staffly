@@ -4,6 +4,8 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "admin:access": "node --import tsx scripts/admin-access.ts",
+    "test:admin:ui": "node --import tsx tests/performance/load-test.mjs --profile=admin",
     "predev:server": "prisma generate",
     "dev": "vite",
     "dev:server": "node scripts/dev-server.mjs",

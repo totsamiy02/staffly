@@ -83,7 +83,7 @@ html[data-theme=dark] {
     --theme-text-strong:#222;--theme-text:#444;--theme-muted:#666;--theme-border:#ddd;
     background:#fff;color:#222;color-scheme:light;
   }
-  .auth {--theme-quiet:var(--theme-muted);background:var(--theme-canvas);}
+  .auth {--theme-quiet:var(--theme-muted);background:radial-gradient(ellipse at 20% 10%,#2b2832 0,#18171c 48%,#0e0e11 100%);}
   .auth__panel {background:var(--theme-header);}
   ::selection {background:#665178;color:#fff;}
 }
@@ -96,7 +96,7 @@ html[data-theme=light] .auth {
   --theme-muted:#625b6e;--theme-quiet:#625b6e;--theme-border:#ddd8e4;--theme-border-strong:#b0a8ba;
   --theme-danger:#a02d3c;--theme-danger-border:#b84b58;--theme-success:#2e6f43;--theme-success-bg:#edf6ef;
   --field-value:#29252e;--field-example:#79717f;
-  background:#f5f4f7;color:#29252e;
+  background:radial-gradient(ellipse at 20% 10%,#fff 0,#f5f4f7 48%,#eeebf3 100%);color:#29252e;
   .auth__panel {background:#fff;box-shadow:0 12px 50px rgb(37 30 47 / 8%);}
   .auth__submit {background:#29252e;color:#fff; &:hover:not(:disabled){background:#41374b;}}
   input[type=checkbox]:checked {background-color:#79638b;}

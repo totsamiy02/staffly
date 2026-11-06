@@ -29,6 +29,7 @@ it('rejects placeholder secrets, insecure storage and malformed production origi
     { JWT_SECRET: 'replace-with-a-random-secret-of-at-least-32-characters' }, { JWT_SECRET: 'x'.repeat(64) }, { INVITE_CODE_SECRET: '' }, { METRICS_TOKEN: valid.JWT_SECRET },
     { APP_ORIGIN: 'http://staffly.test' }, { APP_ORIGIN: 'https://staffly.test/app' }, { APP_ORIGIN: 'https://staffly.test/' }, { APP_ORIGIN: 'https://user:pass@staffly.test' },
     { S3_ALLOW_INSECURE: 'true' }, { S3_ENDPOINT: 'http://minio:9000' }, { STORAGE_DRIVER: 'local' }, { DB_TIMEZONE: 'Europe/Kiev' }, { EMAIL_DELIVERY_PAUSED: 'yes' },
+    { ADMIN_MANAGEMENT_DATABASE_URL: 'postgresql://operator@localhost/staffly' }, { MIGRATION_DATABASE_URL: 'postgresql://migrator@localhost/staffly' },
   ]) assert.throws(() => validateProductionConfig({ ...valid, ...patch }))
 })
 
@@ -63,6 +64,26 @@ it('closes the listener immediately and drains a response lasting longer than th
     assert.equal(await (await response).text(), 'committed')
     await stopped
   } finally { server.closeAllConnections(); server.close() }
+})
+
+it('drains the real API with monitoring in flight beyond four seconds without killing the process', {skip:process.env.ISOLATED_TEST_CLUSTER!=='true',timeout:25000},async()=>{
+ const reservation=tcpServer();reservation.listen(0,'127.0.0.1');await once(reservation,'listening');const port=(reservation.address() as {port:number}).port;await new Promise<void>(resolve=>reservation.close(()=>resolve()))
+ const pool=new Pool({connectionString:process.env.DATABASE_URL}),db=await pool.connect()
+ let child:ReturnType<typeof spawn>|undefined,log='',force:ReturnType<typeof setTimeout>|undefined
+ try{
+  await db.query('BEGIN');await db.query('LOCK TABLE public.platform_online_samples IN ACCESS EXCLUSIVE MODE')
+  const env:NodeJS.ProcessEnv={...process.env,NODE_ENV:'test',PORT:String(port),HOST:'127.0.0.1',RUN_BACKGROUND_WORKERS:'true',API_WARMUP:'false'};delete env.HTTP_SHUTDOWN_TIMEOUT_MS
+  child=spawn(process.execPath,['--import','tsx','src/server/index.ts'],{env,stdio:['ignore','pipe','pipe']})
+  child.stdout!.on('data',chunk=>{log+=chunk.toString()});child.stderr!.on('data',chunk=>{log+=chunk.toString()})
+  const exited=once(child,'exit'),deadline=Date.now()+10000
+  let blocked=false
+  while(Date.now()<deadline&&child.exitCode===null){blocked=(await pool.query("SELECT EXISTS(SELECT 1 FROM pg_locks WHERE relation='public.platform_online_samples'::regclass AND NOT granted) AS blocked")).rows[0].blocked;if(blocked&&log.includes('Staffly API:'))break;await new Promise(resolve=>setTimeout(resolve,25))}
+  assert(blocked&&log.includes('Staffly API:'),'Actual monitoring query must be in flight before SIGTERM')
+  child.kill('SIGTERM');force=setTimeout(()=>child?.kill('SIGKILL'),12000)
+  await new Promise(resolve=>setTimeout(resolve,4500));assert.equal(child.exitCode,null,'The old four-second deadline must not terminate admitted work')
+  await db.query('ROLLBACK');const [code,signal]=await exited
+  assert.equal(code,0,log);assert.equal(signal,null);assert.doesNotMatch(log,/API drain deadline exceeded|Platform monitoring failed|API shutdown failed/)
+ }finally{clearTimeout(force);await db.query('ROLLBACK').catch(()=>{});db.release();if(child?.exitCode===null){child.kill('SIGKILL');await once(child,'exit').catch(()=>{})}await pool.end()}
 })
 
 async function command(binary: string, args: string[], env: NodeJS.ProcessEnv) {
@@ -118,7 +139,7 @@ it('runs real migrations as a schema owner, grants runtime CRUD and denies DDL, 
     await app.query('INSERT INTO users (id, email, updated_at) VALUES ($1, $2, now())', [id, 'limited@example.test'])
     await app.query('UPDATE users SET first_name = $1 WHERE id = $2', ['Limited', id])
     assert.equal((await app.query('SELECT first_name FROM users WHERE id = $1', [id])).rows[0].first_name, 'Limited')
-    for (const sql of ['CREATE TABLE public.forbidden (id int)', 'ALTER TABLE public.users ADD COLUMN forbidden int', 'DROP TABLE public.users CASCADE', 'TRUNCATE public.users CASCADE', 'DELETE FROM public._prisma_migrations', 'CREATE ROLE forbidden', 'SET ROLE staffly_migrator', 'UPDATE organization_resource_budgets SET storage_limit_bytes=999999999999', 'UPDATE organization_resource_budgets SET storage_bytes=0', 'UPDATE organization_resource_budgets SET email_queue_limit=100000', 'DELETE FROM organization_resource_budgets']) await assert.rejects(app.query(sql), { code: '42501' })
+    for (const sql of ['CREATE TABLE public.forbidden (id int)', 'ALTER TABLE public.users ADD COLUMN forbidden int', 'DROP TABLE public.users CASCADE', 'TRUNCATE public.users CASCADE', 'DELETE FROM public._prisma_migrations', 'CREATE ROLE forbidden', 'SET ROLE staffly_migrator', 'UPDATE organization_resource_budgets SET storage_limit_bytes=999999999999', 'UPDATE organization_resource_budgets SET storage_bytes=0', 'UPDATE organization_resource_budgets SET email_queue_limit=100000', 'DELETE FROM organization_resource_budgets', 'DELETE FROM platform_operation_events', 'UPDATE platform_lifetime_metrics SET users_created=0', "INSERT INTO platform_creation_events(metric) VALUES('users')"]) await assert.rejects(app.query(sql), { code: '42501' })
     // Exercise quota triggers with the actual restricted runtime role as well.
     const org = await client.organization.create({ data: { name: 'Runtime quotas', timezone: 'Europe/Moscow', createdByUserId: id } })
     await client.$transaction(async tx => {

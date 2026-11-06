@@ -215,13 +215,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [presenceUserId, liveOrganizationId, queryClient, refresh, liveEnabled, apiRequest])
   useEffect(() => {
     if (!presenceUserId) return
-    const heartbeat = () => { if (document.visibilityState === 'visible' && !isLiveConnected()) void apiRequest('/profile/presence', { method: 'POST', body: { visible: true } }).catch(() => undefined) }
+    const heartbeat = () => { if (document.visibilityState === 'visible' && !isLiveConnected()) void apiRequest('/profile/presence', { method: 'POST', body: { visible: true, ...(liveOrganizationId ? {organizationId:liveOrganizationId} : {}) } }).catch(() => undefined) }
     heartbeat()
     const timer = window.setInterval(heartbeat, 30_000)
     document.addEventListener('visibilitychange', heartbeat)
     // A hidden/closed tab expires by TTL. It cannot mark another visible tab of this session offline.
     return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', heartbeat) }
-  }, [presenceUserId, apiRequest])
+  }, [presenceUserId, liveOrganizationId, apiRequest])
 
   const updateUser = useCallback((nextUser: AuthUser) => {
     if (userIdRef.current !== nextUser.id) return

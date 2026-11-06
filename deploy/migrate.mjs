@@ -11,5 +11,5 @@ const child = spawn(process.execPath, ['node_modules/prisma/build/index.js', 'mi
 const code = await new Promise((resolve, reject) => { child.once('error', reject); child.once('exit', code => resolve(code)) })
 if (code !== 0) process.exit(1)
 const client = new pg.Client({ connectionString: url })
-try { await client.connect(); await client.query(await readFile(new URL('./runtime-grants.sql', import.meta.url), 'utf8')) }
+try { await client.connect(); await client.query(await readFile(new URL('./runtime-grants.sql', import.meta.url), 'utf8')); await client.query(await readFile(new URL('./admin-grants.sql', import.meta.url), 'utf8')) }
 finally { await client.end() }

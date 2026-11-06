@@ -26,7 +26,7 @@ const seconds = Number(options.seconds ?? 20)
 assert(Number.isInteger(seconds) && seconds >= 5 && seconds <= 120, '--seconds must be 5–120')
 const bin = options['pg-bin'] ?? '/Applications/Postgres.app/Contents/Versions/18/bin'
 await access(path.join(bin, 'initdb'))
-const output = await createArtifactDirectory(options.tests ? 'regression' : options.profile === 'workspace' ? 'audit' : options.profile === 'interface' ? 'audit' : options.profile === 'scale' ? 'scale' : options.profile === 'frontend' ? 'frontend' : 'load', options.output)
+const output = await createArtifactDirectory(options.tests ? 'regression' : ['workspace','admin','interface'].includes(options.profile) ? 'audit' : options.profile === 'scale' ? 'scale' : options.profile === 'frontend' ? 'frontend' : 'load', options.output)
 const temporary = await mkdtemp(path.join(os.tmpdir(), 'staffly-load-'))
 const data = path.join(temporary, 'postgres')
 const storage = path.join(temporary, 'storage')
@@ -286,7 +286,10 @@ try {
     }))
     console.log(testLog.slice(-2500))
   }
-  if (options.profile === 'workspace') {
+  if (options.profile === 'admin') {
+    const { runAdminInterface } = await import('../interface/admin-monitoring.mjs')
+    results.admin = await runAdminInterface({ prisma, env, root, temporary, output, options })
+  } else if (options.profile === 'workspace') {
     const { runWorkspaceSafety } = await import('../interface/workspace-safety.mjs')
     results.workspace = await runWorkspaceSafety({ prisma, env, root, temporary, output, options, startApi })
   } else if (options.profile === 'interface') {

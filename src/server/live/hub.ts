@@ -6,9 +6,10 @@ import { positiveInteger } from '../runtime.ts'
 import { readCache, setReadCacheLive } from '../read-cache.ts'
 import { checkDatabasePolicy } from '../database-policy.ts'
 import { utcDatabaseUrl, checkTimeModel } from '../database-time.ts'
+import { recordOrganizationPresences } from '../admin/collection.ts'
 
 export type LiveHint = { topic: string; organizationId?: string; userId?: string }
-type Peer = { response: Response; userId: string; sessionId: string; organizations: Set<string>; expires: number; dirty: Map<string, LiveHint> }
+type Peer = { response: Response; userId: string; sessionId: string; organizations: Set<string>; activeOrganizationId?:string; expires: number; dirty: Map<string, LiveHint> }
 const topics = new Set(['schedule', 'requests', 'requests-mine', 'requests-review', 'documents', 'events', 'organization', 'access', 'notifications', 'profile', 'exports'])
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 export function parseHint(payload: string): LiveHint | null {
@@ -100,6 +101,7 @@ export function createLiveHub(options: { validationIntervalMs?: number } = {}) {
       for (let offset = 0; offset < sessionIds.length; offset += 500) await prisma.authSession.updateMany({
         where: { id: { in: sessionIds.slice(offset, offset + 500) }, revokedAt: null, idleExpiresAt: { gt: now }, absoluteExpiresAt: { gt: now } }, data: { lastActiveAt: now, lastUsedAt: now } })
       for (let offset = 0; offset < userIds.length; offset += 500) await prisma.user.updateMany({ where: { id: { in: userIds.slice(offset, offset + 500) }, deletedAt: null }, data: { lastSeenAt: now } })
+      await recordOrganizationPresences(active.filter(peer=>peer.activeOrganizationId).map(peer=>({userId:peer.userId,sessionId:peer.sessionId,organizationId:peer.activeOrganizationId!})))
     } catch { disconnectAll() }
     finally { checking = false }
   }, options.validationIntervalMs ?? 30000)
@@ -125,7 +127,7 @@ export function createLiveHub(options: { validationIntervalMs?: number } = {}) {
     response.locals.releaseAdmission?.()
     response.locals.releaseHttpMetrics?.()
     // Avoid synchronized full-query resyncs at a common JWT expiry after mass login.
-    const peer: Peer = { response, ...auth, organizations, expires: Math.min((auth.accessExpiresAt ?? Infinity) - 30000 - Math.random() * 120000, Date.now() + 8 * 60000 + Math.random() * 4 * 60000), dirty: new Map() }
+    const peer: Peer = { response, ...auth, organizations, activeOrganizationId:organizationId, expires: Math.min((auth.accessExpiresAt ?? Infinity) - 30000 - Math.random() * 120000, Date.now() + 8 * 60000 + Math.random() * 4 * 60000), dirty: new Map() }
     peers.add(peer); perUser.set(auth.userId, (perUser.get(auth.userId) ?? 0) + 1)
     write(peer, 'ready', {})
     response.once('close', () => {

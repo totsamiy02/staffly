@@ -1,15 +1,20 @@
 import { spawn } from 'node:child_process'
-import { existsSync, watch } from 'node:fs'
+import { existsSync, readFileSync, watch } from 'node:fs'
+import { parseEnv } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const watched = ['src/server', 'src/shared', 'src/app/access', 'src/app/requests', 'src/app/schedule', 'src/app/notifications', 'src/app/file-preview', 'src/app/subscriptions']
-let child, timer, restarting = false, dirty = false, stopping = false
+let child, timer, childShutdownMs = 30000, restarting = false, dirty = false, stopping = false
 const watchers = []
 
 function launch() {
-  child = spawn(process.execPath, ['--env-file=src/server/.env', '--import', 'tsx', 'src/server/index.ts'], { cwd: root, env: { ...process.env, NODE_ENV: 'development' }, stdio: 'inherit' })
+  const configured = process.env.HTTP_SHUTDOWN_TIMEOUT_MS ?? parseEnv(readFileSync(path.join(root, 'src/server/.env'), 'utf8')).HTTP_SHUTDOWN_TIMEOUT_MS
+  const timeout = configured === undefined || configured === '' ? 30000 : Number(configured)
+  if (!Number.isInteger(timeout) || timeout < 1 || timeout > 120000) throw new Error('HTTP_SHUTDOWN_TIMEOUT_MS must be an integer between 1 and 120000')
+  childShutdownMs = timeout
+  child = spawn(process.execPath, ['--env-file=src/server/.env', '--import', 'tsx', 'src/server/index.ts'], { cwd: root, env: { ...process.env, NODE_ENV: 'development', HTTP_SHUTDOWN_TIMEOUT_MS: String(timeout) }, stdio: 'inherit' })
   child.on('error', error => { console.error('Не удалось запустить API:', error.message) })
   child.on('exit', () => { child = undefined })
 }
@@ -17,7 +22,7 @@ async function stopChild() {
   const active = child
   if (!active || active.exitCode !== null || active.signalCode !== null) return
   await new Promise(resolve => {
-    const force = setTimeout(() => active.kill('SIGKILL'), 12000)
+    const force = setTimeout(() => active.kill('SIGKILL'), childShutdownMs + 5000)
     active.once('exit', () => { clearTimeout(force); resolve() })
     active.kill('SIGTERM')
   })

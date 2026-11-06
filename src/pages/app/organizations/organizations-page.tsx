@@ -89,7 +89,7 @@ export default function OrganizationsPage() {
   const busy = previewCode.isPending || acceptCode.isPending
 
   return <div className="app-page">
-    <AppTopbar />
+    <AppTopbar showAdministration />
     <main className="organizations-page">
       <div className="organizations-page__heading"><div><p>Рабочее пространство</p><h1>Ваши организации</h1></div><Link className="app-primary" to="/app/organizations/new"><span>+</span> Создать организацию</Link></div>
       {error && <p className="app-alert app-alert--error" role="alert">{error}</p>}

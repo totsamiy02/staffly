@@ -4,6 +4,8 @@ x-app: &app
   image: ${APP_IMAGE:-staffly:local}
   environment: &app-env
     DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL}
+    ADMIN_DATABASE_URL: ${ADMIN_DATABASE_URL:-}
+    ADMIN_AUTH_SECRET: ${ADMIN_AUTH_SECRET:-}
     LIVE_DATABASE_URL: ${LIVE_DATABASE_URL:-}
     JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET}
     APP_ORIGIN: ${APP_ORIGIN:?Set APP_ORIGIN}
@@ -89,6 +91,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in deploy/.env}
       APP_DATABASE_PASSWORD: ${APP_DATABASE_PASSWORD:?Set APP_DATABASE_PASSWORD}
       MIGRATION_DATABASE_PASSWORD: ${MIGRATION_DATABASE_PASSWORD:?Set MIGRATION_DATABASE_PASSWORD}
+      ADMIN_GATEWAY_DATABASE_PASSWORD: ${ADMIN_GATEWAY_DATABASE_PASSWORD:-}
     volumes:
       - postgres:/var/lib/postgresql
       - ./init-database.sql:/docker-entrypoint-initdb.d/10-staffly.sql:ro
@@ -128,7 +131,7 @@ services:
   worker:
     <<: *app
     command: [node, --import, tsx, src/server/worker.ts]
-    environment: {<<: *app-env, DB_POOL_MAX: '4', NODE_OPTIONS: '--max-old-space-size=512'}
+    environment: {<<: *app-env, ADMIN_DATABASE_URL: '', ADMIN_AUTH_SECRET: '', DB_POOL_MAX: '4', NODE_OPTIONS: '--max-old-space-size=512'}
     mem_limit: ${WORKER_MEMORY_LIMIT:-1536m}
     stop_grace_period: 90s
     healthcheck:

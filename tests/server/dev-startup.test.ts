@@ -60,7 +60,7 @@ it('keeps the API available on generated Prisma changes and still reloads server
     await symlink(join(root, 'node_modules'), join(fixture, 'node_modules'), 'dir')
     await mkdir(join(fixture, 'src/generated/prisma'), { recursive: true })
     await writeFile(join(fixture, 'package.json'), '{"type":"module"}')
-    await writeFile(join(fixture, 'src/server/.env'), 'PORT=0\n')
+    await writeFile(join(fixture, 'src/server/.env'), 'PORT=0\nHTTP_SHUTDOWN_TIMEOUT_MS=6500\n')
     await writeFile(join(fixture, 'src/generated/prisma/enums.ts'), "export const marker = 'before'\n")
     await writeFile(join(fixture, 'src/generated/prisma/client.ts'), "import { marker } from './enums.ts'; export const client = marker\n")
     await writeFile(join(fixture, 'src/server/service.ts'), "export const service = 'before'\n")
@@ -68,7 +68,7 @@ it('keeps the API available on generated Prisma changes and still reloads server
       import { createServer } from 'node:http'
       import { client } from '../generated/prisma/client.ts'
       import { service } from './service.ts'
-      const server = createServer((_request, response) => response.end(JSON.stringify({ pid: process.pid, service, client })))
+      const server = createServer((_request, response) => response.end(JSON.stringify({ pid: process.pid, service, client, shutdownTimeout: process.env.HTTP_SHUTDOWN_TIMEOUT_MS })))
       server.listen(0, '127.0.0.1', () => console.log('READY ' + JSON.stringify({ pid: process.pid, port: server.address().port, service })))
       process.once('SIGTERM', () => server.close())
       process.once('SIGINT', () => server.close())
@@ -110,7 +110,7 @@ it('keeps the API available on generated Prisma changes and still reloads server
     assert.equal(starts.length, 2, `One burst must produce one restart: ${log}`)
     assert.notEqual(next.pid, first.pid)
     const response = await fetch(`http://127.0.0.1:${next.port}`, { signal: AbortSignal.timeout(1000) })
-    assert.equal((await response.json()).service, 'after')
+    const body=await response.json();assert.equal(body.service, 'after');assert.equal(body.shutdownTimeout,'6500')
   } finally {
     if (child?.pid) {
       const signal = (value: NodeJS.Signals) => { try { process.kill(-child!.pid!, value) } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error } }

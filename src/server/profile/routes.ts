@@ -2,6 +2,7 @@ import { securityHistory } from '../security/history-service.ts'
 import { lifecycleStatus, requestAccountDeletion, confirmAccountDeletion } from '../privacy/deletion-service.ts'
 import { accountRateLimit } from '../security/rate-limit.ts'
 import { updatePresence } from './presence.ts'
+import { recordOrganizationPresence } from '../admin/collection.ts'
 import { Router, type Request } from 'express'
 import { z } from 'zod'
 import { prisma } from '../db.ts'
@@ -77,9 +78,10 @@ router.patch('/profile', async (request, response) => {
 })
 
 router.post('/profile/presence', async (request, response) => {
-  const parsed = z.object({ visible: z.boolean().default(true) }).safeParse(request.body)
+  const parsed = z.object({ visible: z.boolean().default(true), organizationId: z.uuid().optional() }).safeParse(request.body)
   if (!parsed.success) throw new ApiError(400, 'INVALID_PRESENCE', 'Некорректное состояние активности.')
   await updatePresence(auth(request).userId, auth(request).sessionId, parsed.data.visible)
+  if(parsed.data.visible && parsed.data.organizationId)await recordOrganizationPresence(auth(request).userId,auth(request).sessionId,parsed.data.organizationId)
   response.status(204).end()
 })
 

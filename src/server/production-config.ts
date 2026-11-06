@@ -2,6 +2,7 @@ import path from 'node:path'
 
 export function validateProductionConfig(env: NodeJS.ProcessEnv = process.env) {
   if (env.NODE_ENV !== 'production') return
+  if(env.ADMIN_MANAGEMENT_DATABASE_URL||env.MIGRATION_DATABASE_URL)throw new Error('Operator and migration credentials must not be provided to API or worker')
   if (env.DB_TIMEZONE !== 'UTC') throw new Error('New production databases require DB_TIMEZONE=UTC; convert and verify legacy dates before importing existing data')
   if (env.DATA_PURGE_ENABLED !== undefined && !['true', 'false'].includes(env.DATA_PURGE_ENABLED)) throw new Error('DATA_PURGE_ENABLED must be true or false')
   if (env.EMAIL_DELIVERY_PAUSED !== undefined && !['true', 'false'].includes(env.EMAIL_DELIVERY_PAUSED)) throw new Error('EMAIL_DELIVERY_PAUSED must be true or false')
@@ -13,6 +14,12 @@ export function validateProductionConfig(env: NodeJS.ProcessEnv = process.env) {
   }
   const jwt = secret('JWT_SECRET'), invite = secret('INVITE_CODE_SECRET'), metrics = secret('METRICS_TOKEN')
   if (new Set([jwt, invite, metrics]).size !== 3) throw new Error('JWT_SECRET, INVITE_CODE_SECRET and METRICS_TOKEN must be different')
+  if(env.ADMIN_DATABASE_URL){
+    const adminSecret=secret('ADMIN_AUTH_SECRET')
+    if([jwt,invite,metrics].includes(adminSecret))throw new Error('ADMIN_AUTH_SECRET must be independent')
+    const adminUrl=new URL(env.ADMIN_DATABASE_URL), appUrl=env.DATABASE_URL?new URL(env.DATABASE_URL):null
+    if(!adminUrl.username||adminUrl.username===appUrl?.username||adminUrl.pathname!==appUrl?.pathname)throw new Error('ADMIN_DATABASE_URL requires a separate restricted role in the same database')
+  }
   let origin: URL
   try { origin = new URL(env.APP_ORIGIN ?? '') } catch { throw new Error('APP_ORIGIN must be a public HTTPS origin') }
   if (origin.protocol !== 'https:' || origin.username || origin.password || origin.pathname !== '/' || origin.search || origin.hash || origin.origin !== env.APP_ORIGIN || ['localhost', '127.0.0.1', '[::1]'].includes(origin.hostname) || origin.hostname.endsWith('.example')) throw new Error('APP_ORIGIN must be a public HTTPS origin without a path or trailing slash')

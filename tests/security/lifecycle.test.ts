@@ -159,6 +159,18 @@ it('keeps provider and Prisma secrets out of diagnostic logs', () => {
   assert.deepEqual(safeError(error), { name: 'PrismaClientKnownRequestError', code: 'P2002' })
   assert.doesNotMatch(JSON.stringify(safeError({ name: 'secret-token', code: 'secret-code', message: 'secret-password' })), /secret-/)
 })
+it('keeps fixed monitoring context and known nested SQL/pool errors while redacting secrets',()=>{
+ const error=Object.assign(new Error('private@example.test secret-password SELECT private'),{operation:'MONITOR_SAMPLE',cause:{name:'error',code:'42P01',message:'private relation secret-token'}})
+ assert.deepEqual(safeError(error),{name:'Error',code:'42P01',operation:'MONITOR_SAMPLE'})
+ assert.deepEqual(safeError(new Error('timeout exceeded when trying to connect')),{name:'Error',code:'POOL_ACQUIRE_TIMEOUT'})
+ assert.doesNotMatch(JSON.stringify(safeError(error)),/private|secret-|SELECT/)
+ assert.deepEqual(safeError({operation:'secret-token',cause:{code:'secret-password',message:'private@example.test'}}),{name:'Error'})
+})
+it('bounds nested diagnostic inspection including AggregateError and cyclic causes',()=>{
+ assert.deepEqual(safeError(new AggregateError([{code:'ECONNREFUSED',message:'secret-token'}],'secret-password')),{name:'Error',code:'ECONNREFUSED'})
+ const cyclic:{cause?:unknown;message:string}={message:'secret-token'};cyclic.cause=cyclic
+ assert.deepEqual(safeError(cyclic),{name:'Error'})
+})
 it('prunes only expired registered backups on explicit apply and refuses changed files and symlinks', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'privacy-backups-'))
   try {

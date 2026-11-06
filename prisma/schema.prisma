@@ -77,6 +77,8 @@ model AuthAttemptLimit {
 }
 
 model User {
+  platformPresence PlatformOrganizationPresence[]
+  platformActivityDays PlatformActivityDay[]
   subscriptionPurchases SubscriptionPurchase[]
   reportExports ReportExport[]
   id                  String    @id @default(uuid()) @db.Uuid
@@ -298,6 +300,10 @@ enum RequestEventType {
 }
 
 model Organization {
+  platformPresence PlatformOrganizationPresence[]
+  platformActivityDays PlatformActivityDay[]
+  platformFeatureDays PlatformFeatureDay[]
+  platformActivity PlatformOrganizationActivity?
   subscription OrganizationSubscription?
   subscriptionPurchases SubscriptionPurchase[]
   resourceBudget OrganizationResourceBudget?
@@ -807,6 +813,7 @@ model SensitiveActionToken {
 }
 
 model AuthSession {
+  platformPresence PlatformOrganizationPresence[]
   id                String    @id @default(uuid()) @db.Uuid
   userId            String    @map("user_id") @db.Uuid
   refreshTokenHash  String    @unique @map("refresh_token_hash") @db.VarChar(64)
@@ -1540,4 +1547,87 @@ model SubscriptionPurchase {
   @@index([organizationId, createdAt])
   @@index([expiresAt, status])
   @@map("subscription_purchases")
+}
+
+// Administrative credentials/grants live in the separate SQL-managed
+// staffly_admin schema and are deliberately unavailable to the ordinary client.
+model PlatformMonitoringState {
+  id Int @id
+  startedAt DateTime @default(now()) @map("started_at") @db.Timestamptz(3)
+  @@map("platform_monitoring_state")
+}
+model PlatformOrganizationPresence {
+  sessionId String @map("session_id") @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  userId String @map("user_id") @db.Uuid
+  lastActiveAt DateTime @default(now()) @map("last_active_at") @db.Timestamptz(3)
+  session AuthSession @relation(fields: [sessionId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  @@id([sessionId, organizationId])
+  @@index([lastActiveAt, organizationId], map: "platform_presence_active_idx")
+  @@map("platform_organization_presence")
+}
+model PlatformOrganizationActivity {
+  organizationId String @id @map("organization_id") @db.Uuid
+  lastActiveAt DateTime @default(now()) @map("last_active_at") @db.Timestamptz(3)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  @@map("platform_organization_activity")
+}
+model PlatformActivityDay {
+  organizationId String @map("organization_id") @db.Uuid
+  userId String @map("user_id") @db.Uuid
+  day DateTime @db.Date
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  @@id([organizationId, day, userId])
+  @@index([day, organizationId], map: "platform_activity_day_idx")
+  @@map("platform_activity_days")
+}
+model PlatformFeatureDay {
+  organizationId String @map("organization_id") @db.Uuid
+  day DateTime @db.Date
+  feature String @db.VarChar(16)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  @@id([organizationId, day, feature])
+  @@map("platform_feature_days")
+}
+model PlatformOnlineSample {
+  bucket DateTime @id @db.Timestamptz(3)
+  usersCount Int @map("users_count")
+  organizationsCount Int @map("organizations_count")
+  sessionsCount Int @map("sessions_count")
+  @@map("platform_online_samples")
+}
+
+model PlatformOperationEvent {
+ id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+ organizationId String @map("organization_id") @db.Uuid
+ userId String? @map("user_id") @db.Uuid
+ resourceId String? @map("resource_id") @db.Uuid
+ module String @db.VarChar(24)
+ action String @db.VarChar(16)
+ createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+ expiresAt DateTime @default(dbgenerated("(now() + '180 days'::interval)")) @map("expires_at") @db.Timestamptz(3)
+ @@index([organizationId,createdAt,id],map:"platform_operations_org_idx")
+ @@index([userId,createdAt,id],map:"platform_operations_user_idx")
+ @@index([expiresAt],map:"platform_operations_expiry_idx")
+ @@map("platform_operation_events")
+}
+model PlatformLifetimeMetrics {
+ id Int @id
+ usersCreated BigInt @map("users_created")
+ organizationsCreated BigInt @map("organizations_created")
+ shiftsCreated BigInt @map("shifts_created")
+ requestsCreated BigInt @map("requests_created")
+ documentsCreated BigInt @map("documents_created")
+ eventsCreated BigInt @map("events_created")
+ @@map("platform_lifetime_metrics")
+}
+
+model PlatformCreationEvent {
+ id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+ metric String @db.VarChar(16)
+ @@index([metric],map:"platform_creation_metric_idx")
+ @@map("platform_creation_events")
 }
