@@ -22,7 +22,7 @@ export async function processFile(operation: FileOperation, kind: string, bytes:
         else reject(new ApiError(503, 'FILE_PROCESSOR_UNAVAILABLE', 'Обработка файлов временно недоступна.'))
       })
     })
-    req.once('error', () => reject(new ApiError(503, 'FILE_PROCESSOR_UNAVAILABLE', 'Обработка файлов временно недоступна.')))
+    req.once('error', error => reject(new ApiError(503, 'FILE_PROCESSOR_UNAVAILABLE', 'Обработка файлов временно недоступна.',undefined,error)))
     req.end(bytes)
   })
 }

@@ -26,9 +26,17 @@ export async function checkAdminDatabase() {
 }
 export async function adminTransaction<T>(work: (db: PoolClient) => Promise<T>): Promise<T> {
   await checkAdminDatabase()
-  const db = await adminPool().connect()
+  return nativeTransaction(adminPool(),work)
+}
+// Pool.query handles client disconnects itself; explicitly leased clients need
+// this listener during the gaps between awaits, including rollback/release.
+export async function nativeTransaction<T>(pool:Pool,work:(db:PoolClient)=>Promise<T>):Promise<T>{
+  const db=await pool.connect()
+  let connectionError:Error|undefined
+  const disconnected=(error:Error)=>{connectionError=error}
+  db.on('error',disconnected)
   try { await db.query('BEGIN'); const result = await work(db); await db.query('COMMIT'); return result }
-  catch (error) { await db.query('ROLLBACK'); throw error }
-  finally { db.release() }
+  catch(error){await db.query('ROLLBACK').catch(failure=>{connectionError??=failure instanceof Error?failure:new Error('Connection unavailable')});throw error}
+  finally{db.release(connectionError);db.removeListener('error',disconnected)}
 }
 export async function closeAdminDatabase() { if (pool) { await pool.end(); pool = undefined; policy = undefined } }

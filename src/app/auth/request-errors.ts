@@ -1,3 +1,4 @@
+import { diagnosticsDocumentDeparting,reportClientFailure } from '../support/client-diagnostics.ts'
 export type RequestFailure = Error & { code?: string; status?: number; errors?: unknown; retryAfterMs?: number; errorId?: string }
 export const supportIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 export function invalidResponseError(status = 502) {
@@ -20,8 +21,11 @@ export async function guardRequest<T>(work: () => Promise<T>, { mutation = false
   try { return await work() }
   catch (error) {
     // Closing a preview or cancelling a query is not a network failure.
-    if (signal?.aborted) throw error
-    throw connectionError(error, mutation)
+    if (signal?.aborted||diagnosticsDocumentDeparting()) throw error
+    const failure=connectionError(error, mutation)
+    if(!failure.errorId&&['NETWORK_ERROR','REQUEST_TIMEOUT','INVALID_RESPONSE'].includes(failure.code??'')){const id=reportClientFailure(failure.code as 'NETWORK_ERROR'|'REQUEST_TIMEOUT'|'INVALID_RESPONSE');if(id){failure.errorId=id;failure.message+=' Код для поддержки: '+id}}
+    if(typeof window!=='undefined'&&failure.errorId&&!['ADMIN_LOCKED','ADMIN_AUTH_REQUIRED','ADMIN_FORBIDDEN'].includes(failure.code??''))window.dispatchEvent(new CustomEvent('staffly:request-failed',{detail:failure}))
+    throw failure
   }
 }
 

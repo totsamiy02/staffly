@@ -5,8 +5,11 @@ import { appUrl, deliverEmail } from '../mail/transport.ts'
 import { ApiError } from '../api-error.ts'
 import { safeError } from '../security/safe-error.ts'
 import { accountRateLimit } from '../security/rate-limit.ts'
-import { adminPool } from './database.ts'
-import { accessState, activity, audit, createChallenge, endAdminSession, lock, requireAdminSession, setPin, unlock, verifyChallenge, type AdminMailer } from './security.ts'
+import { adminRead as read } from './reads.ts'
+import { createOperationsRouter } from './operations/routes.ts'
+import { createManagementRouter } from './management/routes.ts'
+import { clearActionCookie,type ManagementMailer } from './management/actions.ts'
+import { accessState, activity, createChallenge, endAdminSession, lock, setPin, unlock, verifyChallenge, type AdminMailer } from './security.ts'
 import { monitoringEvents } from './events.ts'
 import { monitoringOverview, monitoringOrganizations, monitoringOrganization, monitoringUsers, monitoringOnline, monitoringAnalytics, monitoringUser } from './monitoring.ts'
 
@@ -17,7 +20,11 @@ const defaultMailer: AdminMailer=async(email,code,purpose)=>{
   await deliverEmail(email,{title:purpose==='LOGIN'?'Вход в панель администратора':'Сброс PIN-кода администратора',eyebrow:'Безопасность Staffly',intro:purpose==='LOGIN'?'Подтвердите административный вход кодом. Код привязан к текущему сеансу и действует 5 минут.':'Подтвердите смену PIN-кода. После смены все административные сеансы будут завершены.',code,codeMinutes:5,footer:'Если вы не запрашивали это действие, никому не сообщайте код и проверьте безопасность аккаунта.'})
 }
 const defaultNotice=async(email:string)=>deliverEmail(email,{title:'PIN-код администратора изменён',eyebrow:'Безопасность Staffly',intro:'PIN-код панели администратора изменён. Все административные сеансы завершены. Если вы не выполняли это действие, проверьте безопасность аккаунта и отзовите административный доступ.',footer:'Служебное уведомление о безопасности аккаунта.'})
-export function createAdminRouter({sendCode=defaultMailer,sendNotice=defaultNotice}:{sendCode?:AdminMailer;sendNotice?:(email:string)=>Promise<void>}={}) {
+const defaultManagementMailer:ManagementMailer=async(email,code,summary)=>{
+ if(!process.env.SMTP_USER||!process.env.SMTP_APP_PASSWORD)throw new ApiError(503,'SECURITY_EMAIL_UNAVAILABLE','Настройте отправку писем подтверждения.')
+ await deliverEmail(email,{title:'Подтверждение действия администратора',eyebrow:'Безопасность Staffly',intro:summary+'. Код действует 5 минут и подтверждает только это действие.',code,codeMinutes:5,footer:'Проверьте действие и его получателя. Если запрос сделали не вы, никому не сообщайте код и проверьте безопасность аккаунта.'})
+}
+export function createAdminRouter({sendCode=defaultMailer,sendNotice=defaultNotice,sendManagementCode=defaultManagementMailer}:{sendCode?:AdminMailer;sendNotice?:(email:string)=>Promise<void>;sendManagementCode?:ManagementMailer}={}) {
   const router=Router()
   router.use(requireAuth)
   router.use(accountRateLimit('admin-traffic',120))
@@ -38,15 +45,9 @@ export function createAdminRouter({sendCode=defaultMailer,sendNotice=defaultNoti
   router.post('/unlock',async(request,response)=>response.json(await unlock(request,z.object({pin}).strict().parse(request.body).pin)))
   router.post('/lock',async(request,response)=>{empty.parse(request.body);response.json(await lock(request))})
   router.post('/activity',async(request,response)=>{empty.parse(request.body);response.json(await activity(request))})
-  router.post('/logout',async(request,response)=>{empty.parse(request.body);response.json(await endAdminSession(request,response))})
-  const read=(resource:string,work:(request:Parameters<typeof requireAdminSession>[0])=>Promise<unknown>)=>async(request:Parameters<typeof requireAdminSession>[0],response:Parameters<typeof endAdminSession>[1])=>{
-    const {actor,session}=await requireAdminSession(request)
-    const data=await work(request)
-    // Recheck after DB work; lock/revoke during a read cannot publish its result.
-    await requireAdminSession(request)
-    await audit(adminPool(),actor.userId,'MONITOR_VIEWED','SUCCEEDED',session.id,resource)
-    response.json(data)
-  }
+  router.post('/logout',async(request,response)=>{empty.parse(request.body);const result=await endAdminSession(request,response);clearActionCookie(response);response.json(result)})
+  router.use('/operations',createOperationsRouter())
+  router.use('/management',createManagementRouter(sendManagementCode))
   router.get('/monitoring/events',read('EVENTS',request=>monitoringEvents(request.query)))
   router.get('/monitoring/overview',read('OVERVIEW',request=>monitoringOverview(request.query)))
   router.get('/monitoring/organizations',read('ORGANIZATIONS',request=>monitoringOrganizations(request.query)))

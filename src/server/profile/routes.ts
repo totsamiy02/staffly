@@ -18,10 +18,11 @@ router.use((_request, response, next) => { response.set('Cache-Control', 'privat
 
 function auth(request: Request) { return (request as AuthenticatedRequest).auth! }
 
-function profileUser(user: { id: string; email: string; firstName: string | null; lastName: string | null; middleName: string | null; phone: string | null; bio: string | null; lastSeenAt: Date | null; avatarFileId: string | null }) {
+function profileUser(user: { id: string; publicId:number; email: string; firstName: string | null; lastName: string | null; middleName: string | null; phone: string | null; bio: string | null; lastSeenAt: Date | null; avatarFileId: string | null }) {
   const fullName = [user.lastName, user.firstName].filter(Boolean).join(' ')
   return {
     id: user.id,
+    publicId:user.publicId,
     email: user.email,
     displayName: fullName || user.email.split('@')[0],
     firstName: user.firstName,

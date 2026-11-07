@@ -774,4 +774,4 @@
 
 .app-topbar__admin-link{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:42px;padding:10px 13px;border:1px solid var(--theme-border,#dedede);border-radius:12px;background:var(--theme-surface,#fff);color:var(--theme-text,#444);font-size:12px;font-weight:500;white-space:nowrap;transition:border-color .2s,background .2s;svg{flex:none;}&:hover{background:var(--theme-accent-bg,#f1ebf6);border-color:var(--theme-accent-border,#bda8d0);}&:focus-visible{outline:2px solid var(--theme-focus,#80638f);outline-offset:3px;}}
 @media(max-width:800px){.app-topbar__admin-link{width:42px;min-width:42px;padding:0;}.app-topbar__admin-label{display:none;}}
-@media(max-width:380px){.app-topbar:has(.app-topbar__admin-link) .app-topbar__inner{width:100%;gap:8px;}.app-topbar:has(.app-topbar__admin-link) .app-topbar__logo img{width:88px;}}
+@media(max-width:380px){.app-topbar{padding-inline:12px;}.app-topbar .app-topbar__inner{width:100%;gap:6px;}.app-topbar .app-topbar__logo img{width:80px;}.app-topbar__controls{gap:4px;}}

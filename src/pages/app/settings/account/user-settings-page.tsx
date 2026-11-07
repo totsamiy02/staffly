@@ -1,3 +1,4 @@
+import CopyReference from '../../../../component/ui/copy-reference.tsx'
 import SecurityHistory from '../shared/security-history.tsx'
 import { useFormSafety } from '../../../../app/forms/use-form-safety.ts'
 import DataLifecycleSettings from './data-lifecycle-settings.tsx'
@@ -142,6 +143,7 @@ export default function UserSettingsPage() {
         <div className="profile-settings-heading"><div><h2>Личные данные</h2><p>Имя и фамилия будут использоваться в шапке и списке сотрудников.</p></div><ProfileEditActions editing={false} busy={profileEditing} onEdit={() => editProfile(true)} onCancel={() => void profileSafety.close(() => editProfile(false))} /></div>
         <fieldset className="profile-edit-fields" disabled={profileBusy || imageBusy}><div className="profile-details-groups">
           <ProfileDetails title="Основная информация" icon="people" columns={3} editing={profileEditing} items={[
+            { label: 'ID пользователя', value: user?.publicId&&<CopyReference hideLabel value={String(user.publicId)} label="ID пользователя" />, wide:true },
             { label: 'Фамилия', value: user?.lastName, editor: <input aria-label="Фамилия" value={lastName} onChange={e => setLastName(e.target.value)} maxLength={80} autoComplete="family-name" /> },
             { label: 'Имя', value: user?.firstName, editor: <input aria-label="Имя" value={firstName} onChange={e => setFirstName(e.target.value)} maxLength={80} autoComplete="given-name" /> },
             { label: 'Отчество', value: user?.middleName, editor: <input aria-label="Отчество" value={middleName} onChange={e => setMiddleName(e.target.value)} maxLength={80} autoComplete="additional-name" /> },

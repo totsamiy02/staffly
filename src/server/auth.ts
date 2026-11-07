@@ -91,9 +91,9 @@ export function clearRefreshCookie(response: Response) {
   response.clearCookie(COOKIE_NAME, { path: COOKIE_PATH, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' })
 }
 
-function publicUser(user: { id: string; email: string; firstName?: string | null; lastName?: string | null; middleName?: string | null; phone?: string | null; bio?: string | null; avatarFileId?: string | null }) {
+function publicUser(user: { id: string; publicId:number; email: string; firstName?: string | null; lastName?: string | null; middleName?: string | null; phone?: string | null; bio?: string | null; avatarFileId?: string | null }) {
   const displayName = [user.lastName, user.firstName].filter(Boolean).join(' ') || user.email.split('@')[0]
-  return { id: user.id, email: user.email, displayName, firstName: user.firstName ?? null, lastName: user.lastName ?? null, middleName: user.middleName ?? null, phone: user.phone ?? null, bio: user.bio ?? null, avatarUrl: mediaUrl(user.avatarFileId) }
+  return { id: user.id, publicId:user.publicId, email: user.email, displayName, firstName: user.firstName ?? null, lastName: user.lastName ?? null, middleName: user.middleName ?? null, phone: user.phone ?? null, bio: user.bio ?? null, avatarUrl: mediaUrl(user.avatarFileId) }
 }
 
 async function accessToken(userId: string, sessionId: string) {

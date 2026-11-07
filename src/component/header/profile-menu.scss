@@ -39,3 +39,8 @@ html[data-theme=dark] .profile-menu .topbar-popover--profile { box-shadow:0 16px
 @media(max-width:600px) { .profile-menu .topbar-profile-trigger { min-width:44px;min-height:44px;padding:0;justify-content:center; } }
 @media(max-width:540px) { .profile-menu .topbar-popover--profile { position:fixed;top:78px;right:10px;left:10px;width:auto;max-height:calc(100dvh - 88px);overflow-y:auto;overscroll-behavior:contain; } }
 @media(prefers-reduced-motion:reduce) { .profile-menu button,.profile-menu .topbar-profile-trigger__chevron { transition:none; } }
+
+
+.profile-menu .topbar-popover--profile{max-height:calc(100dvh - 110px);overflow-y:auto;overscroll-behavior:contain;}
+
+.profile-account-reference{padding:10px 0;border-top:1px solid var(--theme-border,#d4d4d4);}

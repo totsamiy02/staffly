@@ -17,3 +17,6 @@ REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE public.organization_resource_bu
 GRANT UPDATE(export_window_start, export_window_count, last_export_at, last_email_at, email_window_start, email_window_count, offer_check_cursor, request_check_cursor) ON public.organization_resource_budgets TO staffly_app;
 REVOKE INSERT,UPDATE,DELETE,TRUNCATE ON public.platform_operation_events,public.platform_lifetime_metrics,public.platform_creation_events FROM staffly_app;
 GRANT EXECUTE ON FUNCTION public.platform_cleanup_operations() TO staffly_app;
+REVOKE UPDATE,DELETE,TRUNCATE ON public.platform_request_errors FROM staffly_app;
+GRANT EXECUTE ON FUNCTION public.platform_cleanup_diagnostics() TO staffly_app;
+GRANT EXECUTE ON FUNCTION public.platform_reconcile_admin_alerts() TO staffly_app;

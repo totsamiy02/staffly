@@ -25,8 +25,9 @@ export function safeError(error: unknown, depth = 0): SafeDiagnostic {
   return { name, ...(code ? { code } : {}), ...(operation ? { operation } : {}) }
 }
 
-export function safeApiError(error: unknown, request: { method: string; route?: { path?: unknown } }, errorId: string) {
+export function safeApiError(error: unknown, request: { method: string; baseUrl?: string; route?: { path?: unknown } }, errorId: string) {
   // A declared route template has no query values, emails or filenames.
-  const route = typeof request.route?.path === 'string' ? request.route.path.slice(0, 200) : 'unmatched'
+  const prefix=typeof request.baseUrl==='string'?request.baseUrl.replace(/[0-9a-f]{8}-[0-9a-f-]{27}/gi,':id'):''
+  const route = typeof request.route?.path === 'string' ? (prefix+request.route.path).slice(0, 200) : 'unmatched'
   return { errorId, at: new Date().toISOString(), method: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'].includes(request.method) ? request.method : 'OTHER', route, ...safeError(error) }
 }

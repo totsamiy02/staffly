@@ -16,12 +16,13 @@ const challengeCookie = () => process.env.NODE_ENV === 'production' ? '__Host-st
 const hashToken = (value: string) => createHash('sha256').update(value).digest('hex')
 const secret = () => process.env.ADMIN_AUTH_SECRET || createHmac('sha256', process.env.JWT_SECRET!).update('staffly-admin-development-only').digest('hex')
 const digest = (purpose: string, value: string) => createHmac('sha256', secret()).update(`${purpose}:${value}`).digest('hex')
+export const managementProof=(value:string)=>digest('management-action',value)
 const same = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b))
 const auth = (request: Request) => (request as AuthenticatedRequest).auth!
 type Principal = { userId: string; authSessionId: string; email: string; version: number; userVersion: number; pinSet: boolean }
-export type AdminSession = { id: string; user_id: string; auth_session_id: string; grant_version: number; user_version: number; created_at:Date; expires_at: Date; activity_at: Date; locked_at: Date | null; revoked_at: Date | null; setup_allowed: boolean; pin_attempts: number }
+export type AdminSession = { token_hash:string; id: string; user_id: string; auth_session_id: string; grant_version: number; user_version: number; created_at:Date; expires_at: Date; activity_at: Date; locked_at: Date | null; revoked_at: Date | null; setup_allowed: boolean; pin_attempts: number }
 export type AdminState = { eligible: boolean; state: 'authenticate' | 'setup-pin' | 'locked' | 'active'; expiresAt?: string; lockAt?: string; pinSet?: boolean; attemptsRemaining?: number }
-type AuditAction = 'CHALLENGE_SENT' | 'CHALLENGE_DENIED' | 'LOGIN' | 'PIN_CREATED' | 'PIN_RESET' | 'PIN_DENIED' | 'UNLOCK' | 'LOCK' | 'LOGOUT' | 'MONITOR_VIEWED' | 'ACCESS_DENIED'
+type AuditAction = 'CHALLENGE_SENT' | 'CHALLENGE_DENIED' | 'LOGIN' | 'PIN_CREATED' | 'PIN_RESET' | 'PIN_DENIED' | 'UNLOCK' | 'LOCK' | 'LOGOUT' | 'MONITOR_VIEWED' | 'OPERATIONS_VIEWED' | 'MANAGEMENT_VIEWED' | 'MANAGEMENT_CHALLENGE_SENT' | 'MANAGEMENT_CHALLENGE_DENIED' | 'EXPORT_RETRY' | 'ACCESS_DENIED'
 export async function audit(db: Pick<PoolClient,'query'>, userId: string, action: AuditAction, outcome: 'SUCCEEDED' | 'DENIED' | 'FAILED' = 'SUCCEEDED', sessionId?: string, resource?: string, resourceId?: string) {
   await db.query('INSERT INTO staffly_admin.audit_events(id,user_id,session_id,action,outcome,resource,resource_id) VALUES ($1,$2,$3,$4,$5,$6,$7)',[randomUUID(),userId,sessionId ?? null,action,outcome,resource ?? null,resourceId ?? null])
 }
@@ -84,7 +85,7 @@ export async function createChallenge(request: Request, response: Response, pass
     await db.query('INSERT INTO staffly_admin.challenges(id,user_id,auth_session_id,grant_version,user_version,purpose,code_hash,browser_hash,expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)',[id,actor.userId,actor.authSessionId,actor.version,actor.userVersion,purpose,digest('email-code',`${id}:${code}`),hashToken(browser),new Date(Date.now()+ADMIN_CODE_MS)])
   })
   try { await sendCode(actor.email,code,purpose) }
-  catch { await adminPool().query('UPDATE staffly_admin.challenges SET used_at=now() WHERE id=$1',[id]); throw new ApiError(502,'SECURITY_EMAIL_UNAVAILABLE','Не удалось отправить код. Попробуйте позже.') }
+  catch(error) { await adminPool().query('UPDATE staffly_admin.challenges SET used_at=now() WHERE id=$1',[id]); throw new ApiError(502,'SECURITY_EMAIL_UNAVAILABLE','Не удалось отправить код. Попробуйте позже.',undefined,error) }
   await adminPool().query('UPDATE staffly_admin.challenges SET sent_at=now() WHERE id=$1 AND used_at IS NULL',[id])
   await audit(adminPool(),actor.userId,'CHALLENGE_SENT')
   cookie(response,challengeCookie(),browser,ADMIN_CODE_MS)

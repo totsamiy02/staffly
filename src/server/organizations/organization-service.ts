@@ -52,6 +52,7 @@ export async function listOrganizations(userId: string) {
     // The organization insert trigger and backfill guarantee this record.
     subscription: effectiveSubscription(organization.subscription!),
     id: organization.id,
+    publicId:organization.publicId,
     createdByViewer: organization.createdByUserId === userId,
     name: organization.name,
     description: organization.description,
@@ -73,6 +74,7 @@ export async function getOrganization(userId: string, organizationId: string) {
   return {
     subscription: await subscriptionSnapshot(organizationId),
     id: membership.organization.id,
+    publicId:membership.organization.publicId,
     name: membership.organization.name,
     description: membership.organization.description,
     timezone: membership.organization.timezone,

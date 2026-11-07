@@ -1,5 +1,6 @@
 import { runDataRetention } from './privacy/maintenance.ts'
 import { startMonitoringCollection } from './admin/collection.ts'
+import { startAdminAlerts } from './admin/management/collection.ts'
 import { startRequestMaintenance } from './requests/worker.ts'
 import { startEmailNotifications } from './mail/email-worker.ts'
 import { startEventNotifications } from './events/worker.ts'
@@ -12,7 +13,7 @@ import { syncSubscriptionNotices } from './subscriptions/notifications.ts'
 
 export function startWorkers() {
   let subscriptionCursor: string | undefined
-  const stops = [startMonitoringCollection(), startBackgroundTask({ name: 'Data retention', intervalMs: 60000, run: shouldContinue => runDataRetention({ shouldContinue }) }), startStorageCleanup(), startOAuthCleanup(), startRequestMaintenance(), startEventNotifications(), startEmailNotifications(), startReportExports(),
+  const stops = [startMonitoringCollection(), startAdminAlerts(), startBackgroundTask({ name: 'Data retention', intervalMs: 60000, run: shouldContinue => runDataRetention({ shouldContinue }) }), startStorageCleanup(), startOAuthCleanup(), startRequestMaintenance(), startEventNotifications(), startEmailNotifications(), startReportExports(),
     startBackgroundTask({ name: 'Subscription reminders', intervalMs: 60000, run: async () => { subscriptionCursor = await syncSubscriptionNotices(undefined, undefined, subscriptionCursor) } }),
     startBackgroundTask({ name: 'Rate counter cleanup', intervalMs: 60000, run: async () => {
       await prisma.$executeRaw`DELETE FROM api_rate_limits WHERE reset_at < now() - interval '1 hour'`

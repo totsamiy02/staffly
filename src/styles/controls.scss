@@ -12,7 +12,7 @@ input:not([type=checkbox]):not([type=radio]):not([type=file]), textarea {
   &:disabled { color: var(--theme-muted,#737780) !important; background-color: var(--theme-surface-muted,#f1f2f4) !important; cursor: not-allowed; opacity: 1; }
   &[readonly] { color: var(--theme-text,#454b54) !important; }
   // Composite fields draw their focus on the outer shell, including autofill.
-  &:focus-visible:not(:where(.auth__field input, .account-password-field input)) { outline: 2px solid var(--theme-focus,#686868) !important; outline-offset: 2px; }
+  &:focus-visible:not(:where(.auth__field input, .account-password-field input, .admin-search input, .admin-management-field input)) { outline: 2px solid var(--theme-focus,#686868) !important; outline-offset: 2px; }
   &[aria-invalid=true], &:user-invalid { border-color: var(--theme-danger-border,#a34b4b); outline-color: var(--theme-danger,#a34b4b); }
 }
 .auth { --field-value: var(--theme-on-solid,#f5f5f5); --field-example: var(--theme-quiet,#a4a4ab); }

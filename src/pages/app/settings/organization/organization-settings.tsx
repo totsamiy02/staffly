@@ -1,3 +1,4 @@
+import CopyReference from '../../../../component/ui/copy-reference.tsx'
 import SecurityHistory from '../shared/security-history.tsx'
 import { useFormSafety } from '../../../../app/forms/use-form-safety.ts'
 import SubscriptionSettings from '../../subscriptions/subscription-settings.tsx'
@@ -148,6 +149,7 @@ export default function OrganizationSettings({ organization }: { organization: O
       <div className="organization-logo-editor"><ImageUpload floatingControls endpoint={`/organizations/${organization.id}/logo`} imageUrl={logoDraft.url} onDraftChange={logoDraft.change} name={organization.name} avatarClassName="organization-logo-editor__preview" disabled={!editing || busy} onBusyChange={setImageBusy} onChange={async () => { await Promise.all([queryClient.invalidateQueries({ queryKey: ['organization', organization.id] }), queryClient.invalidateQueries({ queryKey: ['organizations'] })]) }} onMessage={setMessage} onError={setError} /></div>
       <form onSubmit={saveOrganization} className="organization-profile-form"><fieldset className="profile-edit-fields" disabled={busy || imageBusy}><div className="profile-details-groups">
         <ProfileDetails title="Об организации" icon="building" editing={editing} items={[
+          ...(organization.owner&&organization.publicId?[{ label: 'ID организации', value: <CopyReference hideLabel value={String(organization.publicId)} label="ID организации" />, wide:true }]:[]),
           { label: 'Название', value: organization.name, editor: <input aria-label="Название" value={name} onChange={e => setName(e.target.value)} minLength={2} maxLength={120} required /> },
           { label: 'Часовой пояс', value: RUSSIAN_TIMEZONES.find(item => item.value === (organization.organizationTimezone ?? organization.timezone))?.label ?? organization.organizationTimezone ?? organization.timezone, editor: <Select aria-label="Часовой пояс" disabled={busy || imageBusy} value={timezone} onChange={e => setTimezone(e.target.value)}>{RUSSIAN_TIMEZONES.map(item => <option value={item.value} key={item.value}>{item.label}</option>)}</Select> },
         ]} />

@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { databasePool, prisma } from '../db.ts'
 import { ApiError } from '../api-error.ts'
 import { activePresenceSql } from './collection.ts'
+import { adminPool } from './database.ts'
 import { effectiveSubscription, type SubscriptionRecord } from '../../app/subscriptions/plans.ts'
 
 const querySchema=z.object({page:z.coerce.number().int().min(1).max(10000).default(1),search:z.string().trim().max(120).default(''),plan:z.enum(['ALL','FREE','TEAM','BUSINESS']).default('ALL'),status:z.enum(['all','online','attention','verified','pending']).default('all'),sort:z.enum(['newest','online']).default('newest')})
@@ -12,16 +13,16 @@ const onlineSession=`${activeSession} AND s.last_active_at>now()-interval '90 se
 const planSql=`CASE WHEN sub.next_plan IS NOT NULL AND sub.next_starts_at<=now() THEN sub.next_plan ELSE COALESCE(sub.plan,'FREE') END`
 const untilSql=`CASE WHEN sub.next_plan IS NOT NULL AND sub.next_starts_at<=now() THEN sub.next_ends_at ELSE sub.period_end END`
 const effectivePlanSql=`CASE WHEN (${planSql})='FREE' THEN 'FREE' WHEN (sub.next_plan IS NULL OR sub.next_starts_at IS NULL OR sub.next_starts_at>now()) AND sub.trial_ends_at>now() THEN (${planSql}) WHEN (${untilSql})+interval '7 days'>now() THEN (${planSql}) ELSE 'FREE' END`
-const escapeSearch=(search:string)=>'%'+search.replace(/[\\%_]/g,'\\$&')+'%'
+const escapeSearch=(search:string)=>/^#?[1-9]\d{0,9}$/.test(search.trim())?search.trim().replace(/^#/,''):'%'+search.replace(/[\\%_]/g,'\\$&')+'%'
 const iso=(value:Date|string|null|undefined)=>value?new Date(value).toISOString():null
 const number=(value:unknown)=>Number(value??0)
 type Row=Record<string,unknown>
 function organizationDto(row:Row){
  const record:SubscriptionRecord={plan:String(row.plan??'FREE'),periodStart:row.period_start as Date|null,periodEnd:row.period_end as Date|null,trialEndsAt:row.trial_ends_at as Date|null,trialStartedAt:row.trial_started_at as Date|null,nextPlan:row.next_plan as string|null,nextStartsAt:row.next_starts_at as Date|null,nextEndsAt:row.next_ends_at as Date|null}
  const subscription=effectiveSubscription(record)
- return {id:String(row.id),name:String(row.name),timezone:String(row.timezone),createdAt:iso(row.created_at as Date),lastActiveAt:iso(row.last_active_at as Date|null),members:number(row.members),locations:number(row.locations),storageBytes:number(row.storage_bytes),online:number(row.online),onlineSessions:number(row.online_sessions),subscription,attention:number(row.members)>=subscription.limits.members*.8||number(row.locations)>=subscription.limits.locations*.8||number(row.storage_bytes)>=subscription.limits.storageBytes*.8}
+ return {id:String(row.id),publicId:Number(row.public_id),name:String(row.name),timezone:String(row.timezone),createdAt:iso(row.created_at as Date),lastActiveAt:iso(row.last_active_at as Date|null),members:number(row.members),locations:number(row.locations),storageBytes:number(row.storage_bytes),online:number(row.online),onlineSessions:number(row.online_sessions),subscription,attention:number(row.members)>=subscription.limits.members*.8||number(row.locations)>=subscription.limits.locations*.8||number(row.storage_bytes)>=subscription.limits.storageBytes*.8}
 }
-const organizationSelect=`SELECT o.id,o.name,o.timezone,o.created_at,sub.plan,sub.period_start,sub.period_end,sub.trial_ends_at,sub.trial_started_at,sub.next_plan,sub.next_starts_at,sub.next_ends_at,
+const organizationSelect=`SELECT o.id,o.public_id,o.name,o.timezone,o.created_at,sub.plan,sub.period_start,sub.period_end,sub.trial_ends_at,sub.trial_started_at,sub.next_plan,sub.next_starts_at,sub.next_ends_at,
  COALESCE(b.storage_bytes,0) AS storage_bytes,
  (SELECT count(*)::int FROM organization_members m JOIN users u ON u.id=m.user_id WHERE m.organization_id=o.id AND m.left_at IS NULL AND u.deleted_at IS NULL) AS members,
  (SELECT count(*)::int FROM organization_locations l WHERE l.organization_id=o.id AND l.archived_at IS NULL) AS locations,
@@ -32,7 +33,7 @@ const organizationSelect=`SELECT o.id,o.name,o.timezone,o.created_at,sub.plan,su
 export async function monitoringOrganizations(raw:unknown){
  const q=querySchema.parse(raw), parameters=[escapeSearch(q.search),q.plan]
  // Filtering stays before count/pagination, including effective plan after expiry.
- const conditions=`o.deleted_at IS NULL AND (o.name ILIKE $1 OR o.id::text ILIKE $1) AND ($2='ALL' OR (${effectivePlanSql})=$2)`
+ const conditions=`o.deleted_at IS NULL AND (o.name ILIKE $1 OR o.id::text ILIKE $1 OR o.public_id::text ILIKE $1) AND ($2='ALL' OR (${effectivePlanSql})=$2)`
  const extra=q.status==='online'?' AND item.online>0':q.status==='attention'?` AND (item.members>=CASE item.effective_plan WHEN 'BUSINESS' THEN 80 WHEN 'TEAM' THEN 20 ELSE 4 END OR item.locations>=CASE item.effective_plan WHEN 'BUSINESS' THEN 8 WHEN 'TEAM' THEN 2.4 ELSE .8 END OR item.storage_bytes>=item.storage_limit*.8)`:''
  const source=`WITH item AS (${organizationSelect}, LATERAL (SELECT (${effectivePlanSql}) AS effective_plan, CASE (${effectivePlanSql}) WHEN 'BUSINESS' THEN 10737418240::bigint WHEN 'TEAM' THEN 2147483648::bigint ELSE 262144000::bigint END AS storage_limit) limits WHERE ${conditions})`
  // organizationSelect columns intentionally contain only monitoring metadata.
@@ -78,14 +79,14 @@ export async function monitoringOrganization(id:string,raw:unknown={}){
  return {...organizationDto(row),ownerName:owner?[owner.user.lastName,owner.user.firstName].filter(Boolean).join(' ')||'Владелец организации':null,daily,features,events,startedAt:await monitoringStarted()}
 }
 function maskEmail(email:string){const at=email.lastIndexOf('@');return `${email.slice(0,1)}•••${email.slice(at)}`}
-const userSelect=`SELECT u.id,u.email,u.first_name,u.last_name,u.created_at,u.email_verified_at,u.last_seen_at,
+const userSelect=`SELECT u.id,u.public_id,u.email,u.first_name,u.last_name,u.created_at,u.email_verified_at,u.last_seen_at,
  (SELECT count(*)::int FROM organization_members m JOIN organizations o ON o.id=m.organization_id WHERE m.user_id=u.id AND m.left_at IS NULL AND o.deleted_at IS NULL) AS organizations,
  (SELECT count(*)::int FROM auth_sessions s WHERE s.user_id=u.id AND ${activeSession}) AS sessions,
  EXISTS(SELECT 1 FROM auth_sessions s WHERE s.user_id=u.id AND ${onlineSession}) AS online FROM users u`
-function userDto(row:Row){return {id:String(row.id),displayName:[row.last_name,row.first_name].filter(Boolean).join(' ')||'Пользователь',email:maskEmail(String(row.email)),createdAt:iso(row.created_at as Date),emailVerified:Boolean(row.email_verified_at),lastSeenAt:iso(row.last_seen_at as Date|null),organizations:number(row.organizations),sessions:number(row.sessions),online:Boolean(row.online)}}
+function userDto(row:Row){return {id:String(row.id),publicId:Number(row.public_id),displayName:[row.last_name,row.first_name].filter(Boolean).join(' ')||'Пользователь',email:maskEmail(String(row.email)),createdAt:iso(row.created_at as Date),emailVerified:Boolean(row.email_verified_at),lastSeenAt:iso(row.last_seen_at as Date|null),organizations:number(row.organizations),sessions:number(row.sessions),online:Boolean(row.online)}}
 export async function monitoringUsers(raw:unknown){
  const q=querySchema.parse(raw),search=escapeSearch(q.search)
- const condition=`u.deleted_at IS NULL AND (u.email ILIKE $1 OR concat_ws(' ',u.last_name,u.first_name) ILIKE $1 OR u.id::text ILIKE $1)${q.status==='verified'?' AND u.email_verified_at IS NOT NULL':q.status==='pending'?' AND u.email_verified_at IS NULL':q.status==='online'?` AND EXISTS(SELECT 1 FROM auth_sessions s WHERE s.user_id=u.id AND ${onlineSession})`:''}`
+ const condition=`u.deleted_at IS NULL AND (u.email ILIKE $1 OR concat_ws(' ',u.last_name,u.first_name) ILIKE $1 OR u.id::text ILIKE $1 OR u.public_id::text ILIKE $1)${q.status==='verified'?' AND u.email_verified_at IS NOT NULL':q.status==='pending'?' AND u.email_verified_at IS NULL':q.status==='online'?` AND EXISTS(SELECT 1 FROM auth_sessions s WHERE s.user_id=u.id AND ${onlineSession})`:''}`
  const [{rows},{rows:[count]},{rows:[totals]}]=await Promise.all([
   databasePool.query(`${userSelect} WHERE ${condition} ORDER BY u.created_at DESC,u.id DESC LIMIT $2 OFFSET $3`,[search,limit,(q.page-1)*limit]),
   databasePool.query(`SELECT count(*)::int AS total FROM users u WHERE ${condition}`,[search]),
@@ -99,7 +100,8 @@ export async function monitoringUser(id:string,raw:unknown={}){
  if(!row)throw new ApiError(404,'ADMIN_USER_NOT_FOUND','Пользователь не найден.')
  const memberships=await prisma.organizationMember.findMany({where:{userId:id,leftAt:null,organization:{deletedAt:null,name:{contains:search,mode:'insensitive'}}},take:20,skip:(page-1)*20,orderBy:{joinedAt:'desc'},select:{role:true,organization:{select:{id:true,name:true}}}})
  const membershipsTotal=await prisma.organizationMember.count({where:{userId:id,leftAt:null,organization:{deletedAt:null,name:{contains:search,mode:'insensitive'}}}})
- return {...userDto(row),memberships:memberships.map(m=>({id:m.organization.id,name:m.organization.name,role:m.role})),membershipsTotal,page,pageSize:20}
+ const grant=(await adminPool().query('SELECT enabled FROM staffly_admin.accounts WHERE user_id=$1',[id])).rows[0]
+ return {...userDto(row),platformAdmin:grant?.enabled?'active':grant?'revoked':'none',memberships:memberships.map(m=>({id:m.organization.id,name:m.organization.name,role:m.role})),membershipsTotal,page,pageSize:20}
 }
 export async function monitoringOnline(raw:unknown){
  const q=querySchema.parse(raw)

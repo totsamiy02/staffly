@@ -40,7 +40,7 @@ export async function requestAccountDeletion(auth: AccountSession, sendCode = se
     return user.email
   }))
   try { await sendCode(email, code) }
-  catch { await prisma.accountDeletionChallenge.deleteMany({ where: { id } }); throw new ApiError(503, 'SECURITY_EMAIL_UNAVAILABLE', 'Письмо не отправлено. Повторите запрос позже.') }
+  catch(error) { await prisma.accountDeletionChallenge.deleteMany({ where: { id } }); throw new ApiError(503, 'SECURITY_EMAIL_UNAVAILABLE', 'Письмо не отправлено. Повторите запрос позже.',undefined,error) }
   return { challengeId: id, expiresAt: new Date(+now + 600_000) }
 }
 export async function confirmAccountDeletion(auth: AccountSession, challengeId: string, code: string) {

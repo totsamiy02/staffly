@@ -132,6 +132,7 @@ export async function processReportExport() {
     const retry = error && typeof error === 'object' && 'code' in error && error.code === 'EXPORT_INTERRUPTED' && claimed.attempts < 3
     const failed = await prisma.reportExport.updateMany({ where: { id: claimed.id, leaseToken: token, status: 'RUNNING' }, data: { status: retry ? 'PENDING' : 'FAILED', leaseUntil: null, errorCode: retry ? null : error instanceof ApiError && error.code === 'ORGANIZATION_STORAGE_QUOTA' ? error.code : 'EXPORT_FAILED' } })
     console.error('Report export failed:', claimed.id, error instanceof ApiError ? error.code : 'EXPORT_FAILED')
+    if(failed.count&&retry)await prisma.platformRequestError.create({data:{id:randomUUID(),nodeId:'00000000-0000-0000-0000-000000000000',method:'OTHER',route:'/workers/reports',status:0,name:'Error',source:'report',eventCode:'EXPORT_INTERRUPTED',jobId:claimed.id,attempt:claimed.attempts,maxAttempts:3,nextAttemptAt:new Date(),userId:claimed.userId,organizationId:claimed.organizationId}})
     if (failed.count && !retry) await recordSecurityEvent(prisma, { action: 'REPORT_EXPORT', userId: claimed.userId, organizationId: claimed.organizationId, resourceType: 'EXPORT', resourceId: claimed.id, outcome: 'FAILED', reasonCode: 'OPERATION_FAILED' })
   } finally { await rm(directory, { recursive: true, force: true }) }
   return true

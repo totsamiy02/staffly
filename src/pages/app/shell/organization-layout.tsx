@@ -21,6 +21,7 @@ import OrganizationInfoDialog from '../organizations/organization-info-dialog.ts
 import AnimatedOverlay from '../../../component/ui/modal/animated-overlay.tsx'
 import { useDocuments } from '../../../app/documents/queries.ts'
 import '../app.scss'
+import RequestErrorMessage from '../../../component/ui/request-error-message.tsx'
 
 const DraftPage = lazy(() => import('../schedule/planning/draft-page.tsx'))
 const DemandPage = lazy(() => import('../schedule/planning/demand-page.tsx'))
@@ -59,11 +60,12 @@ function ModuleNotFound({ organizationPath }: { organizationPath: string }) {
   </section>
 }
 
-function WorkspaceLoadError({ retry, notFound, organizationId }: { retry: () => void; notFound: boolean; organizationId?: string }) {
+function WorkspaceLoadError({ retry, notFound, organizationId,error }: { retry: () => void; notFound: boolean; organizationId?: string;error?:unknown }) {
   return <div className="app-page"><AppTopbar notificationOrganizationId={organizationId} /><main className="workspace-load-error" role="alert">
     <p className="app-eyebrow">{notFound ? 'Организация не найдена' : 'Не удалось открыть организацию'}</p>
     <h1>{notFound ? 'Нет доступа или организация удалена' : 'Страница временно недоступна'}</h1>
     <p>{notFound ? 'Проверьте адрес или вернитесь к доступным организациям.' : 'Проверьте подключение и попробуйте ещё раз.'}</p>
+    {error!=null&&<p><RequestErrorMessage error={error}/></p>}
     <div>{!notFound && <button className="app-primary" type="button" onClick={retry}>Повторить</button>}<Link className="app-secondary" to="/app">Все организации</Link></div>
   </main></div>
 }
@@ -89,7 +91,7 @@ export default function OrganizationLayout() {
   const [infoOrganizationId, setInfoOrganizationId] = useState<string | null>(null)
   useEffect(() => { setInfoOrganizationId(null) }, [organizationId])
   if (query.isLoading) return <main className="app-loading"><span /></main>
-  if (query.isError || !query.data) return <WorkspaceLoadError organizationId={organizationId} retry={() => void query.refetch()} notFound={Boolean(query.error && 'status' in query.error && query.error.status === 404)} />
+  if (query.isError || !query.data) return <WorkspaceLoadError error={query.error} organizationId={organizationId} retry={() => void query.refetch()} notFound={Boolean(query.error && 'status' in query.error && query.error.status === 404)} />
   const organization = query.data.organization
   const organizationPath = `/app/organizations/${organization.id}`
   const currentSegment = location.pathname.slice(organizationPath.length).split('/').filter(Boolean)[0] ?? ''

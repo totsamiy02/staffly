@@ -23,7 +23,7 @@ export function libpqEnvironment(databaseUrl: string) {
 }
 
 /** Database only: object-storage files require a separate versioned backup. */
-export async function createDatabaseBackup({ databaseUrl, file, pgBin = '' }: { databaseUrl?: string; file?: string; pgBin?: string }) {
+export async function createDatabaseBackup({ databaseUrl, file, pgBin = '', signal }: { databaseUrl?: string; file?: string; pgBin?: string; signal?: AbortSignal }) {
   if (!databaseUrl || !['postgres:', 'postgresql:'].includes(new URL(databaseUrl).protocol)) throw new Error('BACKUP_DATABASE_URL must be a PostgreSQL connection URL')
   if (!file || !file.endsWith('.dump')) throw new Error('Choose an explicit output path ending in .dump')
   const destination = path.resolve(file), temporary = destination + '.' + randomUUID() + '.tmp'
@@ -32,7 +32,7 @@ export async function createDatabaseBackup({ databaseUrl, file, pgBin = '' }: { 
   try {
     const child = spawn(pgBin ? path.join(pgBin, 'pg_dump') : 'pg_dump', ['--format=custom', '--no-owner', '--no-privileges', '--lock-wait-timeout=10s', '--file', temporary], {
       // Individual libpq variables keep credentials out of argv/logs.
-      env: libpqEnvironment(databaseUrl), stdio: ['ignore', 'ignore', 'pipe'],
+      env: libpqEnvironment(databaseUrl), stdio: ['ignore', 'ignore', 'pipe'], signal,
     })
     child.stderr.resume()
     const code = await new Promise<number | null>((resolve, reject) => { child.once('error', reject); child.once('exit', code => resolve(code)) })

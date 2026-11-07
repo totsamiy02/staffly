@@ -29,7 +29,7 @@ it('rejects placeholder secrets, insecure storage and malformed production origi
     { JWT_SECRET: 'replace-with-a-random-secret-of-at-least-32-characters' }, { JWT_SECRET: 'x'.repeat(64) }, { INVITE_CODE_SECRET: '' }, { METRICS_TOKEN: valid.JWT_SECRET },
     { APP_ORIGIN: 'http://staffly.test' }, { APP_ORIGIN: 'https://staffly.test/app' }, { APP_ORIGIN: 'https://staffly.test/' }, { APP_ORIGIN: 'https://user:pass@staffly.test' },
     { S3_ALLOW_INSECURE: 'true' }, { S3_ENDPOINT: 'http://minio:9000' }, { STORAGE_DRIVER: 'local' }, { DB_TIMEZONE: 'Europe/Kiev' }, { EMAIL_DELIVERY_PAUSED: 'yes' },
-    { ADMIN_MANAGEMENT_DATABASE_URL: 'postgresql://operator@localhost/staffly' }, { MIGRATION_DATABASE_URL: 'postgresql://migrator@localhost/staffly' },
+    { ADMIN_MANAGEMENT_DATABASE_URL: 'postgresql://operator@localhost/staffly' }, { MIGRATION_DATABASE_URL: 'postgresql://migrator@localhost/staffly' }, { BACKUP_DATABASE_URL: 'postgresql://backup@localhost/staffly' }, { RESTORE_DATABASE_URL: 'postgresql://restore@localhost/staffly' },
   ]) assert.throws(() => validateProductionConfig({ ...valid, ...patch }))
 })
 

@@ -1,3 +1,4 @@
+import { startClientDiagnostics } from '../support/client-diagnostics.ts'
 import { readTabValue } from '../workspace/tab-storage.ts'
 import { documentMime } from '../file-preview/formats.ts'
 import { clearFormDrafts } from '../forms/draft-storage.ts'
@@ -11,7 +12,7 @@ import { startLiveStream } from '../live-stream.ts'
 export { authPost, authGet } from './session-transport.ts'
 import { createContext, useCallback, useContext, useEffect, useRef, useState, useMemo, type ReactNode } from 'react'
 
-export type AuthUser = { id: string; email: string; displayName: string; firstName: string | null; lastName: string | null; middleName: string | null; phone: string | null; bio: string | null; avatarUrl: string | null }
+export type AuthUser = { id: string; publicId?:number; email: string; displayName: string; firstName: string | null; lastName: string | null; middleName: string | null; phone: string | null; bio: string | null; avatarUrl: string | null }
 type VerifyEmailBody = { email: string; code: string; password: string; confirmPassword: string; consentData: boolean; consentTerms: boolean }
 type AuthResult = { user: AuthUser; accessToken: string }
 type ApiOptions = { method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'; body?: unknown; signal?: AbortSignal }
@@ -49,6 +50,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const currentUser = useRef<AuthUser | null>(null)
   const retryStartup = useCallback(() => { setStartupError(null); setLoading(true); setStartupAttempt(n => n + 1) }, [])
   const tokenRef = useRef<string | null>(null)
+  useEffect(()=>startClientDiagnostics(()=>({token:tokenRef.current,userId:userIdRef.current})),[])
   const authVersion = useRef(0)
   const refreshRef = useRef<Promise<AuthResult | null> | null>(null)
 
@@ -168,8 +170,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const deadline = Date.now() + 5 * 60000
       let ready = false
       while (Date.now() < deadline) {
-        const job = await apiRequest<{ status: string; message?: string }>(statusPath)
-        if (job.status === 'FAILED') throw new Error(job.message || 'Не удалось подготовить отчёт.')
+        const job = await apiRequest<{ status: string; message?: string;errorId?:string;id?:string }>(statusPath)
+        if (job.status === 'FAILED') {const errorId=job.errorId??job.id;throw Object.assign(new Error((job.message || 'Не удалось подготовить отчёт.')+(errorId?' Код для поддержки: '+errorId:'')),{errorId,code:'EXPORT_FAILED'})}
         if (job.status === 'READY') { ready = true; break }
         await new Promise(resolve => setTimeout(resolve, 1500))
       }

@@ -3,18 +3,21 @@ import { startWorkers } from './workers.ts'
 import { prisma, databasePool } from './db.ts'
 import { checkDatabasePolicy } from './database-policy.ts'
 import { startWorkerHealth } from './worker-health.ts'
+import { startOperationsTelemetry } from './admin/operations/telemetry.ts'
+import { backgroundTasksHealthy } from './background-task.ts'
 
 if (process.env.NODE_ENV === 'production') await checkDatabasePolicy(databasePool)
 
 const stop = startWorkers()
 const stopHealth = startWorkerHealth(() => prisma.$queryRaw`SELECT 1`)
+const stopOperations=startOperationsTelemetry({role:'worker',ready:()=>!stopping&&backgroundTasksHealthy()})
 const keepAlive = setInterval(() => {}, 60000)
 let stopping = false
 async function shutdown() {
   if (stopping) return
   stopping = true
   const deadline = setTimeout(() => process.exit(1), 75000)
-  try { await Promise.all([stop(), stopHealth()]); await prisma.$disconnect(); clearInterval(keepAlive); clearTimeout(deadline) }
+  try { await Promise.all([stop(), stopHealth()]);await stopOperations();await prisma.$disconnect(); clearInterval(keepAlive); clearTimeout(deadline) }
   catch (error) { console.error('Worker shutdown failed:', safeError(error)); process.exitCode = 1; clearInterval(keepAlive); clearTimeout(deadline) }
 }
 process.once('SIGTERM', () => { void shutdown() })

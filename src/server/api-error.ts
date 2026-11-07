@@ -8,8 +8,9 @@ export class ApiError extends Error {
     code: string,
     message: string,
     details?: unknown,
+    cause?: unknown,
   ) {
-    super(message)
+    super(message,cause===undefined?undefined:{cause})
     this.status = status
     this.code = code
     this.details = details

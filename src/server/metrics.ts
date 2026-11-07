@@ -59,5 +59,10 @@ export function createHttpMetrics() {
     lines.push(`staffly_db_pool_total ${databasePool.totalCount}`, `staffly_db_pool_idle ${databasePool.idleCount}`, `staffly_db_pool_waiting ${databasePool.waitingCount}`)
     response.set({ 'Content-Type': 'text/plain; version=0.0.4; charset=utf-8', 'Cache-Control': 'no-store' }).send(lines.join('\n') + '\n')
   }
-  return { middleware, handler }
+  const snapshot=()=>{
+    let requests=0,errors=0,seconds=0
+    for(const [labels,row]of series){requests+=row.count;seconds+=row.sum;if(/status="5\d\d"/.test(labels))errors+=row.count}
+    return{requests,errors,active,meanMs:requests?Math.round(seconds*1000/requests*10)/10:0}
+  }
+  return { middleware, handler, snapshot }
 }

@@ -77,6 +77,7 @@ model AuthAttemptLimit {
 }
 
 model User {
+  publicId Int @unique @default(autoincrement()) @map("public_id")
   platformPresence PlatformOrganizationPresence[]
   platformActivityDays PlatformActivityDay[]
   subscriptionPurchases SubscriptionPurchase[]
@@ -199,10 +200,13 @@ model EmailDelivery {
   availableAt DateTime @default(now()) @map("available_at") @db.Timestamptz(3)
   lockedUntil DateTime? @map("locked_until") @db.Timestamptz(3)
   deliveredAt DateTime? @map("delivered_at") @db.Timestamptz(3)
+  lastErrorCode String? @map("last_error_code") @db.VarChar(40)
+  lastErrorAt DateTime? @map("last_error_at") @db.Timestamptz(3)
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   @@index([organizationId, status, lockedUntil], map: "email_deliveries_org_active_idx")
   @@index([status, availableAt])
   @@index([userId, category])
+  @@index([createdAt])
   @@map("email_deliveries")
 }
 
@@ -300,6 +304,7 @@ enum RequestEventType {
 }
 
 model Organization {
+  publicId Int @unique @default(autoincrement()) @map("public_id")
   platformPresence PlatformOrganizationPresence[]
   platformActivityDays PlatformActivityDay[]
   platformFeatureDays PlatformFeatureDay[]
@@ -1630,4 +1635,41 @@ model PlatformCreationEvent {
  metric String @db.VarChar(16)
  @@index([metric],map:"platform_creation_metric_idx")
  @@map("platform_creation_events")
+}
+
+model PlatformRuntimeNode {
+  id String @id @db.Uuid
+  role String @db.VarChar(12)
+  startedAt DateTime @map("started_at") @db.Timestamptz(3)
+  heartbeatAt DateTime @map("heartbeat_at") @db.Timestamptz(3)
+  stoppedAt DateTime? @map("stopped_at") @db.Timestamptz(3)
+  ready Boolean @default(false)
+  snapshot Json @default("{}")
+  @@index([heartbeatAt])
+  @@map("platform_runtime_nodes")
+}
+
+model PlatformRequestError {
+  id String @id @db.Uuid
+  nodeId String @map("node_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  method String @db.VarChar(8)
+  route String @db.VarChar(200)
+  status Int
+  name String @db.VarChar(64)
+  code String? @db.VarChar(40)
+  userId String? @map("user_id") @db.Uuid
+  organizationId String? @map("organization_id") @db.Uuid
+  source String @default("request") @db.VarChar(12)
+  eventCode String? @map("event_code") @db.VarChar(80)
+  jobId String? @map("job_id") @db.Uuid
+  attempt Int?
+  maxAttempts Int? @map("max_attempts")
+  nextAttemptAt DateTime? @map("next_attempt_at") @db.Timestamptz(3)
+  taskName String? @map("task_name") @db.VarChar(80)
+  @@index([createdAt])
+  @@index([organizationId, createdAt])
+  @@index([userId, createdAt])
+  @@index([jobId, createdAt])
+  @@map("platform_request_errors")
 }

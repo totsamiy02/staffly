@@ -11,7 +11,7 @@ export default function OperationStatus({ state, onRetry, retryLabel = 'Повт
   const reference = state.errorId ?? details.errorId
   return <section className={'operation-status operation-status--' + state.phase} role={state.phase === 'failed' ? 'alert' : 'status'} aria-live="polite" aria-label="Состояние операции">
     <div><strong className={state.phase === 'failed' ? 'form-inline-error' : undefined}>{active && <span className="app-spinner" aria-hidden="true" />}{labels[state.phase]}</strong>{state.message && <p>{details.message}</p>}
-      {(reference || state.jobId) && <p className="operation-status__reference"><SupportReference key={reference ?? state.jobId} value={reference ?? state.jobId!} label={reference ? 'Код для поддержки' : 'Номер операции'} /></p>}
+      {reference&&<p className="operation-status__reference"><SupportReference key={reference} value={reference} /></p>}{state.jobId&&state.jobId!==reference&&<p className="operation-status__reference"><SupportReference key={state.jobId} value={state.jobId} label="ID задачи" /></p>}
     </div>
     <div className="operation-status__actions">{onRetry && <button type="button" className="app-secondary" onClick={onRetry}>{retryLabel}</button>}{onDownload && <button type="button" className="app-primary" onClick={onDownload}>Скачать файл</button>}</div>
   </section>

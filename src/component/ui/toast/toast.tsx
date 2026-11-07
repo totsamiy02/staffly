@@ -5,6 +5,7 @@ import { enqueueMessage } from './message-queue.ts'
 import './toast.scss'
 import { useAuth } from '../../../app/auth/auth-context.tsx'
 import RequestErrorMessage from '../request-error-message.tsx'
+import { requestErrorDetails,type RequestFailure } from '../../../app/auth/request-errors.ts'
 
 type Kind = 'success' | 'error' | 'info'
 export default function ToastProvider({ children }: { children: ReactNode }) {
@@ -49,5 +50,28 @@ export default function ToastProvider({ children }: { children: ReactNode }) {
     const id = `toast:${++sequence.current}`
     enqueue({ id, duration: kind === 'error' ? 12000 : 4000, className: `staffly-toast staffly-toast--${kind}`, content: <><span aria-hidden="true">{kind === 'success' ? '✓' : kind === 'error' ? '!' : 'i'}</span><p>{kind === 'error' ? <RequestErrorMessage error={message} /> : message}</p><button aria-label="Закрыть сообщение" onClick={() => dismiss(id)}>×</button></> })
   }, [enqueue, dismiss])
+  useEffect(()=>{
+    const timers=new Set<ReturnType<typeof setTimeout>>(),recent=new Map<string,number>()
+    const failed=(event:Event)=>{
+      // Every admin surface renders its own copyable error state. The fallback
+      // is for older workspace forms and must not cover admin navigation.
+      if(location.pathname.startsWith('/admin'))return
+      const error=(event as CustomEvent<RequestFailure>).detail,{errorId}=requestErrorDetails(error)
+      if(!errorId)return
+      const timer=setTimeout(()=>{
+        timers.delete(timer)
+        // Existing forms keep their own errors. Supply a copyable reference when
+        // an older screen replaces the server error with a static empty state.
+        if([...document.querySelectorAll('.request-error-reference code')].some(node=>node.textContent===errorId))return
+        const key=location.pathname+':'+(error.code??error.status??'ERROR'),now=Date.now()
+        if(now-(recent.get(key)??0)<30_000)return
+        if(recent.size>=30)recent.delete(recent.keys().next().value!)
+        recent.set(key,now);toast(error.message,'error')
+      },500)
+      timers.add(timer)
+    }
+    window.addEventListener('staffly:request-failed',failed)
+    return()=>{window.removeEventListener('staffly:request-failed',failed);for(const timer of timers)clearTimeout(timer)}
+  },[toast,user?.id])
   return <ToastContext.Provider value={toast}><FloatingMessagesContext.Provider value={{enqueue,dismiss,remove}}>{children}{createPortal(<div className="staffly-notification-stack" role="region" aria-label="Уведомления">{active && phase !== 'gap' && <div key={active.id} className={`${active.className}${phase === 'closing' ? ' is-closing' : ''}`} role="status" onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)} onFocusCapture={() => setFocused(true)} onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocused(false) }}>{active.content}</div>}</div>, document.body)}</FloatingMessagesContext.Provider></ToastContext.Provider>
 }

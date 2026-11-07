@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react'
+import { useLayoutEffect, useRef, useState, type FormEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { useAuth } from '../../app/auth/auth-context.tsx'
 import type { AdminAccess } from './contracts.ts'
@@ -43,7 +43,6 @@ export function AdminLock({setup=false}:{setup?:boolean}){
  const ref=useRef<HTMLDivElement>(null),pending=useRef(false);useDialogFocus(ref)
  // The dialog focus trap runs first; keep the PIN ready for typing afterwards.
  useLayoutEffect(()=>{if(!reset&&!busy)ref.current?.querySelector<HTMLInputElement>('input[name="staffly-unlock-code"]')?.focus({preventScroll:true})},[reset,busy,confirm])
- useEffect(()=>{const overflow=document.body.style.overflow;document.body.style.overflow='hidden';return()=>{document.body.style.overflow=overflow}},[])
  async function submit(value:string){
   if(pending.current||!/^\d{6}$/.test(value))return
   pending.current=true;setBusy(true);setError(null)

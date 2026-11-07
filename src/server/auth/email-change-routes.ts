@@ -45,9 +45,9 @@ export function createEmailChangeRouter(dependencies: Dependencies) {
       if (proof) await tx.oAuthAttempt.delete({ where: { id: proof.id } })
     })
     try { await (dependencies.sendCode ?? deliverSecurityCode)('email-change', input.email, code) }
-    catch {
+    catch(error) {
       await prisma.emailChangeToken.updateMany({ where: { id, usedAt: null }, data: { usedAt: new Date() } })
-      throw new ApiError(503, 'EMAIL_SEND_FAILED', 'Не удалось отправить код. Попробуйте начать изменение почты заново.')
+      throw new ApiError(503, 'EMAIL_SEND_FAILED', 'Не удалось отправить код. Попробуйте начать изменение почты заново.',undefined,error)
     }
     response.json({ challengeId: id, email: input.email, expiresAt })
   })

@@ -95,7 +95,7 @@ export async function processEmailDeliveries(options: { now?: Date; send?: typeo
         console.error('Email delivery attempt failed:', job.id, safeError(error))
         const status = job.attempts >= 7 || +now - +job.createdAt > 86400_000 ? 'FAILED' : 'PENDING'
         const availableAt = new Date(+now + Math.min(3600_000, 30_000 * 2 ** (job.attempts - 1))).toISOString()
-        await prisma.$executeRaw`UPDATE email_deliveries SET locked_until=NULL,status=${status},available_at=${availableAt}::timestamptz WHERE id=${job.id}::uuid AND status='PENDING'`
+        await prisma.$executeRaw`UPDATE email_deliveries SET locked_until=NULL,status=${status},available_at=${availableAt}::timestamptz,last_error_code=${safeError(error).code??'EMAIL_DELIVERY_FAILED'},last_error_at=clock_timestamp() WHERE id=${job.id}::uuid AND status='PENDING'`
       }
     }
   }

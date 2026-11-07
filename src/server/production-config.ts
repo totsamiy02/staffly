@@ -2,7 +2,7 @@ import path from 'node:path'
 
 export function validateProductionConfig(env: NodeJS.ProcessEnv = process.env) {
   if (env.NODE_ENV !== 'production') return
-  if(env.ADMIN_MANAGEMENT_DATABASE_URL||env.MIGRATION_DATABASE_URL)throw new Error('Operator and migration credentials must not be provided to API or worker')
+  if(env.ADMIN_MANAGEMENT_DATABASE_URL||env.MIGRATION_DATABASE_URL||env.BACKUP_DATABASE_URL||env.RESTORE_DATABASE_URL)throw new Error('Operator and migration credentials must not be provided to API or worker')
   if (env.DB_TIMEZONE !== 'UTC') throw new Error('New production databases require DB_TIMEZONE=UTC; convert and verify legacy dates before importing existing data')
   if (env.DATA_PURGE_ENABLED !== undefined && !['true', 'false'].includes(env.DATA_PURGE_ENABLED)) throw new Error('DATA_PURGE_ENABLED must be true or false')
   if (env.EMAIL_DELIVERY_PAUSED !== undefined && !['true', 'false'].includes(env.EMAIL_DELIVERY_PAUSED)) throw new Error('EMAIL_DELIVERY_PAUSED must be true or false')

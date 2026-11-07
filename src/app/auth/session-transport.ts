@@ -1,3 +1,4 @@
+import { reportClientFailure } from '../support/client-diagnostics.ts'
 import { guardRequest, invalidResponseError, supportIdPattern, type RequestFailure } from './request-errors.ts'
 export { connectionError } from './request-errors.ts'
 
@@ -22,7 +23,8 @@ export async function readJson<T>(response: Response): Promise<T> {
   const data = (parsed && typeof parsed === 'object' ? parsed : {}) as T & { message?: string; code?: string; errors?: unknown; errorId?: string }
   if (!response.ok) {
     const fallback = response.status === 401 ? 'Сессия завершена. Войдите в аккаунт снова.' : response.status === 403 ? 'Недостаточно прав для этого действия.' : response.status === 404 ? 'Запрошенные данные не найдены.' : response.status === 429 ? 'Слишком много запросов. Подождите немного и повторите попытку.' : response.status >= 500 ? 'Сервис временно недоступен. Попробуйте немного позже.' : 'Не удалось выполнить запрос.'
-    const errorId = typeof data.errorId === 'string' && supportIdPattern.test(data.errorId) ? data.errorId : undefined
+    const reference=data.errorId??response.headers.get('x-support-code')
+    const errorId = typeof reference === 'string' && supportIdPattern.test(reference) ? reference : reportClientFailure('INVALID_RESPONSE')
     const code = typeof data.code === 'string' && /^[A-Z][A-Z0-9_]{0,79}$/.test(data.code) ? data.code : undefined
     // Only known service messages may replace the generic 5xx message. Never show
     // an upstream exception, SQL, stack trace, or proxy response to the user.

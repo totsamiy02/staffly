@@ -1,6 +1,9 @@
 import { securityCorrelationId } from './security/journal.ts'
 import adminRouter from './admin/routes.ts'
 import { closeAdminDatabase } from './admin/database.ts'
+import { startOperationsTelemetry } from './admin/operations/telemetry.ts'
+import { createSupportRouter } from './support/routes.ts'
+import { supportResponses } from './support/diagnostics.ts'
 import { recordFeature } from './admin/collection.ts'
 import { randomUUID } from 'node:crypto'
 import { safeError, safeApiError } from './security/safe-error.ts'
@@ -40,7 +43,12 @@ import { drainHttpServer } from './http-drain.ts'
 if (process.env.NODE_ENV === 'production') await checkDatabasePolicy(databasePool)
 
 const app = express()
+function reportApiFailure(error:unknown,request:express.Request,response:express.Response,errorId:string,_status:number){
+  console.error('API error:',JSON.stringify(safeApiError(error,request,errorId)))
+  response.locals.supportError=error
+}
 app.use(securityContext)
+app.use(supportResponses)
 app.disable('x-powered-by')
 const metrics = createHttpMetrics()
 app.use(metrics.middleware)
@@ -114,9 +122,11 @@ app.get('/health/ready', async (_request, response) => {
   response.set('Cache-Control', 'no-store').status(ok ? 200 : 503).json({ ok })
 })
 app.use('/api/organizations/:organizationId', (request, response, next) => {
+  response.locals.operationsOrganizationId=String(request.params.organizationId)
   if (!['GET', 'HEAD'].includes(request.method)) response.once('finish', () => { if (response.statusCode < 400) readCache.invalidate(String(request.params.organizationId)) })
   next()
 }, requireAuth, selectLocation, subscriptionWritePolicy)
+app.use('/api/support',createSupportRouter())
 app.use('/api/admin', adminRouter)
 app.use('/api/organizations/:organizationId', (request, response, next) => {
   const id=String(request.params.organizationId)
@@ -143,8 +153,8 @@ app.use((error: unknown, request: express.Request, response: express.Response, _
     response.status(400).json({ code: 'INVALID_BODY', message: 'Некорректное тело запроса.' }); return
   }
   const errorId = securityCorrelationId() ?? randomUUID()
-  if (isDatabaseBusy(error)) {
-    console.error('API error:', JSON.stringify(safeApiError(error, request, errorId)))
+  if (!(error instanceof ApiError)&&isDatabaseBusy(error)) {
+    reportApiFailure(error,request,response,errorId,503)
     response.set('Retry-After', '2').status(503).json({ errorId, code: 'DATABASE_BUSY', message: 'Сервис занят. Повторите попытку немного позже.' }); return
   }
   if (error && typeof error === 'object' && 'type' in error && error.type === 'entity.too.large') {
@@ -157,7 +167,7 @@ app.use((error: unknown, request: express.Request, response: express.Response, _
   }
   if (error instanceof ZodError) { response.status(400).json({code:'VALIDATION_ERROR',message:error.issues[0]?.message ?? 'Проверьте данные.'}); return }
   if (error instanceof ApiError) {
-    if (error.status >= 500) console.error('API error:', JSON.stringify(safeApiError(error, request, errorId)))
+    if (error.status >= 500) reportApiFailure(error,request,response,errorId,error.status)
     response.status(error.status).json({ ...(error.status >= 500 ? { errorId } : {}), code: error.code, message: error.message, ...(error.details ? { errors: error.details } : {}) })
     return
   }
@@ -165,7 +175,7 @@ app.use((error: unknown, request: express.Request, response: express.Response, _
     response.status(409).json({ code: 'CONCURRENT_UPDATE', message: 'Данные уже изменились. Повторите запрос.' })
     return
   }
-  console.error('API error:', JSON.stringify(safeApiError(error, request, errorId)))
+  reportApiFailure(error,request,response,errorId,500)
   response.status(500).json({ errorId, code: 'INTERNAL_ERROR', message: 'Не удалось выполнить действие. Попробуйте немного позже.' })
 })
 
@@ -179,6 +189,7 @@ server.maxRequestsPerSocket = 1000
 server.maxConnections = positiveInteger('HTTP_MAX_CONNECTIONS', 20000, 100000)
 
 let shuttingDown = false
+const stopOperations=startOperationsTelemetry({role:'api',ready:()=>!shuttingDown&&warmed&&live.connected(),http:metrics.snapshot})
 async function shutdown() {
   if (shuttingDown) return
   shuttingDown = true
@@ -190,6 +201,7 @@ async function shutdown() {
   try {
     const closed = drainHttpServer(server)
     await Promise.all([closed, live.stop(), stopWorkers(), warming])
+    await stopOperations()
     await closeAdminDatabase()
     await prisma.$disconnect()
     clearTimeout(deadline)
