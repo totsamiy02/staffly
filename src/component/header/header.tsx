@@ -3,9 +3,8 @@ import HeaderFrame from './header-frame.tsx'
 import { Link } from 'react-router-dom'
 import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../../app/auth/auth-context.tsx'
-import RequestErrorMessage from '../ui/request-error-message.tsx'
-import Avatar from '../ui/avatar/avatar.tsx'
 import ThemeToggle from '../ui/theme-toggle/theme-toggle.tsx'
+import ProfileMenu from './profile-menu.tsx'
 
 function Header() {
   const { user, loading, logout } = useAuth()
@@ -38,18 +37,8 @@ function Header() {
 
       <div className="site-header__actions"><ThemeToggle />
         {loading ? null : user ? (
-          <div className="header__profile" ref={profileRef}>
-            <button className="header__profile-trigger" type="button" aria-expanded={profileOpen} aria-label="Открыть меню профиля" onClick={() => setProfileOpen((value) => !value)}>
-              <Avatar url={user.avatarUrl} name={user.displayName} className="header__avatar" eager />
-              <span>{user.displayName}</span>
-              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m6 8 4 4 4-4" /></svg>
-            </button>
-            {profileOpen && <div className="header__profile-menu">
-              <div><Avatar url={user.avatarUrl} name={user.displayName} className="header__profile-menu-avatar" eager /><p><strong>{user.displayName}</strong><small>{user.email}</small></p></div>
-              <nav><Link to="/app/settings" onClick={() => setProfileOpen(false)}>Настройки профиля</Link></nav>
-              {logoutError && <p className="header__logout-error" role="alert"><RequestErrorMessage error={logoutError} /></p>}
-              <button type="button" disabled={logoutBusy} onClick={() => void signOut()}>{logoutBusy ? 'Выходим…' : 'Выйти из аккаунта'}</button>
-            </div>}
+          <div ref={profileRef}>
+            <ProfileMenu user={user} open={profileOpen} busy={logoutBusy} error={logoutError} onToggle={() => setProfileOpen(value => !value)} onClose={() => setProfileOpen(false)} onLogout={() => void signOut()} />
           </div>
         ) : (
           <div className="header__buttons">

@@ -87,6 +87,10 @@ export async function runInterface({ prisma, env, root, temporary, output, optio
             page.on('response', response => { if (response.status() >= 500 && response.url().includes('/api/')) results.errors.push({ browser: name, preset, route: new URL(page.url()).pathname, status: response.status(), api: new URL(response.url()).pathname }) })
           }
           try {
+            if(options['profile-menu']==='true'){
+              try { const {profileMenuScenarios}=await import('./profile-menu.mjs');await profileMenuScenarios({page:ownerPage,origin,fixture,browser:name,preset,results,output}) }
+              catch(error){results.errors.push({browser:name,preset,scenario:'shared-profile-menu',error:error.message});await ownerPage.screenshot({path:path.join(output,`${name}-${preset}-profile-menu-failure.png`)})}
+            }
             for (const [routeName, route, authenticated] of routes) {
               const page = authenticated ? ownerPage : anonPage
               const entry = { browser: name, preset, name: routeName, route: route.replaceAll(fixture.org.id, ':organization').replaceAll(fixture.draft.id, ':draft'), violations: [] }
