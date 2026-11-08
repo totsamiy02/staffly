@@ -70,7 +70,18 @@ export async function beginAction(request:Request,response:Response,spec:ActionS
  if(sent.rowCount!==1)actionError('CONFLICT')
  await audit(adminPool(),actor.userId,'MANAGEMENT_CHALLENGE_SENT','SUCCEEDED',session.id,spec.action,'targetId'in spec?spec.targetId:undefined)
  response.cookie(actionCookie(),browser,{...cookieOptions(),maxAge:300000})
- return{challengeId:id,expiresAt:expiresAt.toISOString(),summary,attemptsRemaining:5}
+ return{challengeId:id,expiresAt:expiresAt.toISOString(),retryAt:new Date(+expiresAt-240000).toISOString(),summary,attemptsRemaining:5}
+}
+export async function actionStatus(request:Request,id:string){
+ const {actor,session}=await requireAdminSession(request)
+ return adminTransaction(async db=>{
+  // Wait for any execution/cancellation already holding the challenge row. The
+  // next statement sees its committed receipt, even when the POST response died.
+  const {rows:[challenge]}=await db.query('SELECT expires_at,created_at,used_at,attempts,sent_at FROM staffly_admin.action_challenges WHERE id=$1 AND user_id=$2 AND auth_session_id=$3 AND session_id=$4 FOR SHARE',[id,actor.userId,actor.authSessionId,session.id])
+  if(!challenge)throw new ApiError(404,'ADMIN_ACTION_NOT_FOUND','Подтверждение не найдено в этом сеансе.')
+  const {rows:[receipt]}=await db.query('SELECT resource_id,completed_at FROM staffly_admin.action_receipts WHERE challenge_id=$1',[id])
+  return{state:receipt?'completed':challenge.used_at?'cancelled':+new Date(challenge.expires_at)<=Date.now()?'expired':'pending',resourceId:receipt?.resource_id??null,completedAt:receipt?.completed_at?.toISOString()??null,expiresAt:challenge.expires_at.toISOString(),retryAt:new Date(+challenge.created_at+60000).toISOString(),attemptsRemaining:Math.max(0,5-Number(challenge.attempts))}
+ })
 }
 export async function executeAction(request:Request,response:Response,id:string,code:string){
  const {actor,session}=await requireAdminSession(request),browser=request.cookies?.[actionCookie()]

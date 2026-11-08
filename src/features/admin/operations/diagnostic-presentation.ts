@@ -1,4 +1,3 @@
-import type { RequestDiagnostic } from './contracts.ts'
 import { backupErrors } from '../management/catalog.ts'
 export const incidentSources={request:'Запрос сайта',client:'Сообщение браузера',email:'Доставка письма',report:'Подготовка отчёта',worker:'Служебный цикл'}
 const reasons:Record<string,[string,string]>={
@@ -21,7 +20,7 @@ const reasons:Record<string,[string,string]>={
   INVALID_RESPONSE:['Браузер получил неполный или некорректный ответ','Проверить API и промежуточный прокси, формат ответа и обрывы соединения.'],
   CLIENT_RUNTIME_ERROR:['Ошибка выполнения интерфейса','Сообщение устройства: воспроизвести действие в указанном разделе. Текст исключения и содержимое страницы не собираются.'],
 }
-export function incidentExplanation(item:RequestDiagnostic){
+export function incidentExplanation(item:{kind:string;eventCode:string|null;diagnostic:{code?:string};status:number;nextAttemptAt:string|null}){
   if(item.eventCode&&backupErrors[item.eventCode])return{title:backupErrors[item.eventCode],advice:'Проверить состояние служебного процесса резервных копий, приватное хранилище и операторский журнал по ID задания. Повреждённый архив не использовать для восстановления.'}
   const reason=reasons[item.diagnostic.code??'']??reasons[item.eventCode??'']
   if(reason)return{title:reason[0],advice:reason[1]+(item.kind==='email'?(item.nextAttemptAt?' Следующая автоматическая попытка указана в карточке.':' Автоматические попытки завершены. После исправления потребуется новое уведомление; код безопасности пользователь запрашивает заново в соответствующей форме.'):'')}

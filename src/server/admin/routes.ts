@@ -11,6 +11,8 @@ import { createManagementRouter } from './management/routes.ts'
 import { clearActionCookie,type ManagementMailer } from './management/actions.ts'
 import { accessState, activity, createChallenge, endAdminSession, lock, setPin, unlock, verifyChallenge, type AdminMailer } from './security.ts'
 import { monitoringEvents } from './events.ts'
+import { globalSearch,attentionState } from './workspace.ts'
+import { adminMeta } from './meta.ts'
 import { monitoringOverview, monitoringOrganizations, monitoringOrganization, monitoringUsers, monitoringOnline, monitoringAnalytics, monitoringUser } from './monitoring.ts'
 
 const pin=z.string().regex(/^\d{6}$/,'Введите 6 цифр.')
@@ -34,6 +36,9 @@ export function createAdminRouter({sendCode=defaultMailer,sendNotice=defaultNoti
     next()
   })
   router.get('/access',async(request,response)=>response.json(await accessState(request)))
+  router.get('/meta',read('META',async()=>adminMeta()))
+  router.get('/attention',read('ATTENTION',()=>attentionState()))
+  router.get('/search',accountRateLimit('admin-global-search',40),read('GLOBAL_SEARCH',request=>globalSearch(request.query)))
   router.post('/challenge',async(request,response)=>{const body=z.object({password:z.string().min(1).max(256),purpose:z.enum(['LOGIN','RESET_PIN']).default('LOGIN')}).strict().parse(request.body);response.json(await createChallenge(request,response,body.password,body.purpose,sendCode))})
   router.post('/verify',async(request,response)=>{
     const body=z.object({challengeId:z.uuid(),code:pin,newPin:pin.optional(),confirmPin:pin.optional()}).strict().refine(v=>!v.newPin||v.newPin===v.confirmPin,'PIN-коды не совпадают.').parse(request.body)

@@ -7,6 +7,7 @@ ALTER DEFAULT PRIVILEGES FOR ROLE staffly_migrator IN SCHEMA public GRANT USAGE,
 REVOKE ALL ON TABLE public._prisma_migrations FROM staffly_app;
 REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE public.app_time_model FROM staffly_app;
 REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE public.platform_monitoring_state FROM staffly_app;
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON public.platform_assigned_diagnostics FROM staffly_app;
 REVOKE ALL ON SCHEMA staffly_admin FROM staffly_app;
 REVOKE ALL ON ALL TABLES IN SCHEMA staffly_admin FROM staffly_app;
 REVOKE UPDATE, DELETE, TRUNCATE ON TABLE public.security_events FROM staffly_app;

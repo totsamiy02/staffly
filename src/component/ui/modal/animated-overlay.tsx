@@ -44,5 +44,5 @@ export default function AnimatedOverlay({ variant, className = '', dismissible =
   }, [requestClose])
 
   const base = `schedule-${variant}`
-  return createPortal(<DialogOpenerContext.Provider value={opener}><div ref={surface} className={`${base}${className ? ` ${className}` : ''}${closing ? ' is-closing' : ''}`} onMouseDown={(event) => { if (event.target === event.currentTarget) requestClose() }}>{children(requestClose)}</div></DialogOpenerContext.Provider>, document.body)
+  return createPortal(<DialogOpenerContext.Provider value={opener}><div ref={surface} className={`${base}${className ? ` ${className}` : ''}${closing ? ' is-closing' : ''}`} onPointerDown={(event) => { if(event.button!==0)return;const target=event.target as Node,dialogs=[...event.currentTarget.querySelectorAll<HTMLElement>('[role=dialog]')];if(event.target===event.currentTarget||event.currentTarget.contains(target)&&dialogs.length>0&&!dialogs.some(dialog=>dialog.contains(target)))void requestClose() }}>{children(requestClose)}</div></DialogOpenerContext.Provider>, document.body)
 }

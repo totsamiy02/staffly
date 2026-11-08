@@ -13,6 +13,10 @@ DO $$ BEGIN
     GRANT SELECT ON staffly_admin.management_state,staffly_admin.backups,staffly_admin.backup_jobs,staffly_admin.alerts,staffly_admin.alert_rules TO staffly_admin_gateway;
     GRANT SELECT,INSERT,UPDATE ON staffly_admin.action_challenges TO staffly_admin_gateway;
     GRANT EXECUTE ON FUNCTION staffly_admin.execute_management_action(uuid,uuid,uuid,text,uuid,text,text) TO staffly_admin_gateway;
+    REVOKE ALL ON FUNCTION staffly_admin.execute_management_action_once(uuid,uuid,uuid,text,uuid,text,text) FROM staffly_admin_gateway;
+    GRANT SELECT ON staffly_admin.action_receipts TO staffly_admin_gateway;
+    GRANT SELECT ON staffly_admin.work_directory,staffly_admin.work_history_directory TO staffly_admin_gateway;
+    GRANT EXECUTE ON FUNCTION staffly_admin.assign_work(uuid,uuid,uuid,text,text,uuid,uuid,integer) TO staffly_admin_gateway;
     GRANT EXECUTE ON FUNCTION staffly_admin.simple_management_action(uuid,uuid,uuid,text,text,uuid,text) TO staffly_admin_gateway;
   END IF;
 END $$;

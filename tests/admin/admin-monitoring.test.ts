@@ -1,3 +1,4 @@
+import { workflowScenarios } from './workflow-scenarios.ts'
 import { managementScenarios } from './management-scenarios.ts'
 import { supportResponses } from '../../src/server/support/diagnostics.ts'
 import { securityContext } from '../../src/server/security/journal.ts'
@@ -29,15 +30,18 @@ import { startBackgroundTask } from '../../src/server/background-task.ts'
 import { setImmediate as turn } from 'node:timers/promises'
 import { EventEmitter } from 'node:events'
 
+let browserNetwork=0
 const browserReference=()=>{const id=randomUUID();return id.slice(0,14)+'8'+id.slice(15)}
 const suffix=randomUUID(),password='StafflyAdminTesting-72!',pin='628491',users:string[]=[],organizations:string[]=[],codes=new Map<string,string>()
 const operationJobs:string[]=[],operationNodes:string[]=[]
 let server:Server,base:string,hash:string
 const origin=process.env.APP_ORIGIN??'http://localhost:5173'
 class Browser{
+ // Synthetic browsers have independent office IPs, so this suite does not consume another suite's shared auth budget.
+ ip=`198.18.${Math.floor(++browserNetwork/250)}.${browserNetwork%250+1}`
  cookies=new Map<string,string>();token='';userId='';email='';receivedCookies:string[]=[]
  async request(path:string,body?:unknown,extra:Record<string,string>={}){
-  const response=await fetch(base+path,{method:body===undefined?'GET':'POST',headers:{Origin:origin,...(this.token?{Authorization:`Bearer ${this.token}`}:{ }),Cookie:[...this.cookies].map(([k,v])=>`${k}=${v}`).join('; '),...(body===undefined?{}:{'Content-Type':'application/json'}),...extra},...(body===undefined?{}:{body:JSON.stringify(body)})})
+  const response=await fetch(base+path,{method:body===undefined?'GET':'POST',headers:{Origin:origin,'X-Forwarded-For':this.ip,...(this.token?{Authorization:`Bearer ${this.token}`}:{ }),Cookie:[...this.cookies].map(([k,v])=>`${k}=${v}`).join('; '),...(body===undefined?{}:{'Content-Type':'application/json'}),...extra},...(body===undefined?{}:{body:JSON.stringify(body)})})
   for(const cookie of response.headers.getSetCookie()){this.receivedCookies.push(cookie);const [pair]=cookie.split(';'),at=pair.indexOf('='),key=pair.slice(0,at),value=pair.slice(at+1);if(value)this.cookies.set(key,decodeURIComponent(value));else this.cookies.delete(key)}
   return response
  }
@@ -52,7 +56,7 @@ async function expireIdle(browser:Browser){await databasePool.query("UPDATE staf
 describe('Platform administrator boundary and monitoring',()=>{
  before(async()=>{
   hash=await passwordHash(password)
-  const app=express();app.use(securityContext);app.use(supportResponses);app.use(express.json({limit:'16kb'}));app.use(cookieParser());app.use('/api/auth',authRouter);app.use('/api/admin',createAdminRouter({sendCode:async(email,code)=>{codes.set(email,code)},sendManagementCode:async(email,code)=>{codes.set(email,code)}}));app.use('/api',profileRouter);app.use('/api/support',createSupportRouter());app.get('/api/support-probe/:id',(_q,_s)=>{throw new ApiError(409,'CONCURRENT_UPDATE','Test conflict')})
+  const app=express();app.set('trust proxy','loopback');app.use(securityContext);app.use(supportResponses);app.use(express.json({limit:'16kb'}));app.use(cookieParser());app.use('/api/auth',authRouter);app.use('/api/admin',createAdminRouter({sendCode:async(email,code)=>{codes.set(email,code)},sendManagementCode:async(email,code)=>{codes.set(email,code)}}));app.use('/api',profileRouter);app.use('/api/support',createSupportRouter());app.get('/api/support-probe/:id',(_q,_s)=>{throw new ApiError(409,'CONCURRENT_UPDATE','Test conflict')})
   app.use((error:unknown,_request:express.Request,response:express.Response,_next:express.NextFunction)=>{response.locals.supportError=error;response.status(error instanceof ApiError?error.status:error instanceof ZodError?400:500).json({code:error instanceof ApiError?error.code:'INTERNAL_ERROR',message:error instanceof ApiError?error.message:'Не удалось выполнить действие.'})})
   server=app.listen(0,'127.0.0.1');await new Promise<void>(r=>server.once('listening',r));const address=server.address();assert(address&&typeof address!=='string');base=`http://127.0.0.1:${address.port}`
  })
@@ -441,7 +445,8 @@ describe('Platform administrator boundary and monitoring',()=>{
  it('keeps private grants, PIN hashes and journal mutations inaccessible to a public-data runtime role',async()=>{
   const role='admin_boundary_'+randomUUID().replaceAll('-',''),db=await databasePool.connect()
   try{await db.query(`CREATE ROLE ${role} NOLOGIN`);await db.query(`GRANT USAGE ON SCHEMA public TO ${role}`);await db.query(`GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA public TO ${role}`);await db.query(`SET ROLE ${role}`)
-   for(const sql of ['SELECT * FROM staffly_admin.accounts','SELECT * FROM staffly_admin.credentials','DELETE FROM staffly_admin.audit_events','TRUNCATE staffly_admin.audit_events'])await assert.rejects(db.query(sql),(e:{code:string})=>e.code==='42501')
+   const assigned=await db.query('SELECT * FROM public.platform_assigned_diagnostics LIMIT 1');assert.deepEqual(assigned.fields.map(field=>field.name),['subject_id']);await assert.rejects(db.query('UPDATE public.platform_assigned_diagnostics SET subject_id=NULL'),(e:{code:string})=>e.code==='55000')
+   for(const sql of ['SELECT * FROM staffly_admin.accounts','SELECT * FROM staffly_admin.credentials','DELETE FROM staffly_admin.audit_events','UPDATE staffly_admin.work_assignments SET assignee_id=NULL','DELETE FROM staffly_admin.work_assignment_history','INSERT INTO staffly_admin.action_receipts(challenge_id) SELECT id FROM staffly_admin.action_challenges LIMIT 1','DELETE FROM staffly_admin.action_receipts','SELECT * FROM staffly_admin.execute_management_action_once(NULL,NULL,NULL,NULL,NULL,NULL,NULL)','TRUNCATE staffly_admin.audit_events'])await assert.rejects(db.query(sql),(e:{code:string})=>e.code==='42501')
   }finally{await db.query('RESET ROLE');await db.query(`DROP OWNED BY ${role}`);await db.query(`DROP ROLE ${role}`);db.release()}
  })
  it('grants and revokes a specific existing account through the operator CLI',async()=>{
@@ -465,6 +470,7 @@ describe('Platform administrator boundary and monitoring',()=>{
   assert.equal((await browser.request('/api/admin/pin',{pin,confirmPin:pin})).status,403)
  })
  managementScenarios({account,db:databasePool,codes,password})
+ workflowScenarios({account,db:databasePool})
  it('operates with the production gateway role without grant/DDL/journal-erasure privileges and uses Secure Host cookies',async()=>{
   const saved=Object.fromEntries(['NODE_ENV','ADMIN_DATABASE_URL','ADMIN_AUTH_SECRET'].map(key=>[key,process.env[key]]))
   const browser=await account(),client=await databasePool.connect()
@@ -477,10 +483,15 @@ describe('Platform administrator boundary and monitoring',()=>{
    await browser.ready()
    assert.equal((await browser.request('/api/admin/monitoring/overview')).status,200)
    for(const endpoint of ['security','administrators','backups','alerts'])assert.equal((await browser.request('/api/admin/management/'+endpoint)).status,200)
+   for(const endpoint of ['meta','attention','search?search='+browser.userId,'operations/service']){const response=await browser.request('/api/admin/'+endpoint);assert.equal(response.status,200,await response.clone().text())}
+   const diagnosticId=randomUUID();await databasePool.query("INSERT INTO platform_request_errors(id,node_id,method,route,status,name) VALUES($1,$2,'GET','/probe',500,'Error')",[diagnosticId,randomUUID()])
+   const assign=await browser.request('/api/admin/management/work/diagnostic/'+diagnosticId+'/assign',{assigneeId:browser.userId,version:0,confirm:true});assert.equal(assign.status,200,await assign.clone().text())
+   const work=await browser.request('/api/admin/management/work/diagnostic/'+diagnosticId).then(r=>r.json());assert.equal(work.assigneeId,browser.userId);assert.equal(work.history.total,1)
    const recipient=await account(false),candidate=await browser.request('/api/admin/management/administrators/candidate?search='+recipient.userId).then(r=>r.json())
    const confirmation=await browser.request('/api/admin/management/actions',{password,spec:{action:'ACCESS_GRANT',targetId:recipient.userId,payload:{version:0,userVersion:candidate.userVersion}}});assert.equal(confirmation.status,200,await confirmation.clone().text());const ticket=await confirmation.json()
    assert.equal((await browser.request('/api/admin/management/actions/execute',{challengeId:ticket.challengeId,code:codes.get(browser.email),confirm:true})).status,200)
    assert.equal((await browser.request('/api/admin/monitoring/users/'+recipient.userId).then(r=>r.json())).platformAdmin,'active')
+   const receipt=await browser.request('/api/admin/management/actions/'+ticket.challengeId).then(r=>r.json());assert.equal(receipt.state,'completed');assert.equal(receipt.resourceId,recipient.userId)
    const actionHostCookie=browser.receivedCookies.find(c=>c.startsWith('__Host-staffly_admin_action=')&&!c.startsWith('__Host-staffly_admin_action=;'));assert(actionHostCookie);assert.match(actionHostCookie,/Secure/);assert.match(actionHostCookie,/HttpOnly/);assert.match(actionHostCookie,/SameSite=Strict/)
    await browser.request('/api/admin/lock',{})
    const response=await browser.request('/api/admin/unlock',{pin});assert.equal(response.status,200)
@@ -488,7 +499,7 @@ describe('Platform administrator boundary and monitoring',()=>{
    const hostCookie=browser.receivedCookies.find(c=>c.startsWith('__Host-staffly_admin='));assert(hostCookie);assert.match(hostCookie,/Secure/);assert.match(hostCookie,/HttpOnly/);assert.match(hostCookie,/SameSite=Strict/);assert.ok(!/Domain=/i.test(hostCookie))
    const challenge=await databasePool.query('SELECT expires_at-created_at AS ttl FROM staffly_admin.sessions WHERE user_id=$1',[browser.userId]);assert(challenge.rowCount)
    await client.query('SET ROLE staffly_admin_gateway')
-   for(const sql of ["UPDATE staffly_admin.accounts SET enabled=true",'DELETE FROM staffly_admin.audit_events','TRUNCATE staffly_admin.audit_events','CREATE TABLE public.admin_should_fail(id int)'])await assert.rejects(client.query(sql),(e:{code:string})=>e.code==='42501')
+   for(const sql of ["UPDATE staffly_admin.accounts SET enabled=true",'DELETE FROM staffly_admin.audit_events','UPDATE staffly_admin.work_assignments SET assignee_id=NULL','DELETE FROM staffly_admin.work_assignment_history','INSERT INTO staffly_admin.action_receipts(challenge_id) SELECT id FROM staffly_admin.action_challenges LIMIT 1','DELETE FROM staffly_admin.action_receipts','SELECT * FROM staffly_admin.execute_management_action_once(NULL,NULL,NULL,NULL,NULL,NULL,NULL)','TRUNCATE staffly_admin.audit_events','CREATE TABLE public.admin_should_fail(id int)'])await assert.rejects(client.query(sql),(e:{code:string})=>e.code==='42501')
   }finally{
    await client.query('RESET ROLE');await closeAdminDatabase();for(const [key,value]of Object.entries(saved)){if(value===undefined)delete process.env[key];else process.env[key]=value}
    await client.query('DROP OWNED BY staffly_admin_gateway');await client.query('DROP ROLE staffly_admin_gateway');client.release()

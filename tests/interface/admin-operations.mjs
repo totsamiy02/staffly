@@ -4,8 +4,8 @@ import path from 'node:path'
 export async function checkOperations({page,nav,check,expect,org,user,pin,context,databasePool,prisma,output,result,tag,operationsJob,operationsErrorId,noOverflow,parentPage,publishOperationsSnapshot,operationsNodeId}){
   const shot=async name=>{await page.evaluate(()=>window.scrollTo({top:0,behavior:'instant'}));const file=`operations-${tag}-${name}.png`;await page.screenshot({path:path.join(output,file),fullPage:true});result.screenshots.push(file)}
   await check('operations service shows real process and task snapshots without private configuration',async()=>{
-    await nav('Состояние сервиса');await expect(page.getByRole('heading',{name:'Состояние сервиса',exact:true})).toBeVisible();await expect(page.locator('.admin-ops-banner')).toContainText('Приложение на связи')
-    await page.locator('.admin-ops-node summary').first().click();await expect(page.locator('.admin-ops-node[open]')).toContainText('Подготовка отчётов');await expect(page.locator('.admin-ops-node[open]')).toContainText('Средний ответ')
+    await nav('Состояние сервиса');await expect(page.getByRole('heading',{name:'Состояние сервиса',exact:true})).toBeVisible();await expect(page.locator('.admin-ops-banner')).toContainText('Есть сигналы для проверки')
+    await page.locator('.admin-ops-node>.admin-disclosure-trigger').first().click();await expect(page.locator('.admin-ops-node.is-open')).toContainText('Подготовка отчётов');await expect(page.locator('.admin-ops-node.is-open')).toContainText('Средний ответ')
     await noOverflow();assert(!(await page.locator('.admin-main').innerText()).includes('private-operations-ui-marker'));await shot('service')
   })
   await check('user identity and a real rejected request have copyable references searchable by the administrator',async()=>{
@@ -17,7 +17,7 @@ export async function checkOperations({page,nav,check,expect,org,user,pin,contex
     const reference=parentPage.locator('.request-error-reference code').first();await expect(reference).toBeVisible();const code=await reference.innerText();assert.match(code,/^[0-9a-f-]{36}$/)
     const failure=path.join(output,'operations-'+tag+'-user-error.png');await parentPage.screenshot({path:failure,fullPage:true});result.screenshots.push(path.basename(failure))
     await publishOperationsSnapshot({role:'api',ready:()=>true,nodeId:operationsNodeId,http:()=>({requests:147,errors:1,active:0,meanMs:18.4})})
-    await nav('Поддержка');await page.getByRole('searchbox',{name:'Поиск диагностики',exact:true}).fill(code);await expect(page.locator('tbody tr')).toHaveCount(1)
+    await nav('Поддержка');await page.getByRole('searchbox',{name:'Поиск диагностики',exact:true}).fill(code);await expect(page.locator('[data-admin-record]')).toHaveCount(1)
     await page.getByRole('link',{name:'Разобрать',exact:true}).click();await expect(page.locator('.admin-main')).toContainText(code);await expect(page.locator('.admin-main')).toContainText(String(user.publicId));await shot('user-error-diagnostic')
     await parentPage.goto(new URL(page.url()).origin+'/app')
   })
@@ -29,10 +29,10 @@ export async function checkOperations({page,nav,check,expect,org,user,pin,contex
       await expect(page.locator('[role=alert]')).toContainText('после восстановления связи');await noOverflow();await shot('offline-error')
     }finally{await context.setOffline(false)}
     await expect.poll(async()=>await prisma.platformRequestError.count({where:{id:code,source:'client'}})).toBe(1)
-    await nav('Поддержка');await page.getByRole('searchbox',{name:'Поиск диагностики',exact:true}).fill(code);await expect(page.locator('tbody tr')).toHaveCount(1);await page.getByRole('link',{name:'Разобрать',exact:true}).click();await expect(page.locator('.admin-main')).toContainText('Сообщение устройства');await shot('browser-diagnostic')
+    await nav('Поддержка');await page.getByRole('searchbox',{name:'Поиск диагностики',exact:true}).fill(code);await expect(page.locator('[data-admin-record]')).toHaveCount(1);await page.getByRole('link',{name:'Разобрать',exact:true}).click();await expect(page.locator('.admin-main')).toContainText('Сообщение устройства');await shot('browser-diagnostic')
   })
   await check('support finds a real error by code and copies safe diagnostics when clipboard access is denied',async()=>{
-    await nav('Поддержка');await page.getByRole('searchbox',{name:'Поиск диагностики',exact:true}).fill(operationsErrorId);await page.getByRole('button',{name:'Найти',exact:true}).click();await expect(page.locator('tbody tr')).toHaveCount(1)
+    await nav('Поддержка');await page.getByRole('searchbox',{name:'Поиск диагностики',exact:true}).fill(operationsErrorId);await page.getByRole('button',{name:'Найти',exact:true}).click();await expect(page.locator('[data-admin-record]')).toHaveCount(1)
     await page.getByRole('link',{name:'Разобрать',exact:true}).click();await expect(page.getByRole('heading',{name:'Разбор сбоя',exact:true})).toBeVisible();await expect(page.locator('.admin-main')).toContainText('42P01');await expect(page.locator('.admin-main')).toContainText(org.name)
     assert(!(await page.locator('.admin-main').innerText()).includes('private-operations-ui-marker'));assert(!(await page.locator('.admin-main').innerText()).includes(user.email))
     await page.evaluate(()=>Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async()=>{throw new Error('denied')}}}))
@@ -40,8 +40,8 @@ export async function checkOperations({page,nav,check,expect,org,user,pin,contex
     const selection=await page.getByRole('textbox',{name:'Диагностика для копирования',exact:true}).evaluate(node=>({selected:node.value.slice(node.selectionStart,node.selectionEnd),value:node.value}));assert.equal(selection.selected,selection.value);assert(selection.selected.includes(operationsErrorId));await noOverflow();await shot('diagnostic')
     await page.getByRole('button',{name:'Вернуться назад',exact:true}).click();await expect(page.getByRole('heading',{name:'Поддержка',exact:true})).toBeVisible();await expect(page.getByRole('searchbox',{name:'Поиск диагностики',exact:true})).toHaveValue(operationsErrorId)
     assert.equal(await page.locator('.admin-nav-item.active').count(),1)
-    await page.getByRole('searchbox',{name:'Поиск диагностики',exact:true}).fill(operationsJob.id);await expect(page.locator('tbody tr')).toHaveCount(1)
-    await page.getByRole('combobox',{name:'Источник',exact:true}).click();await page.getByRole('option',{name:'Подготовка отчётов',exact:true}).click();await expect(page.locator('tbody tr')).toHaveCount(1);await shot('support-report')
+    await page.getByRole('searchbox',{name:'Поиск диагностики',exact:true}).fill(operationsJob.id);await expect(page.locator('[data-admin-record]')).toHaveCount(1)
+    await page.getByRole('combobox',{name:'Источник',exact:true}).click();await page.getByRole('option',{name:'Подготовка отчётов',exact:true}).click();await expect(page.locator('[data-admin-record]')).toHaveCount(1);await shot('support-report')
 
   })
   await check('support separates email failures and shows the safe SMTP cause and exhausted attempts',async()=>{
@@ -50,14 +50,14 @@ export async function checkOperations({page,nav,check,expect,org,user,pin,contex
     const trace=async stage=>{result.searchTransitions.push({tag,stage,url:page.url(),value:await box.inputValue(),expected:user.id});await import('node:fs/promises').then(fs=>fs.writeFile(path.join(output,'admin-interface.json'),JSON.stringify(result,null,2)))}
     await trace('before-fill');await box.fill(user.id);await trace('after-fill');await page.getByRole('combobox',{name:'Источник',exact:true}).click();await trace('after-open');await page.getByRole('option',{name:'Доставка писем',exact:true}).click();await trace('after-filter')
     await expect(box).toHaveValue(user.id);await expect.poll(()=>new URL(page.url()).searchParams.get('search')).toBe(user.id)
-    await expect(page.locator('tbody tr')).toHaveCount(1);await page.getByRole('link',{name:'Разобрать',exact:true}).click();await expect(page.locator('.admin-main')).toContainText('EAUTH');await expect(page.locator('.admin-main')).toContainText('7 из 7');await expect(page.locator('.admin-main')).toContainText('Почтовый сервер отклонил авторизацию');await noOverflow();await shot('email-diagnostic')
+    await expect(page.locator('[data-admin-record]')).toHaveCount(1);await page.getByRole('link',{name:'Разобрать',exact:true}).click();await expect(page.locator('.admin-main')).toContainText('EAUTH');await expect(page.locator('.admin-main')).toContainText('7 из 7');await expect(page.locator('.admin-main')).toContainText('Почтовый сервер отклонил авторизацию');await noOverflow();await shot('email-diagnostic')
   })
   await check('job filters preserve the mounted page and retry confirmation handles failure, focus and safe requeue',async()=>{
     await nav('Фоновые задачи');await expect(page.getByRole('heading',{name:'Фоновые задачи',exact:true})).toBeVisible()
-    await page.getByRole('searchbox',{name:'Поиск задач',exact:true}).fill(org.name);await expect(page.locator('tbody tr')).toHaveCount(8);await shot('queue-states')
-    await page.getByRole('searchbox',{name:'Поиск задач',exact:true}).fill('Нет такой организации');await expect(page.locator('tbody tr')).toHaveCount(0);await expect(page.locator('.admin-note').first()).toContainText('Найдено задач: 0')
-    await page.getByRole('searchbox',{name:'Поиск задач',exact:true}).fill(operationsJob.id);await page.getByRole('button',{name:'Найти',exact:true}).click();await expect(page.locator('tbody tr')).toHaveCount(1)
-    await page.locator('.admin-main').evaluate(node=>node.dataset.preserved='yes');await page.getByRole('combobox',{name:'Период',exact:true}).click();await page.getByRole('option',{name:'Вся доступная история',exact:true}).click();await expect(page.locator('tbody tr')).toHaveCount(1);assert.equal(await page.locator('.admin-main').getAttribute('data-preserved'),'yes');assert.equal(await page.locator('.admin-loading').count(),0)
+    await page.getByRole('searchbox',{name:'Поиск задач',exact:true}).fill(org.name);await expect(page.locator('[data-admin-record]')).toHaveCount(8);await shot('queue-states')
+    await page.getByRole('searchbox',{name:'Поиск задач',exact:true}).fill('Нет такой организации');await expect(page.locator('[data-admin-record]')).toHaveCount(0);await expect(page.locator('.admin-list-summary').first()).toContainText('Найдено задач: 0')
+    await page.getByRole('searchbox',{name:'Поиск задач',exact:true}).fill(operationsJob.id);await page.getByRole('button',{name:'Найти',exact:true}).click();await expect(page.locator('[data-admin-record]')).toHaveCount(1)
+    await page.locator('.admin-main').evaluate(node=>node.dataset.preserved='yes');await page.getByRole('combobox',{name:'Период',exact:true}).click();await page.getByRole('option',{name:'Вся доступная история',exact:true}).click();await expect(page.locator('[data-admin-record]')).toHaveCount(1);assert.equal(await page.locator('.admin-main').getAttribute('data-preserved'),'yes');assert.equal(await page.locator('.admin-loading').count(),0)
     await page.locator(`a[href="/admin/operations/jobs/report/${operationsJob.id}"]`).click();await expect(page.getByRole('heading',{name:'Диагностика задачи',exact:true})).toBeVisible();await noOverflow();await shot('job')
     await page.getByRole('button',{name:'Повторить подготовку',exact:true}).click();const dialog=page.getByRole('dialog',{name:'Повторить подготовку отчёта?',exact:true});await expect(dialog).toBeVisible();for(let i=0;i<6;i++){await page.keyboard.press('Tab');assert(await dialog.evaluate(node=>node.contains(document.activeElement)))}await noOverflow();await shot('retry')
     const initialSize=page.viewportSize()

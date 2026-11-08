@@ -1621,6 +1621,7 @@ model PlatformOperationEvent {
 }
 model PlatformLifetimeMetrics {
  id Int @id
+ countedFrom DateTime? @map("counted_from") @db.Timestamptz(3)
  usersCreated BigInt @map("users_created")
  organizationsCreated BigInt @map("organizations_created")
  shiftsCreated BigInt @map("shifts_created")

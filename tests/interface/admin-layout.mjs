@@ -24,7 +24,7 @@ export async function checkAdminLayout({page,nav,expect,org,userId,output,result
   for(const [size,width,height]of sizes){
    const label=`${browser}/${route}/${size} (${width}×${height})`
    await page.setViewportSize({width,height})
-   const compact=width<=1050||height<740
+   const compact=width<=1050||height<700
    await expect(page.locator('.admin-root')).toHaveClass(compact?/has-compact-navigation/:/^(?!.*has-compact-navigation)/)
    await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))))
    await page.evaluate(()=>window.scrollTo({top:0,behavior:'instant'}))
@@ -39,7 +39,7 @@ export async function checkAdminLayout({page,nav,expect,org,userId,output,result
     assert(Math.abs(initial.sidebar.top-initial.header.bottom)<2,label+': sidebar starts below header')
     assert(initial.sidebar.bottom<=height+1,label+': sidebar fits viewport')
     assert(initial.sidebar.scroll<=initial.sidebar.client+2,label+': no scrolling inside desktop navigation '+JSON.stringify(initial.sidebar))
-    assert(initial.mainLeft>=220,label+': content leaves space for navigation')
+    assert(initial.mainLeft>=210,label+': content leaves space for navigation')
     if(size==='laptop'&&await page.evaluate(()=>document.documentElement.scrollHeight>innerHeight+100)){
      await page.mouse.move(width-40,height/2);await page.mouse.wheel(0,420)
      await expect.poll(()=>page.evaluate(()=>scrollY>0||document.documentElement.scrollHeight<=innerHeight+100)).toBeTruthy()
@@ -53,7 +53,7 @@ export async function checkAdminLayout({page,nav,expect,org,userId,output,result
     const dialog=page.getByRole('dialog',{name:'Навигация администратора',exact:true});await expect(dialog).toBeVisible()
     const drawer=await dialog.evaluate(node=>{const r=node.getBoundingClientRect();return{top:r.top,bottom:r.bottom,width:r.width,client:node.clientHeight,scroll:node.scrollHeight}})
     assert(drawer.top>=-1&&drawer.bottom<=height+1&&drawer.width<=width+1,label+': drawer stays within viewport')
-    assert(drawer.scroll<=drawer.client+2,label+': compact navigation fits without scrolling '+JSON.stringify(drawer))
+    assert(drawer.scroll<=drawer.client+2,label+': navigation never scrolls internally '+JSON.stringify(drawer));await expect(dialog.getByRole('button',{name:'Выйти из панели',exact:true})).toBeInViewport()
     await page.keyboard.press('Tab');assert(await dialog.evaluate(node=>node.contains(document.activeElement)),label+': navigation keeps keyboard focus')
     if(route==='overview'&&['phone-small','phone-landscape'].includes(size)){
      const file=`admin-layout-${browser}-${size}-navigation.png`;await page.screenshot({path:path.join(output,file)});result.screenshots.push(file)

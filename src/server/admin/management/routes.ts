@@ -3,16 +3,22 @@ import { z } from 'zod'
 import { adminRead } from '../reads.ts'
 import { requireAdminSession } from '../security.ts'
 import { accountRateLimit } from '../../security/rate-limit.ts'
-import { administrators,backupsState,alertsState,securityState,candidate } from './read-model.ts'
-import { beginAction,executeAction,cancelAction,simpleAction,type ManagementMailer } from './actions.ts'
+import { administrators,backupsState,backupJob,alertsState,securityState,candidate } from './read-model.ts'
+import { beginAction,executeAction,actionStatus,cancelAction,simpleAction,type ManagementMailer } from './actions.ts'
 import { actionSpec } from './schemas.ts'
+import { workKind,workState,assignWork,alertDetails } from './work.ts'
 export function createManagementRouter(sendCode:ManagementMailer){
  const router=Router(),read=(resource:string,work:Parameters<typeof adminRead>[1])=>adminRead(resource,work,'MANAGEMENT_VIEWED')
  router.get('/security',read('SECURITY',securityState))
  router.get('/administrators',read('ADMINISTRATORS',administrators))
  router.get('/administrators/candidate',read('ADMINISTRATOR_CANDIDATE',async request=>candidate(request.query.search,(await requireAdminSession(request)).actor.userId)))
  router.get('/backups',read('BACKUPS',request=>backupsState(request.query)))
+ router.get('/backups/jobs/:id',read('BACKUP_JOB',request=>backupJob(z.uuid().parse(request.params.id))))
+ router.get('/actions/:id',read('ACTION_STATUS',request=>actionStatus(request,z.uuid().parse(request.params.id))))
  router.get('/alerts',read('ALERTS',request=>alertsState(request.query)))
+ router.get('/alerts/:id',read('ALERT',request=>alertDetails(z.uuid().parse(request.params.id))))
+ router.get('/work/:kind/:id',read('WORK',request=>workState(request,workKind.parse(request.params.kind),z.uuid().parse(request.params.id))))
+ router.post('/work/:kind/:id/assign',accountRateLimit('admin-work-assign',20),async(request,response)=>response.json(await assignWork(request,workKind.parse(request.params.kind),z.uuid().parse(request.params.id))))
  router.post('/actions',accountRateLimit('admin-management-begin',10),async(request,response)=>{
   const body=z.object({spec:actionSpec,password:z.string().min(1).max(1024)}).strict().parse(request.body)
   response.json(await beginAction(request,response,body.spec,body.password,sendCode))

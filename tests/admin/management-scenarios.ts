@@ -23,6 +23,34 @@ export function managementScenarios({account,db,codes,password}:{account:(admin?
   await assert.rejects(db.query('UPDATE public.users SET public_id=public_id+100000 WHERE id=$1',[first.userId]),(error:{code:string})=>error.code==='23514')
   assert.equal((await first.request(root+'/administrators/candidate?search='+two.user.publicId)).status,403)
  })
+ it('recovers a committed action result without replaying the code and scopes receipts to the elevated session',async()=>{
+  const browser=await account(),recipient=await account(false),other=await account();await browser.ready();await other.ready()
+  const person=await target(browser,recipient.userId),spec={action:'ACCESS_GRANT',targetId:recipient.userId,payload:{version:person.version,userVersion:person.userVersion}}
+  const challenge=await begin(browser,spec),url=root+'/actions/'+challenge.challengeId
+  const pending=await browser.request(url).then(r=>r.json());assert.equal(pending.state,'pending');assert.equal(pending.resourceId,null)
+  assert.equal((await other.request(url)).status,404)
+  const completed=await execute(browser,challenge.challengeId);assert.equal(completed.status,200)
+  const result=await browser.request(url).then(r=>r.json());assert.equal(result.state,'completed');assert.equal(result.resourceId,recipient.userId);assert(result.completedAt)
+  assert.doesNotMatch(JSON.stringify(result),/code_hash|browser_hash|payload|token_hash/)
+  assert.equal((await execute(browser,challenge.challengeId)).status,409)
+  assert.equal((await browser.request(url).then(r=>r.json())).state,'completed')
+  await browser.request('/api/admin/lock',{});assert.equal((await browser.request(url)).status,423)
+ })
+ it('separates expired archives in filters and alert severity without changing global summaries',async()=>{
+  const browser=await account();await browser.ready();const id=randomUUID()
+  await db.query("INSERT INTO staffly_admin.backups(id,file_key,size_bytes,sha256,created_at,expires_at,verified_at,file_state) VALUES($1,$2,1,$3,now()-interval '31 days',now()-interval '1 day',now()-interval '30 days','AVAILABLE')",[id,'staffly-'+id+'.dump','a'.repeat(64)])
+  try{
+   const expired=await browser.request(root+'/backups?days=0&status=EXPIRED&search='+id).then(r=>r.json());assert.equal(expired.total,1);assert.equal(expired.items[0].state,'EXPIRED')
+   assert.equal((await browser.request(root+'/backups?days=0&status=AVAILABLE&search='+id).then(r=>r.json())).total,0)
+   assert.equal((await browser.request(root+'/backups/'+id+'/verify',{confirm:true,sha256:'a'.repeat(64)})).status,409)
+   const all=await browser.request(root+'/alerts?status=all').then(r=>r.json())
+   for(const severity of ['critical','warning']){
+    const filtered=await browser.request(root+'/alerts?status=all&severity='+severity).then(r=>r.json())
+    assert(filtered.items.every((item:{severity:string})=>item.severity===severity));assert.deepEqual(filtered.summary,all.summary)
+   }
+   assert.equal((await browser.request(root+'/alerts?severity=invalid')).status,400)
+  }finally{await db.query('DELETE FROM staffly_admin.backups WHERE id=$1',[id])}
+ })
  it('management denies ordinary users, locked PIN sessions, cross-origin writes and forged payloads',async()=>{
   const ordinary=await account(false);assert.equal((await ordinary.request(root+'/security')).status,403)
   const browser=await account();await browser.ready()
