@@ -73,8 +73,11 @@ export async function checkChartUi({ page, nav, check, expect, noOverflow, outpu
    if([1600,390].includes(width))await shot('users-'+width)
   }
   await page.setViewportSize(originalSize)
+  // Crossing 900px replaces cards with table rows (or the reverse). Focusing
+  // before that render finishes can target a node that is about to be removed.
+  await expect(page.locator(originalSize.width>900?'.admin-users table':'.admin-users .admin-mobile-table')).toBeVisible()
   const profile=page.locator(`.admin-users .admin-user-profile[href="/admin/users/${user.id}"]`)
-  await profile.focus();await page.keyboard.press('Enter');await expect(page.getByRole('heading',{name:'Профиль пользователя',exact:true})).toBeVisible()
+  await expect(profile).toBeVisible();await profile.focus();await expect(profile).toBeFocused();await page.keyboard.press('Enter');await expect(page.getByRole('heading',{name:'Профиль пользователя',exact:true})).toBeVisible()
   await nav('Пользователи');await page.locator(`.admin-user-actions a[href="/admin/users/${user.id}/service"]`).click();await expect(page.getByRole('heading',{name:'Обслуживание аккаунта',exact:true})).toBeVisible()
  })
 }

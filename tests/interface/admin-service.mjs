@@ -3,9 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import AxeBuilder from '@axe-core/playwright'
 export async function checkService({page,check,expect,prisma,databasePool,user,org,hash,password,codes,email,noOverflow,shot}){
- // Finish the previous document's reads before hard navigation: WebKit emits
- // native page errors for navigation-aborted fetches even when they are caught.
- const origin=new URL(page.url()).origin,open=async(path)=>{await page.waitForLoadState('networkidle');await page.goto(origin+'/admin'+path);await expect(page.locator('.admin-page-head h1')).toBeVisible();await noOverflow()},target=await prisma.user.create({data:{email:'service-ui-'+randomUUID()+'@example.test',firstName:'Елена',lastName:'Поддержки',emailVerifiedAt:new Date(),passwordHash:hash}}),session=await prisma.authSession.create({data:{userId:target.id,refreshTokenHash:randomUUID().replaceAll('-','').padEnd(64,'a'),idleExpiresAt:new Date(Date.now()+86400000),absoluteExpiresAt:new Date(Date.now()+30*86400000),userAgent:'Chrome on a synthetic support test device'}})
+ const origin=new URL(page.url()).origin,open=async(path)=>{await page.goto(origin+'/admin'+path);await expect(page.locator('.admin-page-head h1')).toBeVisible();await noOverflow()},target=await prisma.user.create({data:{email:'service-ui-'+randomUUID()+'@example.test',firstName:'Елена',lastName:'Поддержки',emailVerifiedAt:new Date(),passwordHash:hash}}),session=await prisma.authSession.create({data:{userId:target.id,refreshTokenHash:randomUUID().replaceAll('-','').padEnd(64,'a'),idleExpiresAt:new Date(Date.now()+86400000),absoluteExpiresAt:new Date(Date.now()+30*86400000),userAgent:'Chrome on a synthetic support test device'}})
  const reason=async value=>page.getByRole('textbox',{name:'Причина',exact:true}).fill(value)
  const choose=async(label,value)=>{await page.getByRole('combobox',{name:label,exact:true}).click();await page.getByRole('option',{name:value,exact:true}).click()}
  const confirm=async()=>{
