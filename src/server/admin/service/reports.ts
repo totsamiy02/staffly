@@ -1,0 +1,21 @@
+import { z } from 'zod'
+import { adminPool } from '../database.ts'
+import { databasePool } from '../../db.ts'
+export const reportQuery=z.object({from:z.iso.datetime({offset:true}),to:z.iso.datetime({offset:true}),kind:z.enum(['all','support','incidents','access','backups']).default('all'),limit:z.coerce.number().int().min(1).max(1000).default(500)}).refine(q=>Date.parse(q.to)>=Date.parse(q.from)&&Date.parse(q.to)-Date.parse(q.from)<=31*86400000,'Диапазон отчёта — не больше 31 дня.')
+export async function serviceReport(query:unknown){
+ const q=reportQuery.parse(query),db=adminPool(),entries:Array<{id:string;kind:string;at:string;action:string;status:string;actorId:string|null;subjectId:string|null}>=[]
+ const add=(kind:string,rows:Array<Record<string,unknown>>)=>{for(const r of rows)entries.push({id:String(r.id),kind,at:new Date(r.at as string).toISOString(),action:String(r.action),status:String(r.status),actorId:r.actor_id?String(r.actor_id):null,subjectId:r.subject_id?String(r.subject_id):null})}
+ if(q.kind==='all'||q.kind==='access')add('access',(await db.query("SELECT id,created_at AS at,action,outcome AS status,user_id AS actor_id,resource_id AS subject_id FROM staffly_admin.audit_events WHERE created_at BETWEEN $1 AND $2 AND action IN ('ACCESS_GRANTED','ACCESS_REVOKED','ADMIN_SESSION_REVOKED','USER_SESSION_REVOKE','ORG_STATE','PLAN_ADJUST','WORK_ASSIGNED') ORDER BY created_at DESC,id LIMIT $3",[q.from,q.to,q.limit+1])).rows)
+ if(q.kind==='all'||q.kind==='incidents')add('incidents',(await db.query("SELECT id,first_seen_at AS at,'ALERT' AS action,CASE WHEN resolved_at IS NOT NULL THEN 'RESOLVED' WHEN acknowledged_at IS NOT NULL THEN 'ACKNOWLEDGED' ELSE 'OPEN' END AS status,acknowledged_by AS actor_id,rule_id AS subject_id FROM staffly_admin.alerts WHERE first_seen_at BETWEEN $1 AND $2 ORDER BY first_seen_at DESC,id LIMIT $3",[q.from,q.to,q.limit+1])).rows)
+ if(q.kind==='all'||q.kind==='backups')add('backups',(await db.query('SELECT id,created_at AS at,kind AS action,status,requested_by AS actor_id,backup_id AS subject_id FROM staffly_admin.backup_jobs WHERE created_at BETWEEN $1 AND $2 ORDER BY created_at DESC,id LIMIT $3',[q.from,q.to,q.limit+1])).rows)
+ if(q.kind==='all'||q.kind==='support')add('support',(await databasePool.query("SELECT id,created_at AS at,COALESCE(event_code,'DIAGNOSTIC') AS action,CASE WHEN status>=500 OR source<>'request' THEN 'FAILED' ELSE 'RECORDED' END AS status,NULL::uuid AS actor_id,organization_id AS subject_id FROM public.platform_request_errors WHERE created_at BETWEEN $1 AND $2 ORDER BY created_at DESC,id LIMIT $3",[q.from,q.to,q.limit+1])).rows)
+ if(q.kind==='all'||q.kind==='backups')add('backups',(await db.query("SELECT id,checked_at AS at,'RESTORE_CHECK' AS action,status,NULL::uuid AS actor_id,backup_id AS subject_id FROM staffly_admin.restore_checks WHERE checked_at BETWEEN $1 AND $2 ORDER BY checked_at DESC,id LIMIT $3",[q.from,q.to,q.limit+1])).rows)
+ if(q.kind==='all'||['support','incidents'].includes(q.kind))add(q.kind==='incidents'?'incidents':'support',(await db.query("SELECT id,created_at AS at,'WORK_ASSIGNED' AS action,CASE WHEN to_assignee IS NULL THEN 'UNASSIGNED' ELSE 'ASSIGNED' END AS status,actor_id,subject_id FROM staffly_admin.work_history_directory WHERE created_at BETWEEN $1 AND $2 AND ($4='all' OR $4='support' AND subject_kind='diagnostic' OR $4='incidents' AND subject_kind='alert') ORDER BY created_at DESC,id LIMIT $3",[q.from,q.to,q.limit+1,q.kind])).rows)
+ entries.sort((a,b)=>b.at.localeCompare(a.at)||a.id.localeCompare(b.id))
+ return{format:'staffly-service-report-v1',generatedAt:new Date().toISOString(),filters:q,truncated:entries.length>q.limit,entries:entries.slice(0,q.limit)}
+}
+export function reportCsv(report:Awaited<ReturnType<typeof serviceReport>>){
+ // Quote every cell and neutralize spreadsheet formulas, including leading whitespace.
+ const cell=(value:unknown)=>'"'+String(value??'').replace(/^[\s]*([=+@-])/,'\'$1').replaceAll('"','""')+'"'
+ return '\uFEFF'+[['Сформирован',report.generatedAt],['С',report.filters.from,'По',report.filters.to],['Ограничено',String(report.truncated)],['ID','Вид','Время UTC','Действие','Состояние','Администратор ID','Объект ID'],...report.entries.map(e=>[e.id,e.kind,e.at,e.action,e.status,e.actorId,e.subjectId])].map(row=>row.map(cell).join(';')).join('\r\n')
+}

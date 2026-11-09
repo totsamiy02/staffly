@@ -1,3 +1,4 @@
+import { assertOrganizationAvailable } from '../service-state.ts'
 import { ensureAccessRoles, resolveAccess } from './access.ts'
 import type { OrganizationRole, Prisma } from '../../../generated/prisma/client.ts'
 import { scopedLocationId, locationContext } from '../location-context.ts'
@@ -20,12 +21,14 @@ export function getMembership(userId: string, organizationId: string, db: Prisma
   return pending
 }
 async function loadMembership(userId: string, organizationId: string, db: Prisma.TransactionClient) {
+  if(db!==prisma)await db.$queryRaw`SELECT pg_advisory_xact_lock_shared(hashtextextended(${organizationId},681947262))::text`
   const compact = db === prisma ? await readMembership(db, userId, organizationId) : undefined
   const membership = compact === undefined ? await db.organizationMember.findUnique({
     where: { organizationId_userId: { organizationId, userId } },
     include: { organization: true, _count: {select:{locationMemberships:true}}, accessAssignments: true, locationMemberships: { where: { leftAt: null, location: { archivedAt: null } } } },
   }) : compact?.membership
   if (!membership || membership.leftAt || membership.organization.deletedAt) throw new ApiError(404, 'ORGANIZATION_NOT_FOUND', 'Организация не найдена.')
+  assertOrganizationAvailable(membership.organization)
   const roles = compact?.roles.length ? compact.roles.map(role => ({ ...role, permissions: role.permissions.filter(key => (permissionKeys as readonly string[]).includes(key)) })) : await ensureAccessRoles(db, organizationId)
   const allLocations = compact?.locations ?? await db.organizationLocation.findMany({ where: { organizationId, ...(membership.role === 'OWNER' ? {} : { archivedAt: null }) }, select: { id: true } })
   const selected = scopedLocationId(organizationId)

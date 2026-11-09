@@ -31,6 +31,7 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run build
+      - run: node node_modules/typescript/bin/tsc -p tsconfig.test.json --pretty false
       - name: Validate migration history
         env:
           MIGRATION_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
@@ -63,6 +64,96 @@ jobs:
           retention-days: 7
           if-no-files-found: warn
 
+  browser:
+    name: Admin ${{ matrix.suite }} / ${{ matrix.theme }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        suite: [monitoring, management, operations, workflow, polish, review-fixes, service]
+        theme: [light, dark]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: bash scripts/ci/install-postgres.sh
+      - run: npx prisma generate
+      - name: Install Chromium
+        if: matrix.suite != 'service'
+        run: npx playwright install --with-deps chromium
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: artifacts/browser-binaries
+      - name: Install browsers for service workflows
+        if: matrix.suite == 'service'
+        run: npx playwright install --with-deps chromium firefox webkit
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: artifacts/browser-binaries
+      - name: Verify admin workflows on desktop and phone
+        run: node --import tsx tests/performance/load-test.mjs --profile=admin --admin-suite="$ADMIN_SUITE" --theme="$ADMIN_THEME" --browsers="$ADMIN_BROWSERS" --viewports=desktop,mobile --pg-bin=/usr/lib/postgresql/18/bin --quiet=true --output=artifacts/tests/admin-ui
+        env:
+          ADMIN_SUITE: ${{ matrix.suite }}
+          ADMIN_THEME: ${{ matrix.theme }}
+          ADMIN_BROWSERS: ${{ matrix.suite == 'service' && 'chrome,firefox,webkit' || 'chrome' }}
+          PLAYWRIGHT_BROWSERS_PATH: artifacts/browser-binaries
+      - name: Save browser diagnostics
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: admin-ui-${{ matrix.suite }}-${{ matrix.theme }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/tests/admin-ui/
+          retention-days: 7
+          if-no-files-found: warn
+
+  layout:
+    name: Admin layout / ${{ matrix.browser }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - browser: chrome
+            engine: chromium
+          - browser: firefox
+            engine: firefox
+          - browser: webkit
+            engine: webkit
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: bash scripts/ci/install-postgres.sh
+      - run: npx prisma generate
+      - run: npx playwright install --with-deps "$PLAYWRIGHT_ENGINE"
+        env:
+          PLAYWRIGHT_ENGINE: ${{ matrix.engine }}
+          PLAYWRIGHT_BROWSERS_PATH: artifacts/browser-binaries
+      - name: Verify fixed navigation and every admin page at twelve sizes
+        run: node --import tsx tests/performance/load-test.mjs --profile=admin --admin-suite=layout --browsers="$ADMIN_BROWSER" --viewports=desktop --pg-bin=/usr/lib/postgresql/18/bin --quiet=true --output=artifacts/tests/admin-layout
+        env:
+          ADMIN_BROWSER: ${{ matrix.browser }}
+          PLAYWRIGHT_BROWSERS_PATH: artifacts/browser-binaries
+      - name: Save layout diagnostics
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: admin-layout-${{ matrix.browser }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/tests/admin-layout/
+          retention-days: 7
+          if-no-files-found: warn
+
   security:
     name: Security
     uses: ./.github/workflows/security.yml
@@ -72,7 +163,7 @@ jobs:
   gate:
     name: CI gate
     if: always()
-    needs: [quality, server, security]
+    needs: [quality, server, browser, layout, security]
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
@@ -81,8 +172,30 @@ jobs:
           QUALITY: ${{ needs.quality.result }}
           SERVER: ${{ needs.server.result }}
           SECURITY: ${{ needs.security.result }}
+          BROWSER: ${{ needs.browser.result }}
+          LAYOUT: ${{ needs.layout.result }}
         run: |
           set -euo pipefail
           test "$QUALITY" = success
           test "$SERVER" = success
           test "$SECURITY" = success
+          test "$BROWSER" = success
+          test "$LAYOUT" = success
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Prepare release verification report after every gate passed
+        env:
+          APP_VERSION: ${{ github.sha }}
+        run: |
+          node --input-type=module -e '
+            import {readdirSync,writeFileSync} from "node:fs";
+            const schemaVersion=readdirSync("prisma/migrations",{withFileTypes:true}).filter(v=>v.isDirectory()).map(v=>v.name).sort().at(-1);
+            writeFileSync("release-check.json",JSON.stringify({appVersion:process.env.APP_VERSION,schemaVersion,checks:{build:true,types:true,lint:true,serverTests:true,browserTests:true,migrations:true,secrets:true}},null,2)+"\n");
+          '
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-check-${{ github.sha }}
+          path: release-check.json
+          retention-days: 30
+          if-no-files-found: error

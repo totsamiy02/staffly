@@ -1,6 +1,7 @@
+import { usePublishedGuideCatalog,mergeGuideArticles } from '../../features/public-content/content.tsx'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { guideArticles, guideArticleBySlug, guideCollections, guideHref, readingMinutes, guidePlural } from './content/index.ts'
+import { guideArticles, guideCollections, guideHref, readingMinutes, guidePlural } from './content/index.ts'
 import { guideChapters } from './content/chapters.ts'
 import type { GuideArticle } from './content/types.ts'
 import Select from '../../component/ui/select/select.tsx'
@@ -12,11 +13,11 @@ type Collection = typeof guideCollections[number]
 const articleAnchor = (slug: string) => `article-${slug}`
 
 function moduleArticles(collection: Collection, articles = guideArticles) {
-  return guideChapters(collection.id, articles).flatMap(chapter => chapter.slugs.map(slug => guideArticleBySlug.get(slug)!))
+  const bySlug=new Map(articles.map(article=>[article.slug,article]));return guideChapters(collection.id, articles).flatMap(chapter=>chapter.slugs.map(slug=>bySlug.get(slug)!)).filter(Boolean)
 }
 
 export function GuideJourney({ collection, activeSlug, continuous = false }: { collection: Collection; activeSlug?: string; continuous?: boolean }) {
-  const navigate = useNavigate(), articles = moduleArticles(collection)
+  const navigate = useNavigate(),published=usePublishedGuideCatalog(),articles=moduleArticles(collection,mergeGuideArticles(guideArticles,published))
   const [open, setOpen] = useState(false)
   const activeLink = useRef<HTMLAnchorElement>(null), graph = useRef<HTMLElement>(null)
   const current = Math.max(0, articles.findIndex(article => article.slug === activeSlug))

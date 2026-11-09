@@ -13,6 +13,7 @@ export type GuideSection = {
   table?: { headings: string[]; rows: string[][] }
 }
 export type GuideArticle = {
+  publishedReadingMinutes?:number
   slug: string
   category: GuideCategoryId
   title: string

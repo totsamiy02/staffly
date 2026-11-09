@@ -304,6 +304,10 @@ enum RequestEventType {
 }
 
 model Organization {
+  serviceState String @default("ACTIVE") @map("service_state") @db.VarChar(16)
+  serviceReason String? @map("service_reason") @db.VarChar(1000)
+  serviceUntil DateTime? @map("service_until") @db.Timestamptz(3)
+  serviceRevision Int @default(1) @map("service_revision")
   publicId Int @unique @default(autoincrement()) @map("public_id")
   platformPresence PlatformOrganizationPresence[]
   platformActivityDays PlatformActivityDay[]
@@ -1514,6 +1518,9 @@ model VacationCampaign {
 }
 
 model OrganizationSubscription {
+  supportPlan String? @map("support_plan") @db.VarChar(16)
+  supportStartsAt DateTime? @map("support_starts_at") @db.Timestamptz(3)
+  supportEndsAt DateTime? @map("support_ends_at") @db.Timestamptz(3)
   organizationId String @id @map("organization_id") @db.Uuid
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   plan String @default("FREE") @db.VarChar(16)

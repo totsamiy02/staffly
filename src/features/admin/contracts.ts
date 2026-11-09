@@ -1,7 +1,7 @@
 import type { HistoryPoint, HistoryRange } from '../../shared/monitoring-history.ts'
 import type { SubscriptionSnapshot } from '../../app/subscriptions/plans.ts'
 export type AdminAccess = {eligible:boolean;state:'authenticate'|'setup-pin'|'locked'|'active';expiresAt?:string;lockAt?:string;pinSet?:boolean;reset?:boolean;attemptsRemaining?:number}
-export type OrganizationMonitor = {id:string;publicId:number;name:string;timezone:string;createdAt:string;lastActiveAt:string|null;members:number;locations:number;storageBytes:number;online:number;onlineSessions:number;subscription:SubscriptionSnapshot;attention:boolean}
+export type OrganizationMonitor = {serviceState:'ACTIVE'|'SUSPENDED';id:string;publicId:number;name:string;timezone:string;createdAt:string;lastActiveAt:string|null;members:number;locations:number;storageBytes:number;online:number;onlineSessions:number;subscription:SubscriptionSnapshot;attention:boolean}
 export type PageResult<T>={items:T[];total:number;page:number;pageSize:number}
 export type OnlineSummary={users:number;sessions:number;organizations:number;at:string}
 export type OnlineSample=HistoryPoint

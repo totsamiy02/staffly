@@ -14,7 +14,7 @@ export async function recordOrganizationPresences(items:Array<{userId:string;ses
       JOIN auth_sessions s ON s.id=input.session_id AND s.user_id=input.user_id
       JOIN users u ON u.id=s.user_id AND u.deleted_at IS NULL AND u.email_verified_at IS NOT NULL
       JOIN organization_members m ON m.user_id=s.user_id AND m.organization_id=input.organization_id AND m.left_at IS NULL
-      JOIN organizations o ON o.id=m.organization_id AND o.deleted_at IS NULL
+      JOIN organizations o ON o.id=m.organization_id AND o.deleted_at IS NULL AND public.platform_organization_available(o.id)
       WHERE s.revoked_at IS NULL AND s.idle_expires_at>now() AND s.absolute_expires_at>now()
       ON CONFLICT(session_id,organization_id) DO UPDATE SET last_active_at=now() WHERE platform_organization_presence.last_active_at<now()-interval '20 seconds'
       RETURNING organization_id,user_id
@@ -37,7 +37,7 @@ export async function recordFeature(organizationId: string, feature: string) {
 export const activePresenceSql=`FROM platform_organization_presence p
   JOIN auth_sessions presence_session ON presence_session.id=p.session_id AND presence_session.user_id=p.user_id AND presence_session.revoked_at IS NULL AND presence_session.idle_expires_at>now() AND presence_session.absolute_expires_at>now()
   JOIN users presence_user ON presence_user.id=p.user_id AND presence_user.deleted_at IS NULL AND presence_user.email_verified_at IS NOT NULL
-  JOIN organizations presence_org ON presence_org.id=p.organization_id AND presence_org.deleted_at IS NULL
+  JOIN organizations presence_org ON presence_org.id=p.organization_id AND presence_org.deleted_at IS NULL AND public.platform_organization_available(presence_org.id)
   JOIN organization_members presence_member ON presence_member.organization_id=p.organization_id AND presence_member.user_id=p.user_id AND presence_member.left_at IS NULL
   WHERE p.last_active_at>now()-interval '90 seconds'`
 type MonitoringQuery = (sql: string) => Promise<unknown>

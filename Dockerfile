@@ -37,3 +37,26 @@ RUN mkdir -p /var/lib/staffly/storage && chown node:node /var/lib/staffly/storag
 USER node
 EXPOSE 3001
 CMD ["node", "--import", "tsx", "src/server/index.ts"]
+
+# Operator image: PostgreSQL client matches the database major version.
+# It receives its own credentials and separate persistent backup volumes.
+FROM postgres:18 AS maintenance
+WORKDIR /app
+RUN useradd --uid 1000 --create-home node && mkdir -p /var/lib/staffly/database-backups /var/lib/staffly/file-backups /var/lib/staffly/deletion-ledger && chown -R node:node /var/lib/staffly
+COPY --from=runtime /usr/local/bin/node /usr/local/bin/node
+COPY --from=runtime --chown=node:node /app /app
+COPY --from=build --chown=node:node /app/scripts ./scripts
+ENV NODE_ENV=production
+USER node
+ENTRYPOINT ["node", "--import", "tsx"]
+CMD ["scripts/admin-maintenance.ts", "--watch"]
+
+FROM runtime AS observer
+COPY --from=build --chown=node:node /app/scripts ./scripts
+USER root
+RUN mkdir -p /var/lib/staffly/observer && chown node:node /var/lib/staffly/observer
+USER node
+CMD ["node", "--import", "tsx", "scripts/service-observer.ts", "--watch"]
+
+# Keep the default build equivalent to the HTTP application image.
+FROM runtime AS production

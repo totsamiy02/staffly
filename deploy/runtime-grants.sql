@@ -21,3 +21,9 @@ GRANT EXECUTE ON FUNCTION public.platform_cleanup_operations() TO staffly_app;
 REVOKE UPDATE,DELETE,TRUNCATE ON public.platform_request_errors FROM staffly_app;
 GRANT EXECUTE ON FUNCTION public.platform_cleanup_diagnostics() TO staffly_app;
 GRANT EXECUTE ON FUNCTION public.platform_reconcile_admin_alerts() TO staffly_app;
+DO $$ BEGIN
+ IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='staffly_app') THEN
+  GRANT SELECT ON public.platform_public_content,public.platform_maintenance_notice TO staffly_app;
+  REVOKE INSERT,UPDATE,DELETE,TRUNCATE ON public.platform_public_content,public.platform_maintenance_notice FROM staffly_app;
+ END IF;
+END $$;

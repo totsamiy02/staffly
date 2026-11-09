@@ -76,7 +76,7 @@ export function useFormSafety<T>({ scope, value, dirtyValue, active = true, busy
     expectedRevision: restoredRevision ?? cycle.current.revision,
     restore() { if (candidate && onRestore) { writtenHere.current = key; onRestore(candidate.value); setRestoredRevision(candidate.revision); setCandidate(null); setSaved(stableJson(candidate.value)) } },
     deleteDraft() { writtenHere.current = null; removeDraft(key); setCandidate(null); setSaved(null); setStorageError(false) },
-    markSaved() { writtenHere.current = null; cycle.current.baseline = serialized; guard.dirty = false; guard.busy = false; notify(); removeDraft(key); setCandidate(null); setSaved(null); update(value => value + 1) },
+    markSaved(nextRevision?:number) { if(nextRevision!==undefined){cycle.current.revision=nextRevision;setRestoredRevision(undefined)} writtenHere.current = null; cycle.current.baseline = serialized; guard.dirty = false; guard.busy = false; notify(); removeDraft(key); setCandidate(null); setSaved(null); update(value => value + 1) },
     confirmClose: () => confirm([guard]),
     async close(action: () => void) { if (await confirm([guard])) action() },
   }

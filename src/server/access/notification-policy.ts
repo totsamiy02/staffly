@@ -14,7 +14,7 @@ export async function notificationPolicy(userId: string, organizationId?: string
   for (const membership of memberships) {
     let actor: Actor
     try { actor = await getMembership(userId, membership.organizationId) }
-    catch (error) { if (error instanceof ApiError && error.status === 404) continue; throw error }
+    catch (error) { if (error instanceof ApiError && (error.status === 404 || error.code === 'ORGANIZATION_SUSPENDED')) continue; throw error }
     actors.set(membership.organizationId, actor)
     const permission = (key: Parameters<typeof hasPermission>[1], field: string) => permissionSql(actor,key,Prisma.raw(field))
     const viewIds = locationsFor(actor,'events.view'), managerIds = [...new Set([...locationsFor(actor,'events.edit'), ...locationsFor(actor,'events.cancel')])]

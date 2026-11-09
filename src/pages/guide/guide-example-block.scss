@@ -1,0 +1,14 @@
+.guide-figure { margin: 27px 0;
+  &__frame { overflow: hidden; border: 1px solid var(--theme-accent-border,#cddff7); border-radius: 12px; background: var(--theme-accent-bg,#f7faff); > button { display: flex; align-items: center; justify-content: center; gap: 7px; width: 100%; min-height: 40px; border-top: 1px solid var(--theme-accent-border,#dce8f9); color: var(--theme-accent,#1562cd); font-size: 11px; background: var(--theme-accent-bg,#f0f6ff); svg { width: 14px; height: 14px; } &:hover { color: var(--theme-accent,#0052cf); background: var(--theme-accent-bg,#e2efff); } } }
+  &__label { display: flex; align-items: center; gap: 7px; padding: 11px 15px; border-bottom: 1px solid var(--theme-accent-border,#e1eaf7); background: var(--theme-surface,#fff); color: var(--theme-accent,#30629d); font-size: 10px; font-weight: 500; svg { width: 14px; height: 14px; } }
+  figcaption { margin-top: 10px; color: var(--theme-accent,#526784); font-size: 10px; line-height: 1.7; }
+}
+// Shared UI previews retain actual Staffly styling; blue is the surrounding guide, not a fake screen.
+.guide-example { padding: 20px; background: var(--theme-surface-muted,#f7f8fa); overflow-x: auto; > div { min-width: 0; } .work-time-panel { padding-top: 0; } .document-row { border-radius: 10px; padding: 16px; background: var(--theme-surface,#fff); flex-wrap: wrap; } .report-dialog.document-dialog { width: auto; max-height: none; padding: 20px; border: 1px solid var(--theme-border,#e7e7e7); border-radius: 10px; background: var(--theme-surface,white); .report-rules { border-top: 0; padding-top: 0; } } }
+.guide-example-overlay { position: fixed; z-index: 100; inset: 0; display: grid; align-items: center; justify-items: center; padding: 24px; overflow-y: auto; background: rgb(5 17 37 / 65%); backdrop-filter: blur(5px); }
+.guide-example-dialog.document-dialog { display: block; width: min(980px, 100%); max-height: 92dvh; padding: 24px; overflow-y: auto; border: 1px solid var(--theme-accent-border,#d1e1f8); border-radius: 16px; background: var(--theme-surface,#fff); box-shadow: 0 30px 90px #0003;
+  > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 18px; h2 { font-size: 20px; } button { width: 32px; height: 32px; font-size: 25px; cursor: pointer; } } > p { margin-top: 12px; color: var(--theme-accent,#586d8a); font-size: 11px; }
+}
+.guide-example-stage { overflow-x: auto; border-radius: 10px; .guide-example { min-width: 720px; padding: 28px; } }
+
+@media(max-width:800px){.guide-example{padding:13px;}.guide-example-overlay{padding:12px;}.guide-example-dialog.document-dialog{padding:17px;>header h2{font-size:17px;}}}

@@ -1,3 +1,4 @@
+import { withFileCleanupLock } from '../storage/cleanup-lock.ts'
 import { prisma, databasePool } from '../db.ts'
 import type { Prisma } from '../../generated/prisma/client.ts'
 import { storage } from '../storage/provider.ts'
@@ -98,8 +99,11 @@ export async function runDataRetention({ enabled = purgeEnabled(), removeObject 
       const files = await prisma.storedFile.findMany({ where: { ...fileScope, purgedAt: null }, take: 50, orderBy: { id: 'asc' }, select: { id: true, objectKey: true } })
       for (const file of files) {
         if (!shouldContinue()) continue nextJob
-        try { await removeObject(file.objectKey) } catch { throw new Error('OBJECT_DELETE_FAILED') }
-        await prisma.storedFile.updateMany({ where: { id: file.id }, data: { purgedAt: new Date(), pendingDeletionAt: null, lastDeletionError: null } })
+        const removed=await withFileCleanupLock(file.id,async()=>{
+          try { await removeObject(file.objectKey) } catch { throw new Error('OBJECT_DELETE_FAILED') }
+          await prisma.storedFile.updateMany({ where: { id: file.id }, data: { purgedAt: new Date(), pendingDeletionAt: null, lastDeletionError: null } });return true
+        })
+        if(!removed)throw new Error('FILES_HELD')
       }
       const exports = await prisma.reportExport.findMany({ where: { ...exportScope, objectKey: { not: null } }, select: { id: true, objectKey: true }, take: 50 })
       for (const report of exports) {
@@ -120,7 +124,7 @@ export async function runDataRetention({ enabled = purgeEnabled(), removeObject 
       completed++
     } catch (error) {
       failed++
-      const allowed = ['SUBJECT_ACTIVE', 'SUBJECT_MISSING', 'ACTIVE_MEMBERSHIP', 'OBJECT_DELETE_FAILED']
+      const allowed = ['SUBJECT_ACTIVE', 'SUBJECT_MISSING', 'ACTIVE_MEMBERSHIP', 'FILES_HELD', 'OBJECT_DELETE_FAILED']
       await prisma.dataDeletion.update({ where: { id: candidate.id }, data: { attempts: { increment: 1 }, lastErrorCode: error instanceof Error && allowed.includes(error.message) ? error.message : 'DATABASE_CLEANUP_FAILED' } })
     } finally {
       if (acquired) await lock.query('SELECT pg_advisory_unlock(hashtextextended($1, 91))', [candidate.id])

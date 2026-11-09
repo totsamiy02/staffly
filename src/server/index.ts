@@ -1,3 +1,5 @@
+import { publicContentRouter,maintenanceWriteGate } from './public-content.ts'
+import { organizationServiceGate,suspendedWriteError } from './organizations/service-state.ts'
 import { securityCorrelationId } from './security/journal.ts'
 import adminRouter from './admin/routes.ts'
 import { closeAdminDatabase } from './admin/database.ts'
@@ -121,11 +123,13 @@ app.get('/health/ready', async (_request, response) => {
   const ok = !shuttingDown && warmed && live.connected() && await readiness.pending
   response.set('Cache-Control', 'no-store').status(ok ? 200 : 503).json({ ok })
 })
+app.use('/api/public',publicContentRouter)
+app.use('/api',maintenanceWriteGate)
 app.use('/api/organizations/:organizationId', (request, response, next) => {
   response.locals.operationsOrganizationId=String(request.params.organizationId)
   if (!['GET', 'HEAD'].includes(request.method)) response.once('finish', () => { if (response.statusCode < 400) readCache.invalidate(String(request.params.organizationId)) })
   next()
-}, requireAuth, selectLocation, subscriptionWritePolicy)
+}, requireAuth, organizationServiceGate, selectLocation, subscriptionWritePolicy)
 app.use('/api/support',createSupportRouter())
 app.use('/api/admin', adminRouter)
 app.use('/api/organizations/:organizationId', (request, response, next) => {
@@ -152,6 +156,7 @@ app.use((error: unknown, request: express.Request, response: express.Response, _
   if (error && typeof error === 'object' && 'type' in error && ['entity.parse.failed', 'request.aborted', 'request.size.invalid'].includes(String(error.type))) {
     response.status(400).json({ code: 'INVALID_BODY', message: 'Некорректное тело запроса.' }); return
   }
+  if(suspendedWriteError(error)){response.status(423).json({code:'ORGANIZATION_SUSPENDED',message:'Работа организации приостановлена. Обратитесь к владельцу или в поддержку.'});return}
   const errorId = securityCorrelationId() ?? randomUUID()
   if (!(error instanceof ApiError)&&isDatabaseBusy(error)) {
     reportApiFailure(error,request,response,errorId,503)

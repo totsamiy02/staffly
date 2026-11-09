@@ -6,7 +6,7 @@ import { loadReviewerContext,reviewersFromContext } from './reviewers.ts'
 import { reconcileShiftRequests } from './shift-conflicts.ts'
 export async function maintainRequests(now=new Date(),shouldContinue=()=>true){
   await maintainShiftOffers(shouldContinue)
-  const orgs=await prisma.organization.findMany({where:{deletedAt:null},select:{id:true}})
+  const orgs=await prisma.organization.findMany({where:{deletedAt:null,OR:[{serviceState:'ACTIVE'},{serviceUntil:{lte:now}}]},select:{id:true}})
   for(const org of orgs){
     if (!shouldContinue()) return
     await reconcileShiftRequests(org.id,true)

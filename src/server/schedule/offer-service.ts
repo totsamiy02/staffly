@@ -318,7 +318,7 @@ export async function actOnOffer(userId: string, organizationId: string, offerId
 }
 
 export async function maintainShiftOffers(shouldContinue=()=>true) {
-  const organizations=await prisma.organization.findMany({where:{deletedAt:null},select:{id:true}})
+  const organizations=await prisma.organization.findMany({where:{deletedAt:null,OR:[{serviceState:'ACTIVE'},{serviceUntil:{lte:new Date()}}]},select:{id:true}})
   for(const organization of organizations) {
     if(!shouldContinue())return
     await transaction(organization.id,async tx=>{

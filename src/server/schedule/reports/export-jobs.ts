@@ -21,7 +21,7 @@ import { freshFileAccess } from '../../storage/guarded-delivery.ts'
 import { parserArguments } from '../../file-processing/runner.ts'
 
 const publicJob = (job: ReportExport) => ({ id: job.id, status: job.status, errorId: job.status === 'FAILED' ? job.id : undefined, expiresAt: job.expiresAt,
-  message: job.status === 'FAILED' ? job.errorCode === 'ORGANIZATION_STORAGE_QUOTA' ? 'Хранилище организации заполнено. Освободите место и повторите экспорт.' : 'Не удалось подготовить отчёт. Проверьте доступ и повторите попытку.' : undefined,
+  message: job.status==='CANCELLED'?'Подготовка отчёта отменена администратором. Создайте новую выгрузку при необходимости.':job.status === 'FAILED' ? job.errorCode === 'ORGANIZATION_STORAGE_QUOTA' ? 'Хранилище организации заполнено. Освободите место и повторите экспорт.' : 'Не удалось подготовить отчёт. Проверьте доступ и повторите попытку.' : undefined,
   statusUrl: `/organizations/${job.organizationId}/statistics/reports/exports/${job.id}` })
 const converters = new Set<ChildProcess>()
 const interrupted = new WeakSet<ChildProcess>()
@@ -101,7 +101,7 @@ export async function claimReportExport(token: string) {
       SELECT j.id, j.organization_id AS "organizationId" FROM report_exports j
       JOIN organization_resource_budgets b ON b.organization_id=j.organization_id
       WHERE j.expires_at>now() AND j.attempts<3
-      AND (j.status='PENDING' OR j.status='RUNNING' AND j.lease_until<now())
+      AND public.platform_organization_available(j.organization_id) AND (j.status='PENDING' OR j.status='RUNNING' AND j.lease_until<now())
       AND NOT EXISTS(SELECT 1 FROM report_exports active WHERE active.organization_id=j.organization_id AND active.id<>j.id AND active.status='RUNNING' AND active.lease_until>=now())
       ORDER BY b.last_export_at ASC NULLS FIRST,j.created_at,j.id LIMIT 1 FOR UPDATE OF j SKIP LOCKED`
     if (!rows[0]) return null

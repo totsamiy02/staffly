@@ -26,6 +26,7 @@
 @media(prefers-reduced-motion:reduce){.admin-root .admin-management-dialog form.has-action-error input{animation:none;}}
 
 .admin-backup-row-actions{display:flex;flex-wrap:wrap;gap:8px;max-width:240px;}
+@media(max-width:900px){.admin-root .admin-record-actions .admin-backup-row-actions{display:grid;grid-template-columns:minmax(0,1fr);flex:1 1 100%;min-width:0;width:100%;>.admin-btn{width:100%;justify-content:center;}}}
 
 .admin-root .admin-rule-dialog footer{flex-wrap:wrap;}
 @media(max-width:600px){.admin-root .admin-rule-dialog footer>.admin-text-button{flex-basis:100%;}}

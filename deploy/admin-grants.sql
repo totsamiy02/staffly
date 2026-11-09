@@ -20,3 +20,24 @@ DO $$ BEGIN
     GRANT EXECUTE ON FUNCTION staffly_admin.simple_management_action(uuid,uuid,uuid,text,text,uuid,text) TO staffly_admin_gateway;
   END IF;
 END $$;
+DO $$ BEGIN
+ IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='staffly_admin_gateway') THEN
+  REVOKE ALL ON FUNCTION staffly_admin.execute_management_action_legacy(uuid,uuid,uuid,text,uuid,text,text) FROM staffly_admin_gateway;
+  GRANT SELECT ON staffly_admin.service_history,staffly_admin.service_jobs,staffly_admin.cleanup_directory,staffly_admin.queue_history,
+   staffly_admin.queue_batches,staffly_admin.backup_schedule,staffly_admin.backup_components,staffly_admin.restore_checks,
+   staffly_admin.content_items,staffly_admin.content_revisions,staffly_admin.content_reviews,staffly_admin.content_publications,
+   staffly_admin.maintenance_windows,staffly_admin.delivery_settings,staffly_admin.external_probe,staffly_admin.signal_deliveries,
+   staffly_admin.user_service_sessions,staffly_admin.release_schema_state,staffly_admin.release_checks TO staffly_admin_gateway;
+  GRANT EXECUTE ON FUNCTION staffly_admin.save_service_content(uuid,uuid,uuid,text,jsonb),staffly_admin.review_service_content(uuid,uuid,uuid,text,uuid),staffly_admin.record_runtime_checks(uuid,uuid,uuid,text,uuid,jsonb,text,text) TO staffly_admin_gateway;
+ END IF;
+END $$;
+DO $$ BEGIN
+ IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='staffly_admin_gateway') THEN
+  GRANT SELECT ON staffly_admin.file_cleanup_directory,staffly_admin.service_runner_state TO staffly_admin_gateway;
+ END IF;
+END $$;
+DO $$ BEGIN
+ IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='staffly_admin_gateway') THEN
+  GRANT EXECUTE ON FUNCTION staffly_admin.confirm_signal(uuid,uuid,uuid,text,uuid,text) TO staffly_admin_gateway;
+ END IF;
+END $$;

@@ -14,9 +14,19 @@ on:
       - src/server/storage/**
       - src/server/schedule/reports/**
       - src/server/worker*.ts
+      - src/server/admin/**
+      - src/server/organizations/service-state.ts
+      - src/server/public-content.ts
+      - src/features/admin/**
+      - scripts/admin-*.ts
+      - scripts/service-observer.ts
+      - scripts/database-*.ts
+      - tests/admin/**
+      - tests/interface/admin-*
       - prisma/**
       - package*.json
       - .github/workflows/production.yml
+      - .github/workflows/ci.yml
   push:
     tags: ['v*']
   workflow_dispatch:
@@ -46,6 +56,14 @@ jobs:
         env:
           PLAYWRIGHT_BROWSERS_PATH: artifacts/browser-binaries
       - run: npm run test:production
+      - name: Build maintenance and observer images
+        run: |
+          docker build --target maintenance --tag staffly-maintenance-ci:local .
+          docker build --target observer --tag staffly-observer-ci:local .
+      - name: Verify operator dependencies without network or credentials
+        run: |
+          docker run --rm --network none --read-only --tmpfs /tmp:rw,size=32m,mode=1777 --cap-drop ALL --security-opt no-new-privileges --entrypoint node --volume "$PWD/tests/production/operator-imports.mjs:/app/tests/production/operator-imports.mjs:ro" staffly-maintenance-ci:local --import tsx tests/production/operator-imports.mjs maintenance
+          docker run --rm --network none --read-only --tmpfs /tmp:rw,size=32m,mode=1777 --cap-drop ALL --security-opt no-new-privileges --entrypoint node --volume "$PWD/tests/production/operator-imports.mjs:/app/tests/production/operator-imports.mjs:ro" staffly-observer-ci:local --import tsx tests/production/operator-imports.mjs observer
       - name: Save container diagnostics
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

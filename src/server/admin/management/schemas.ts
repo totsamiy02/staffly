@@ -1,8 +1,10 @@
 import { z } from 'zod'
+import { serviceActions } from '../service/schemas.ts'
 import { periodFields } from '../period.ts'
 const version=z.number().int().nonnegative().max(2147483647)
 const empty=z.object({}).strict()
 export const actionSpec=z.discriminatedUnion('action',[
+ ...serviceActions,
  z.object({action:z.literal('ACCESS_GRANT'),targetId:z.uuid(),payload:z.object({version,userVersion:version}).strict()}).strict(),
  z.object({action:z.literal('ACCESS_REVOKE'),targetId:z.uuid(),payload:z.object({version,userVersion:version}).strict()}).strict(),
  z.object({action:z.literal('SESSION_REVOKE'),targetId:z.uuid(),payload:z.object({version}).strict()}).strict(),

@@ -44,7 +44,9 @@
     "test:interface:visual:update": "node --import tsx tests/performance/load-test.mjs --profile=interface --routes=auth,register,forgot,account-profile,controls --viewports=desktop,mobile --update-visual=true",
     "test:interface:browsers": "PLAYWRIGHT_BROWSERS_PATH=artifacts/browser-binaries playwright install chromium firefox webkit",
     "data:retention": "node --env-file=src/server/.env --import tsx scripts/data-retention.ts",
-    "db:backup:retention": "node --import tsx scripts/backup-retention.ts"
+    "db:backup:retention": "node --import tsx scripts/backup-retention.ts",
+    "admin:observer": "node --import tsx scripts/service-observer.ts",
+    "admin:release:record": "node --import tsx scripts/record-release-check.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1158.0",

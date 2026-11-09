@@ -8,6 +8,8 @@ import { adminPool,adminTransaction } from '../database.ts'
 import { requireAdminSession,managementProof,audit } from '../security.ts'
 import { managementActions,alertCatalog } from '../../../features/admin/management/catalog.ts'
 import type { ActionSpec } from './schemas.ts'
+import { checkServiceSpec } from '../service/actions.ts'
+import type { ServiceAction } from '../service/schemas.ts'
 import { candidate } from './read-model.ts'
 export type ManagementMailer=(email:string,code:string,summary:string)=>Promise<void>
 const hash=(value:string)=>createHash('sha256').update(value).digest('hex')
@@ -19,10 +21,13 @@ export function actionError(result:string):never{
  if(result==='FORBIDDEN')throw new ApiError(403,'ADMIN_AUTH_REQUIRED','Подтвердите административный вход заново.')
  if(result==='SELF'||result==='LAST_ADMIN')throw new ApiError(409,'ADMIN_LAST_ADMIN','Свой доступ и последний действующий административный аккаунт нельзя отключить через панель.')
  if(result==='BUSY')throw new ApiError(409,'ADMIN_BACKUP_BUSY','Уже есть задание резервного копирования. Дождитесь его завершения.')
+ if(result==='CHECKS_REQUIRED')throw new ApiError(409,'ADMIN_CHECKS_REQUIRED','Сначала выполните обязательные проверки для этого этапа обслуживания.')
+ if(result==='INVALID_TRANSITION')throw new ApiError(409,'ADMIN_TRANSITION_INVALID','Перейдите к следующему этапу работ по порядку: подготовка, выполнение, проверка, завершение.')
  if(result==='LIMIT')throw new ApiError(429,'ADMIN_MANAGEMENT_LIMIT','Достигнут лимит этой операции. Повторите позже.')
  throw new ApiError(409,'ADMIN_ACTION_CHANGED','Данные изменились или действие уже выполнено. Закройте окно, обновите данные и подготовьте действие заново.')
 }
-async function checkSpec(spec:ActionSpec,actorId:string,sessionId:string){
+async function checkSpec(spec:ActionSpec,actorId:string,sessionId:string,authSessionId:string){
+ if(!['ACCESS_GRANT','ACCESS_REVOKE','SESSION_REVOKE','BACKUP_CREATE','ALERT_RULE'].includes(spec.action))return checkServiceSpec(spec as ServiceAction,actorId,authSessionId)
  if(spec.action==='ACCESS_GRANT'||spec.action==='ACCESS_REVOKE'){
   const value=await candidate(spec.targetId,actorId)
   if(value.self)actionError('SELF')
@@ -48,7 +53,7 @@ async function checkSpec(spec:ActionSpec,actorId:string,sessionId:string){
 }
 export async function beginAction(request:Request,response:Response,spec:ActionSpec,password:string,sendCode:ManagementMailer){
  const {actor,session}=await requireAdminSession(request)
- const target=await checkSpec(spec,actor.userId,session.id)
+ const target=await checkSpec(spec,actor.userId,session.id,actor.authSessionId)
  const bucket=await reserveAuthAttempt('admin-password',actor.userId,5),user=await prisma.user.findUniqueOrThrow({where:{id:actor.userId},select:{passwordHash:true}})
  if(!await verifyLoginPassword(user.passwordHash,password)){await audit(adminPool(),actor.userId,'MANAGEMENT_CHALLENGE_DENIED','DENIED',session.id);throw new ApiError(400,'ADMIN_CONFIRMATION_INVALID','Не удалось подтвердить пароль.')}
  await clearAuthAttempts(bucket);await reserveAuthAttempt('admin-management-mail',actor.userId,10)

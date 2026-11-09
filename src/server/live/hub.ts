@@ -113,7 +113,7 @@ export function createLiveHub(options: { validationIntervalMs?: number } = {}) {
     if (!connected || peers.size >= maximum || (perUser.get(auth.userId) ?? 0) >= 4) {
       response.set('Retry-After', '5').status(503).json({ code: 'LIVE_BUSY', message: 'Обновления временно недоступны.' }); return
     }
-    const memberships = await prisma.organizationMember.findMany({ where: { userId: auth.userId, leftAt: null, organization: { deletedAt: null } }, select: { organizationId: true } })
+    const memberships = await prisma.organizationMember.findMany({ where: { userId: auth.userId, leftAt: null, organization: { deletedAt: null,OR:[{serviceState:'ACTIVE'},{serviceUntil:{lte:new Date()}}] } }, select: { organizationId: true } })
     const organizations = new Set(memberships.map(member => member.organizationId))
     if (organizationId && !organizations.has(organizationId)) {
       response.status(404).json({ code: 'ORGANIZATION_NOT_FOUND' }); return

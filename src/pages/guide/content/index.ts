@@ -17,6 +17,7 @@ export const featuredSlugs = ['welcome', 'first-day']
 export const popularSlugs = ['transfer-shift', 'submit-request', 'roles', 'excel-report']
 export const guideHref = (slug: string) => `/guide/${slug}`
 export function readingMinutes(article: GuideArticle) {
+  if(article.publishedReadingMinutes)return article.publishedReadingMinutes
   return Math.max(2, Math.ceil(JSON.stringify(article.sections).split(/\s+/).length / 150))
 }
 const normalize = (value: string) => value.toLocaleLowerCase('ru').replaceAll('ё', 'е').replace(/[^\p{L}\p{N}\s]/gu, ' ')

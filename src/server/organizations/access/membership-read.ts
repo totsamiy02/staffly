@@ -5,7 +5,7 @@ type Row = Record<string, unknown>
 function model<T>(row: Row): T {
   return Object.fromEntries(Object.entries(row).map(([column, value]) => {
     const key = column.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase())
-    return [key, key.endsWith('At') && typeof value === 'string' ? new Date(value) : value]
+    return [key, (key.endsWith('At')||key.endsWith('Until')) && typeof value === 'string' ? new Date(value) : value]
   })) as T
 }
 

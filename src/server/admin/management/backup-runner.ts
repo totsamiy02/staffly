@@ -6,8 +6,10 @@ import { createReadStream } from 'node:fs'
 import { mkdir,lstat,readFile,realpath,chmod } from 'node:fs/promises'
 import path from 'node:path'
 import { createDatabaseBackup } from '../../../../scripts/database-backup.ts'
+import { createCoordinatedBackup } from '../service/backup-components.ts'
+import type { StorageProvider } from '../../storage/provider.ts'
 import { safeError } from '../../security/safe-error.ts'
-type Options={managementUrl:string;backupUrl:string;directory:string;pgBin?:string;signal?:AbortSignal;keepOnline?:boolean}
+type Options={managementUrl:string;backupUrl:string;directory:string;pgBin?:string;signal?:AbortSignal;keepOnline?:boolean;filesDirectory?:string;ledgerDirectory?:string;storage?:StorageProvider}
 class BackupFailure extends Error{readonly code:string;constructor(code:string){super(code);this.code=code}}
 const failure=(code:string):never=>{throw new BackupFailure(code)}
 const DAY=86400000
@@ -56,7 +58,12 @@ export async function runBackupMaintenance(options:Options){
    }finally{await backupDb.end()}
    const file=path.join(directory,fileKey),exists=await lstat(file).then(()=>true,()=>false)
    stage='DUMP'
-   if(!exists)await createDatabaseBackup({databaseUrl:options.backupUrl,file,pgBin:options.pgBin,signal:controller.signal})
+   if(!exists){
+    if(options.filesDirectory&&options.ledgerDirectory){
+     const source=new Pool({connectionString:options.backupUrl,max:2,connectionTimeoutMillis:10000,statement_timeout:30000})
+     try{await createCoordinatedBackup({source,management:db,file,id,filesDirectory:options.filesDirectory,ledgerDirectory:options.ledgerDirectory,storage:options.storage??(await import('../../storage/provider.ts')).storage,pgBin:options.pgBin,signal:controller.signal})}finally{await source.end()}
+    }else await createDatabaseBackup({databaseUrl:options.backupUrl,file,pgBin:options.pgBin,signal:controller.signal})
+   }
    // A complete dump left by a crash is reused only with its valid retention manifest.
    stage='MANIFEST'
    const manifestPath=file+'.retention.json',manifestStat=await lstat(manifestPath)
@@ -81,6 +88,7 @@ export async function runBackupMaintenance(options:Options){
    if(current.kind==='CREATE')await db.query("INSERT INTO staffly_admin.backups(id,file_key,size_bytes,sha256,created_at,expires_at,verified_at,file_state) VALUES($1,$2,$3,$4,$5,$5::timestamptz+interval '30 days',now(),'AVAILABLE')",[id,fileKey,info.size,info.sha256,createdAt])
    else await db.query("UPDATE staffly_admin.backups SET file_state='AVAILABLE',check_code=NULL,verified_at=now() WHERE id=$1",[id])
    await db.query('UPDATE staffly_admin.backup_jobs SET backup_id=$2 WHERE id=$1',[current.id,id])
+   await db.query("INSERT INTO staffly_admin.backup_components(backup_id,component,snapshot_at,checked_at,expires_at,status,sha256,consistent) VALUES($1,'database',$2,now(),$2::timestamptz+interval '30 days','VERIFIED',$3,true)",[id,createdAt,info.sha256])
    await db.query("INSERT INTO staffly_admin.audit_events(id,user_id,action,outcome,resource,resource_id) VALUES(gen_random_uuid(),$1,$2,'SUCCEEDED','BACKUP_JOB',$3)",[current.requested_by,current.kind==='CREATE'?'BACKUP_COMPLETED':'BACKUP_VERIFIED',current.id])
   })
   return{status:'succeeded',jobId:String(job.id),backupId:id}

@@ -1,3 +1,4 @@
+import { PublicServiceNotice } from './features/public-content/content.tsx'
 import { lazy, Suspense } from 'react'
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import Header from './component/header/header.tsx'
@@ -39,6 +40,7 @@ function App() {
   return (
     <>
       <RouteAccessibility />
+      <PublicServiceNotice />
       {!hidePublicFrame && <Header />}
       {isAuthPage && <div className="auth-theme-control"><ThemeToggle /></div>}
 

@@ -51,7 +51,7 @@ export async function auditAccess(db: DB, actor: { id: string; organizationId: s
   await recordSecurityEvent(db, { action: 'ACCESS_CHANGED', userId: member.userId, organizationId: actor.organizationId, resourceType: 'ACCESS', resourceId: entry.id })
 }
 export async function loadPermissionMembers(db: DB, organizationId: string) {
-  const members = await db.organizationMember.findMany({ where: { organizationId, leftAt: null, user: { deletedAt: null }, organization: { deletedAt: null } }, include: { _count: {select:{locationMemberships:true}}, locationMemberships: { where: { leftAt: null } }, accessAssignments: true } })
+  const members = await db.organizationMember.findMany({ where: { organizationId, leftAt: null, user: { deletedAt: null }, organization: { deletedAt: null,OR:[{serviceState:'ACTIVE'},{serviceUntil:{lte:new Date()}}] } }, include: { _count: {select:{locationMemberships:true}}, locationMemberships: { where: { leftAt: null } }, accessAssignments: true } })
   const roles = await ensureAccessRoles(db, organizationId), locations = await db.organizationLocation.findMany({ where: { organizationId, archivedAt: null }, select: { id: true } })
   const locationIds = locations.map(l => l.id)
   return { organizationId, roles, members: members.map(member => ({ ...member, ...resolveAccess(member, roles, locationIds) })) }

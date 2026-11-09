@@ -1,3 +1,4 @@
+import { runServiceMaintenance } from '../src/server/admin/service/runner.ts'
 import { loadEnvFile } from 'node:process'
 import { access } from 'node:fs/promises'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -15,7 +16,7 @@ const pgBin=process.env.PG_BIN||await access(defaultBin).then(()=>defaultBin,()=
 const controller=new AbortController()
 process.once('SIGTERM',()=>controller.abort());process.once('SIGINT',()=>controller.abort())
 do{
- try{const result=await runBackupMaintenance({managementUrl,backupUrl,directory,pgBin,signal:controller.signal,keepOnline:process.argv.includes('--watch')});if(result.status!=='idle'&&result.status!=='busy')console.log(JSON.stringify(result))}
+ try{const service=await runServiceMaintenance({managementUrl,directory,pgBin,restoreAdminUrl:process.env.RESTORE_ADMIN_DATABASE_URL,filesDirectory:process.env.ADMIN_FILES_BACKUP_DIRECTORY,ledgerDirectory:process.env.ADMIN_DELETION_LEDGER_DIRECTORY,signal:controller.signal});if(service.status==='failed')console.log(JSON.stringify(service));const result=await runBackupMaintenance({managementUrl,backupUrl,directory,pgBin,signal:controller.signal,keepOnline:process.argv.includes('--watch'),filesDirectory:process.env.ADMIN_FILES_BACKUP_DIRECTORY,ledgerDirectory:process.env.ADMIN_DELETION_LEDGER_DIRECTORY});if(result.status!=='idle'&&result.status!=='busy')console.log(JSON.stringify(result))}
  catch{console.error('Backup maintenance unavailable; check operator configuration and migrations');if(!process.argv.includes('--watch'))process.exitCode=1}
  if(!process.argv.includes('--watch')||controller.signal.aborted)break
  await delay(5000,undefined,{signal:controller.signal}).catch(()=>{})

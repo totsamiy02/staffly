@@ -6,11 +6,13 @@ import path from 'node:path'
 import { createServer } from 'vite'
 import react from '@vitejs/plugin-react'
 import { spawn } from 'node:child_process'
+import { resolveAdminSuite } from './admin-suites.mjs'
 
 // The actual admin router and authentication run against the runner's temporary
 // database. A test-only injected mail delivery captures synthetic codes in memory.
 // There is no test code endpoint, auth bypass, working .env or external SMTP.
 export async function runAdminInterface({prisma,env,root,temporary,output,options}){
+ const suite=resolveAdminSuite(options)
  const socket=netServer();await new Promise(resolve=>socket.listen(0,'127.0.0.1',resolve));const port=socket.address().port;await new Promise(resolve=>socket.close(resolve))
  const origin=`http://127.0.0.1:${port}`;env.APP_ORIGIN=origin;process.env.APP_ORIGIN=origin
  const [{default:express},{default:cookieParser},{default:authRouter},{createAdminRouter},{default:profileRouter},{ApiError},{ZodError},{passwordHash},{databasePool},{createBusinessOrganization},{collectMonitoringSample,recordOrganizationPresence},{closeAdminDatabase}]=await Promise.all([
@@ -23,7 +25,8 @@ export async function runAdminInterface({prisma,env,root,temporary,output,option
  const {supportResponses}=await import('../../src/server/support/diagnostics.ts')
  const {securityContext}=await import('../../src/server/security/journal.ts')
  const {createSupportRouter}=await import('../../src/server/support/routes.ts')
- const app=express();app.use(securityContext);app.use(supportResponses);app.use(express.json());app.use('/api/support',createSupportRouter());app.use('/api/organizations/:organizationId',(request,response,next)=>{response.locals.operationsOrganizationId=request.params.organizationId;next()});app.use(cookieParser());app.use('/api/auth',authRouter);app.use('/api/admin',createAdminRouter({sendCode:async(email,code)=>{codes.set(email,code)},sendNotice:async()=>{},sendManagementCode:async(email,code)=>{codes.set(email,code)}}));app.use('/api',profileRouter);app.use('/api',organizationRouter);app.use('/api',storageRouter)
+ const {publicContentRouter}=await import('../../src/server/public-content.ts')
+ const app=express();app.use(securityContext);app.use(supportResponses);app.use(express.json());app.use('/api/public',publicContentRouter);app.use('/api/support',createSupportRouter());app.use('/api/organizations/:organizationId',(request,response,next)=>{response.locals.operationsOrganizationId=request.params.organizationId;next()});app.use(cookieParser());app.use('/api/auth',authRouter);app.use('/api/admin',createAdminRouter({sendCode:async(email,code)=>{codes.set(email,code)},sendNotice:async()=>{},sendManagementCode:async(email,code)=>{codes.set(email,code)}}));app.use('/api',profileRouter);app.use('/api',organizationRouter);app.use('/api',storageRouter)
  app.use((error,_q,response,_next)=>{response.locals.supportError=error;response.status(error instanceof ApiError?error.status:error instanceof ZodError?400:500).json({code:error instanceof ApiError?error.code:'INTERNAL_ERROR',message:error instanceof ApiError?error.message:'Не удалось выполнить действие.'})})
  const api=app.listen(0,'127.0.0.1');await new Promise(resolve=>api.once('listening',resolve));const apiPort=api.address().port
  const {devApiProxy}=await import('../../scripts/dev-api-proxy.ts')
@@ -33,7 +36,7 @@ export async function runAdminInterface({prisma,env,root,temporary,output,option
  const {chromium,firefox,webkit,expect}=await import('playwright/test')
  const firefoxHome=path.join(temporary,'admin-firefox');await mkdir(firefoxHome,{recursive:true})
  const launch={chrome:()=>chromium.launch({headless:true,executablePath:process.platform==='darwin'?'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome':undefined}),firefox:async()=>{const home=path.join(firefoxHome,randomUUID());await mkdir(home,{recursive:true});return firefox.launch({headless:true,env:{...process.env,CFFIXED_USER_HOME:home}})},webkit:()=>webkit.launch({headless:true})}
- const result={checks:[],errors:[],browserDiagnostics:[],screenshots:[]}
+ const result={suite,checks:[],errors:[],browserDiagnostics:[],screenshots:[]}
  const recordBrowserError=(error,details)=>{const native=error.message.includes('/api/support/client-errors')&&error.message.includes('due to access control checks');(native?result.browserDiagnostics:result.errors).push({...details,message:error.message,stack:error.stack})}
  try{
   for(const name of(options.browsers??'chrome').split(',')){
@@ -62,7 +65,7 @@ export async function runAdminInterface({prisma,env,root,temporary,output,option
      await prisma.emailDelivery.create({data:{userId:user.id,organizationId:org.id,sourceKey:randomUUID(),sourceKind:'MANDATORY',payload:{private:'private-operations-ui-marker'},recipientEmail:'private-operations-recipient@example.test',status:'FAILED',attempts:7,lastErrorCode:'EAUTH',lastErrorAt:new Date()}})
      for(const entry of[{status:'PENDING'},{status:'PENDING',availableAt:new Date(Date.now()+600000)},{status:'PENDING',availableAt:new Date(Date.now()+600000),attempts:2},{status:'PENDING',lockedUntil:new Date(Date.now()+600000),attempts:1},{status:'SENT',deliveredAt:new Date()},{status:'SKIPPED'}])await prisma.emailDelivery.create({data:{userId:user.id,organizationId:org.id,sourceKey:randomUUID(),sourceKind:'MANDATORY',...entry}})
      let page=await context.newPage();let parentPage=page;page.on('pageerror',error=>recordBrowserError(error,{tag,check:activeCheck,url:page.url()}))
-     const shot=async(label)=>{const file=`admin-${tag}-${label}.png`;await page.screenshot({path:path.join(output,file),fullPage:true});result.screenshots.push(file)}
+     const shot=async(label,target=page,fullPage=true)=>{const file=`admin-${tag}-${label}.png`;await target.screenshot({path:path.join(output,file),fullPage});result.screenshots.push(file)}
      const check=async(label,run)=>{await databasePool.query('UPDATE api_rate_limits SET hits=0');activeCheck=label;result.current={tag,label};await writeFile(path.join(output,'admin-interface.json'),JSON.stringify(result,null,2));try{await run();result.checks.push({tag,label,status:'passed'});await writeFile(path.join(output,'admin-interface.json'),JSON.stringify(result,null,2))}catch(error){if(!page.isClosed())await shot('failure');result.checks.push({tag,label,status:'failed',error:error.message});throw error}}
      const nav=async(label)=>{const toggle=page.getByRole('button',{name:'Открыть навигацию',exact:true});if(await toggle.isVisible()&&await toggle.getAttribute('aria-expanded')!=='true')await toggle.click();const sidebar=page.locator('.admin-sidebar'),link=sidebar.locator('a').filter({hasText:new RegExp('^'+label+'$')});if(!await link.isVisible()){const group=await link.evaluate(node=>node.closest('nav').getAttribute('aria-label'));await sidebar.getByRole('tab',{name:group,exact:true}).click()}await sidebar.getByRole('link',{name:label,exact:true}).click();await expect(page.getByRole('dialog',{name:'Навигация администратора',exact:true})).not.toBeVisible()}
 
@@ -76,17 +79,18 @@ export async function runAdminInterface({prisma,env,root,temporary,output,option
        await expect(page.locator('.admin-auth-account .admin-avatar img')).toBeVisible();await shot('login');await page.getByLabel('Пароль аккаунта',{exact:true}).fill(password);await page.getByRole('button',{name:'Получить код на почту',exact:true}).click();await expect(page.getByRole('heading',{name:'Проверьте почту',exact:true})).toBeVisible();assert(codes.get(email));await page.getByLabel('Код из письма',{exact:false}).fill(codes.get(email));await page.getByRole('button',{name:'Подтвердить код',exact:true}).click()
        await expect(page.getByRole('heading',{name:'Создайте PIN-код',exact:true})).toBeVisible();await expect(page.getByRole('dialog',{name:'Создайте PIN-код',exact:true})).toBeVisible();assert(await page.getByRole('dialog',{name:'Создайте PIN-код',exact:true}).evaluate(node=>node.scrollHeight<=node.clientHeight+1),'First PIN setup fits without a scrollbar');assert.equal(await page.getByLabel('PIN-код из 6 цифр',{exact:false}).getAttribute('type'),'text');await expect(page.getByLabel('PIN-код из 6 цифр',{exact:false})).toBeFocused();await page.keyboard.type(pin);await page.getByRole('button',{name:'Продолжить',exact:true}).click();await expect(page.getByRole('textbox',{name:'Повторите PIN-код',exact:true})).toBeFocused();await page.keyboard.type(pin);await page.getByRole('button',{name:'Создать PIN и открыть панель',exact:true}).click();await expect(page.getByRole('heading',{name:'Обзор сервиса',exact:true})).toBeVisible();await noOverflow();await shot('overview')
       })
-      if(options['admin-layout']==='true'){
+      if(suite==='layout'){
        await check('monitoring and operations pages adapt to twelve desktop, tablet and phone sizes',async()=>{
         const {checkAdminLayout}=await import('./admin-layout.mjs');await checkAdminLayout({page,nav,expect,org,userId:user.id,output,result,browser:name,operationsJobId:operationsJob.id,operationsErrorId})
        })
        continue
       }
-      if(options['polish-ui']==='true'){const {checkPolish}=await import('./admin-polish.mjs');await checkPolish({page,nav,check,expect,prisma,databasePool,user,org,hash,operationsJob,operationsErrorId,shot,noOverflow,output,tag,password,codes,email});continue}
-      if(options['workflow-ui']==='true'){const {checkWorkflow}=await import('./admin-workflow.mjs');await checkWorkflow({page,nav,check,expect,prisma,databasePool,user,org,hash,operationsJob,operationsErrorId,shot,noOverflow});continue}
-      if(options['review-fixes']==='true'){const {checkReviewFixes}=await import('./admin-review-fixes.mjs');await checkReviewFixes({page,nav,check,expect,prisma,databasePool,password,hash,codes,email,user,org,shot,noOverflow});continue}
-      if(options.management==='true'){const {checkManagement}=await import('./admin-management.mjs');await checkManagement({page,nav,expect,check,shot,noOverflow,prisma,databasePool,password,hash,codes,email,userId:user.id,publicId:user.publicId,parentPage,origin,org});continue}
-      if(options['operations']==='true'){
+      if(suite==='service'){const {checkService}=await import('./admin-service.mjs');await checkService({page,check,expect,prisma,databasePool,user,org,hash,password,codes,email,noOverflow,shot});continue}
+      if(suite==='polish'){const {checkPolish}=await import('./admin-polish.mjs');await checkPolish({page,nav,check,expect,prisma,databasePool,user,org,hash,operationsJob,operationsErrorId,shot,noOverflow,output,tag,password,codes,email});continue}
+      if(suite==='workflow'){const {checkWorkflow}=await import('./admin-workflow.mjs');await checkWorkflow({page,nav,check,expect,prisma,databasePool,user,org,hash,operationsJob,operationsErrorId,shot,noOverflow});continue}
+      if(suite==='review-fixes'){const {checkReviewFixes}=await import('./admin-review-fixes.mjs');await checkReviewFixes({page,nav,check,expect,prisma,databasePool,password,hash,codes,email,user,org,shot,noOverflow});continue}
+      if(suite==='management'){const {checkManagement}=await import('./admin-management.mjs');await checkManagement({page,nav,expect,check,shot,noOverflow,prisma,databasePool,password,hash,codes,email,userId:user.id,publicId:user.publicId,parentPage,origin,org});continue}
+      if(suite==='operations'){
        const {checkOperations}=await import('./admin-operations.mjs');await checkOperations({page,nav,check,expect,org,user,pin:activePin,context,databasePool,prisma,output,result,tag,operationsJob,operationsErrorId,noOverflow,parentPage,loginData,publishOperationsSnapshot,operationsNodeId})
        continue
       }
@@ -131,7 +135,7 @@ export async function runAdminInterface({prisma,env,root,temporary,output,option
        await page.getByLabel('Пароль аккаунта',{exact:true}).fill(password);await page.getByRole('button',{name:'Получить код на почту',exact:true}).click();await expect(page.getByLabel('Код из письма',{exact:false})).toBeVisible();await page.getByLabel('Код из письма',{exact:false}).fill(codes.get(email));await page.getByRole('button',{name:'Подтвердить код',exact:true}).click();await expect(page.getByRole('dialog',{name:'Панель заблокирована',exact:true})).toBeVisible();await expect(page.getByLabel('PIN-код',{exact:true})).toBeFocused();await page.keyboard.type(nextPin);await expect(page.getByRole('heading',{name:'Аналитика продукта',exact:true})).toBeVisible();activePin=nextPin
       })
       await check('error screens and browser back preserve navigation on a narrow viewport',async()=>{
-       await nav('Организации');await expect(page.locator('[data-admin-record]').first()).toBeVisible();await databasePool.query('UPDATE organizations SET deleted_at=now() WHERE id=$1',[org.id]);await page.locator(`a.admin-btn[href="/admin/organizations/${org.id}"]`).click();await expect(page.getByRole('heading',{name:'Не удалось загрузить страницу',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Повторить загрузку',exact:true})).toBeVisible();await noOverflow();await shot('organization-error');await page.getByRole('button',{name:'Вернуться назад',exact:true}).click();await expect(page.getByRole('heading',{name:'Организации',exact:true})).toBeVisible();await nav('Аналитика');await expect(page.getByRole('heading',{name:'Аналитика продукта',exact:true})).toBeVisible()
+       await nav('Организации');await expect(page.locator('[data-admin-record]').first()).toBeVisible();await databasePool.query('UPDATE organizations SET deleted_at=now() WHERE id=$1',[org.id]);await page.locator(`a.admin-btn[href="/admin/organizations/${org.id}"]`).click();await expect(page.getByRole('heading',{name:'Не удалось загрузить страницу',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Повторить загрузку',exact:true})).toBeVisible();await noOverflow();await shot('organization-error');await page.getByRole('button',{name:/^К /}).click();await expect(page.getByRole('heading',{name:'Организации',exact:true})).toBeVisible();await nav('Аналитика');await expect(page.getByRole('heading',{name:'Аналитика продукта',exact:true})).toBeVisible()
       })
       if(name==='chrome'&&viewport==='desktop')await check('20-second polling keeps the page mounted and does not extend the PIN idle timeout',async()=>{
        await new Promise(resolve=>setTimeout(resolve,1000));const before=(await databasePool.query('SELECT activity_at FROM staffly_admin.sessions WHERE user_id=$1 AND revoked_at IS NULL',[user.id])).rows[0].activity_at.toISOString();const response=await page.waitForResponse(response=>response.url().includes('/api/admin/monitoring/analytics')&&response.status()===200,{timeout:25000});assert(response.ok());const after=(await databasePool.query('SELECT activity_at FROM staffly_admin.sessions WHERE user_id=$1 AND revoked_at IS NULL',[user.id])).rows[0].activity_at.toISOString();assert.equal(after,before);assert.equal(await page.locator('.admin-loading').count(),0)

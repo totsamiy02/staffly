@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useAuth } from '../../auth/auth-context.tsx'
 import type { ReportInput } from './reporting.ts'
 import type { OperationState } from '../../../component/ui/operation-status.tsx'
-type Job = { id: string; status: 'PENDING' | 'RUNNING' | 'READY' | 'FAILED'; statusUrl: string; message?: string; errorId?: string; expiresAt: string }
+type Job = { id: string; status: 'PENDING' | 'RUNNING' | 'READY' | 'FAILED' | 'CANCELLED'; statusUrl: string; message?: string; errorId?: string; expiresAt: string }
 type Intent = { requestKey: string; userId: string; organizationId: string; input: ReportInput; job?: Job; createdAt: number }
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 function readIntent(key: string, userId: string, organizationId: string): Intent | null {
@@ -39,7 +39,7 @@ export function useReportExport(organizationId: string) {
     if (!job || submitting || !intent || !mounted.current) return
     if (!uuid.test(job.id)) { setState({ phase: 'failed', message: 'Некорректный ответ сервера.' }); return }
     if (intent.job?.id !== job.id) setIntent(current => current ? { ...current, job } : null)
-    if (job.status === 'FAILED') setState({ phase: 'failed', message: job.message ?? 'Выгрузка не завершена. Параметры сохранены, можно повторить.', errorId: job.errorId ?? job.id, jobId: job.id })
+    if (job.status === 'FAILED'||job.status === 'CANCELLED') setState({ phase: 'failed', message: job.message ?? 'Выгрузка не завершена. Параметры сохранены, можно повторить.', errorId: job.errorId ?? job.id, jobId: job.id })
     else if (job.status === 'READY') setState({ phase: 'ready', message: 'Отчёт за ' + intent.input.from + ' — ' + intent.input.to + (recoverable ? ' готов к скачиванию.' : ' готов. Скачайте файл перед закрытием: номер операции не сохраняется в браузере.'), jobId: job.id })
     else setState({ phase: job.status === 'PENDING' ? 'queued' : 'running', message: recoverable ? 'Можно закрыть окно. При следующем открытии состояние восстановится в этой вкладке.' : 'Браузер не сохраняет номер операции. Оставьте окно открытым до скачивания файла.', jobId: job.id })
   }, [query.data, query.dataUpdatedAt, submitting, intent, recoverable])

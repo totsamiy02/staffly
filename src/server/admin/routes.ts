@@ -1,3 +1,4 @@
+import { createServiceRouter } from './service/routes.ts'
 import { Router } from 'express'
 import { z } from 'zod'
 import { requireAuth, type AuthenticatedRequest } from '../auth.ts'
@@ -53,6 +54,7 @@ export function createAdminRouter({sendCode=defaultMailer,sendNotice=defaultNoti
   router.post('/logout',async(request,response)=>{empty.parse(request.body);const result=await endAdminSession(request,response);clearActionCookie(response);response.json(result)})
   router.use('/operations',createOperationsRouter())
   router.use('/management',createManagementRouter(sendManagementCode))
+  router.use('/service',createServiceRouter())
   router.get('/monitoring/events',read('EVENTS',request=>monitoringEvents(request.query)))
   router.get('/monitoring/overview',read('OVERVIEW',request=>monitoringOverview(request.query)))
   router.get('/monitoring/organizations',read('ORGANIZATIONS',request=>monitoringOrganizations(request.query)))

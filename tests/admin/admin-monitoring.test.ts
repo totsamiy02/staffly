@@ -1,3 +1,5 @@
+import { serviceLifecycleScenarios } from './service-lifecycle-scenarios.ts'
+import { publicContentRouter } from '../../src/server/public-content.ts'
 import { workflowScenarios } from './workflow-scenarios.ts'
 import { managementScenarios } from './management-scenarios.ts'
 import { supportResponses } from '../../src/server/support/diagnostics.ts'
@@ -56,7 +58,7 @@ async function expireIdle(browser:Browser){await databasePool.query("UPDATE staf
 describe('Platform administrator boundary and monitoring',()=>{
  before(async()=>{
   hash=await passwordHash(password)
-  const app=express();app.set('trust proxy','loopback');app.use(securityContext);app.use(supportResponses);app.use(express.json({limit:'16kb'}));app.use(cookieParser());app.use('/api/auth',authRouter);app.use('/api/admin',createAdminRouter({sendCode:async(email,code)=>{codes.set(email,code)},sendManagementCode:async(email,code)=>{codes.set(email,code)}}));app.use('/api',profileRouter);app.use('/api/support',createSupportRouter());app.get('/api/support-probe/:id',(_q,_s)=>{throw new ApiError(409,'CONCURRENT_UPDATE','Test conflict')})
+  const app=express();app.set('trust proxy','loopback');app.use(securityContext);app.use(supportResponses);app.use(express.json({limit:'16kb'}));app.use(cookieParser());app.use('/api/public',publicContentRouter);app.use('/api/auth',authRouter);app.use('/api/admin',createAdminRouter({sendCode:async(email,code)=>{codes.set(email,code)},sendManagementCode:async(email,code)=>{codes.set(email,code)}}));app.use('/api',profileRouter);app.use('/api/support',createSupportRouter());app.get('/api/support-probe/:id',(_q,_s)=>{throw new ApiError(409,'CONCURRENT_UPDATE','Test conflict')})
   app.use((error:unknown,_request:express.Request,response:express.Response,_next:express.NextFunction)=>{response.locals.supportError=error;response.status(error instanceof ApiError?error.status:error instanceof ZodError?400:500).json({code:error instanceof ApiError?error.code:'INTERNAL_ERROR',message:error instanceof ApiError?error.message:'Не удалось выполнить действие.'})})
   server=app.listen(0,'127.0.0.1');await new Promise<void>(r=>server.once('listening',r));const address=server.address();assert(address&&typeof address!=='string');base=`http://127.0.0.1:${address.port}`
  })
@@ -471,6 +473,7 @@ describe('Platform administrator boundary and monitoring',()=>{
  })
  managementScenarios({account,db:databasePool,codes,password})
  workflowScenarios({account,db:databasePool})
+ serviceLifecycleScenarios({account,db:databasePool,codes,password,organizations})
  it('operates with the production gateway role without grant/DDL/journal-erasure privileges and uses Secure Host cookies',async()=>{
   const saved=Object.fromEntries(['NODE_ENV','ADMIN_DATABASE_URL','ADMIN_AUTH_SECRET'].map(key=>[key,process.env[key]]))
   const browser=await account(),client=await databasePool.connect()
@@ -483,7 +486,7 @@ describe('Platform administrator boundary and monitoring',()=>{
    await browser.ready()
    assert.equal((await browser.request('/api/admin/monitoring/overview')).status,200)
    for(const endpoint of ['security','administrators','backups','alerts'])assert.equal((await browser.request('/api/admin/management/'+endpoint)).status,200)
-   for(const endpoint of ['meta','attention','search?search='+browser.userId,'operations/service']){const response=await browser.request('/api/admin/'+endpoint);assert.equal(response.status,200,await response.clone().text())}
+   for(const endpoint of ['meta','attention','search?search='+browser.userId,'operations/service','service/maintenance','service/cleanup','service/cleanup/files','service/queues','service/content','service/release/checks','service/accounts/'+browser.userId]){const response=await browser.request('/api/admin/'+endpoint);assert.equal(response.status,200,await response.clone().text())}
    const diagnosticId=randomUUID();await databasePool.query("INSERT INTO platform_request_errors(id,node_id,method,route,status,name) VALUES($1,$2,'GET','/probe',500,'Error')",[diagnosticId,randomUUID()])
    const assign=await browser.request('/api/admin/management/work/diagnostic/'+diagnosticId+'/assign',{assigneeId:browser.userId,version:0,confirm:true});assert.equal(assign.status,200,await assign.clone().text())
    const work=await browser.request('/api/admin/management/work/diagnostic/'+diagnosticId).then(r=>r.json());assert.equal(work.assigneeId,browser.userId);assert.equal(work.history.total,1)

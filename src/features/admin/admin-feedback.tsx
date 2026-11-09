@@ -5,7 +5,7 @@ import { AdminIcon,adminParent } from './admin-elements.tsx'
 
 export function Loading({error,retry}:{error:Error|null;retry:()=>void}){
   const navigate=useNavigate(),route=useLocation(),parent=adminParent(route.pathname),source=route.state?.adminReturn,matching=parent&&typeof source?.url==='string'&&source.url.split('?')[0]===parent[1],target=matching?source.url:parent?.[1]??'/admin'
-  return error?<div className="admin-load-error" role="alert"><AdminIcon name="help"/><h2>Не удалось загрузить страницу</h2><RequestErrorMessage error={error}/><div className="admin-actions"><button className="admin-btn" aria-label={parent?'Вернуться назад':undefined} onClick={()=>void navigate(target,{replace:true,state:matching?{adminRestoreKey:source.key}:null})}>{parent?parent[2]:'К обзору сервиса'}</button><button className="admin-btn admin-btn--primary" onClick={retry}>Повторить загрузку</button></div></div>:<div className="admin-loading" role="status"><span/>Загружаем данные…</div>
+  return error?<div className="admin-load-error" role="alert"><AdminIcon name="help"/><h2>Не удалось загрузить страницу</h2><RequestErrorMessage error={error}/><div className="admin-actions"><button className="admin-btn" onClick={()=>void navigate(target,{replace:true,state:matching?{adminRestoreKey:source.key,adminReturn:source.previous}:null})}>{parent?parent[2]:'К обзору сервиса'}</button><button className="admin-btn admin-btn--primary" onClick={retry}>Повторить загрузку</button></div></div>:<div className="admin-loading" role="status"><span/>Загружаем данные…</div>
 }
 export function ReadError({error,retry,state}:{error?:Error|null;retry?:()=>void;state?:AdminReadState}){
  const failure=state?.error??error,repeat=state?.refresh??retry

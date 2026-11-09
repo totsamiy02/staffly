@@ -1,3 +1,4 @@
+import { guideCollections } from './categories.ts'
 import type { GuideArticle } from './types.ts'
 
 export type GuideChapter = { id: string; title: string; summary: string; slugs: string[] }
@@ -33,5 +34,7 @@ export function guideChapters(collectionId: string, articles?: GuideArticle[]): 
   const list = chapters[collectionId] ?? []
   if (!articles) return list
   const allowed = new Set(articles.map(article => article.slug))
-  return list.map(chapter => ({ ...chapter, slugs: chapter.slugs.filter(slug => allowed.has(slug)) })).filter(chapter => chapter.slugs.length)
+  const result=list.map(chapter=>({...chapter,slugs:chapter.slugs.filter(slug=>allowed.has(slug))})).filter(chapter=>chapter.slugs.length),known=new Set(list.flatMap(c=>c.slugs)),collection=guideCollections.find(c=>c.id===collectionId),extra=articles.filter(a=>!known.has(a.slug)&&collection?.categories.includes(a.category))
+  if(extra.length)result.push({id:'published',title:'Дополнительные инструкции',summary:'Новые материалы справочника.',slugs:extra.map(a=>a.slug)})
+  return result
 }

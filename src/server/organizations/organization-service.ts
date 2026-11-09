@@ -1,3 +1,4 @@
+import { organizationAvailable } from './service-state.ts'
 import { recordSecurityEvent } from '../security/journal.ts'
 import { requireCapacity, subscriptionSnapshot } from '../subscriptions/access.ts'
 import { effectiveSubscription, TRIAL_DAYS } from '../../app/subscriptions/plans.ts'
@@ -51,6 +52,7 @@ export async function listOrganizations(userId: string) {
   return memberships.map(({ organization, role, joinedAt }) => ({
     // The organization insert trigger and backfill guarantee this record.
     subscription: effectiveSubscription(organization.subscription!),
+    service:{state:organizationAvailable(organization)?'ACTIVE' as const:'SUSPENDED' as const,until:organization.serviceUntil?.toISOString()??null},
     id: organization.id,
     publicId:organization.publicId,
     createdByViewer: organization.createdByUserId === userId,

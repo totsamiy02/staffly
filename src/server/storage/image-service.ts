@@ -1,3 +1,4 @@
+import { withFileCleanupLock } from './cleanup-lock.ts'
 import { safeError } from '../security/safe-error.ts'
 import { storageQuotaError } from '../resources/quotas.ts'
 import type { Prisma } from '../../generated/prisma/client.ts'
@@ -34,6 +35,9 @@ async function normalizeImage(input: unknown) {
 type RemoveObject = (objectKey: string) => Promise<void>
 
 export async function deletePendingFile(fileId: string, removeObject: RemoveObject = storage.delete) {
+ return withFileCleanupLock(fileId,()=>deletePendingFileLocked(fileId,removeObject))
+}
+async function deletePendingFileLocked(fileId:string,removeObject:RemoveObject){
   const file = await prisma.storedFile.findFirst({ where: { id: fileId, pendingDeletionAt: { not: null }, purgedAt: null }, include: { document: { select: { deletedAt: true } } } })
   if (!file) return true
   // A bound active document must never lose its content through the cleanup queue.

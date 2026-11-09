@@ -28,3 +28,9 @@ export async function clearAuthAttempts(bucket: { key: string; expiresAt: Date }
 export async function clearPasswordAttempts(tx: Prisma.TransactionClient, email: string) {
   await tx.authAttemptLimit.deleteMany({ where: { key: attemptKey('password', email) } })
 }
+
+export async function passwordAttemptState(email:string){
+ const bucket=await prisma.authAttemptLimit.findUnique({where:{key:attemptKey('password',email)},select:{attempts:true,expiresAt:true}})
+ const active=!!bucket&&bucket.expiresAt>new Date()
+ return{blocked:active&&bucket.attempts>=10,remaining:active?Math.max(0,10-bucket.attempts):10,until:active?bucket.expiresAt.toISOString():null}
+}

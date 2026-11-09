@@ -7,7 +7,7 @@ import { useSearchDraft } from './use-search-draft.ts'
 const dateInput=(iso:string|null)=>iso&&Number.isFinite(Date.parse(iso))?new Date(Date.parse(iso)+10800000).toISOString().slice(0,16):''
 const dateValue=(local:string)=>local&&/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(local)&&Number.isFinite(Date.parse(local+':00+03:00'))?new Date(local+':00+03:00').toISOString():undefined
 const periods:Record<string,string>={'1':'24 часа','7':'7 дней','30':'30 дней','0':'Вся доступная история'}
-const jobStates={all:'Все состояния',PENDING:'В очереди',RUNNING:'Выполняется',SCHEDULED:'Запланирована',RETRY:'Ожидает повтора',DONE:'Готово',FAILED:'Ошибка',SKIPPED:'Пропущена'}
+const jobStates={all:'Все состояния',PENDING:'В очереди',RUNNING:'Выполняется',SCHEDULED:'Запланирована',RETRY:'Ожидает повтора',DONE:'Готово',FAILED:'Ошибка',SKIPPED:'Пропущена',CANCELLED:'Отменена'}
 export type Filter={key:string;label:string;defaultValue?:string;options:Record<string,string>}
 export default function OperationsToolbar({jobs=false,support=false,placeholder='Код ошибки, организация или ID',label='Поиск диагностики',hidePeriod=false,defaultDays='30',filters=[],searchKey='search',pageKey='page',searchHelp}:{jobs?:boolean;support?:boolean;placeholder?:string;label?:string;hidePeriod?:boolean;defaultDays?:string;filters?:Filter[];searchKey?:string;pageKey?:string;searchHelp?:ReactNode}){
  const [params,setParams]=useSearchParams(),term=params.get(searchKey)??'',[search,setSearch,applied]=useSearchDraft(term,searchKey)

@@ -23,7 +23,7 @@ function OrganizationGrid({ title, organizations }: { title: string; organizatio
     <div className="organization-grid">
       {organizations.map((organization) => <Link className="organization-card" to={`/app/organizations/${organization.id}`} key={organization.id}>
         <Avatar url={organization.logoUrl} name={organization.name} className="organization-card__avatar" />
-        <span className="organization-card__body"><strong>{organization.name}</strong><span className="organization-card__participants">{organization.memberCount ?? 0} {participantLabel(organization.memberCount ?? 0)}</span><span className="organization-card__meta"><RoleBadge role={organization.role} />{organization.subscription && <PlanBadge plan={organization.subscription.effectivePlan} trial={organization.subscription.phase === 'trial'} />}</span>{organization.subscription?.validUntil && <small>До {new Date(organization.subscription.validUntil).toLocaleDateString('ru-RU')}</small>}</span>
+        <span className="organization-card__body"><strong>{organization.name}</strong>{organization.service?.state==='SUSPENDED'&&<span className="role-badge">Работа приостановлена</span>}<span className="organization-card__participants">{organization.memberCount ?? 0} {participantLabel(organization.memberCount ?? 0)}</span><span className="organization-card__meta"><RoleBadge role={organization.role} />{organization.subscription && <PlanBadge plan={organization.subscription.effectivePlan} trial={organization.subscription.phase === 'trial'} />}</span>{organization.subscription?.validUntil && <small>До {new Date(organization.subscription.validUntil).toLocaleDateString('ru-RU')}</small>}</span>
 
       </Link>)}
     </div>

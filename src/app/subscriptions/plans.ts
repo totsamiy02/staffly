@@ -19,11 +19,16 @@ export type SubscriptionSnapshot = {
   plan: PlanId; effectivePlan: PlanId; phase: 'free' | 'trial' | 'active' | 'grace' | 'expired';
   validUntil: string | null; graceUntil: string | null; trialEndsAt: string | null; readOnly: boolean;
   trialAvailable: boolean;
+  supportAccess?: {plan:PlanId;startsAt:string;endsAt:string;active:boolean};
   scheduled: { plan: PlanId; startsAt: string; endsAt: string | null } | null;
   limits: { members: number; locations: number; storageBytes: number }; features: PlanFeature[];
 }
-export type SubscriptionRecord = { plan: string; periodStart: Date | null; periodEnd: Date | null; trialEndsAt: Date | null; trialStartedAt?: Date | null; nextPlan: string | null; nextStartsAt: Date | null; nextEndsAt: Date | null }
+export type SubscriptionRecord = { supportPlan?:string|null;supportStartsAt?:Date|null;supportEndsAt?:Date|null; plan: string; periodStart: Date | null; periodEnd: Date | null; trialEndsAt: Date | null; trialStartedAt?: Date | null; nextPlan: string | null; nextStartsAt: Date | null; nextEndsAt: Date | null }
 export function effectiveSubscription(record: SubscriptionRecord, now = new Date()): SubscriptionSnapshot {
+  if(record.supportPlan&&record.supportStartsAt&&record.supportEndsAt){
+    const base=effectiveSubscription({...record,supportPlan:null},now),active=record.supportStartsAt<=now&&record.supportEndsAt>now,plan=record.supportPlan as PlanId
+    return {...base,...(active?{effectivePlan:plan,phase:plan==='FREE'?'free' as const:'active' as const,readOnly:false,validUntil:record.supportEndsAt.toISOString(),graceUntil:null,limits:{members:plans[plan].members,locations:plans[plan].locations,storageBytes:plans[plan].storageBytes},features:plans[plan].features}:{}),supportAccess:{plan,startsAt:record.supportStartsAt.toISOString(),endsAt:record.supportEndsAt.toISOString(),active}}
+  }
   const next = !!record.nextPlan && !!record.nextStartsAt && record.nextStartsAt <= now
   const plan = (next ? record.nextPlan : record.plan) as PlanId
   const until = next ? record.nextEndsAt : record.periodEnd

@@ -4,7 +4,7 @@ import { Link,useLocation,type LinkProps } from 'react-router-dom'
 const positions=new Map<string,number>()
 export function AdminLink({state,onClick,...props}:LinkProps){
  const location=useLocation()
- return <Link {...props} onClick={event=>{positions.set(location.key,window.scrollY);onClick?.(event)}} state={{...state,adminReturn:{url:location.pathname+location.search,key:location.key,scroll:window.scrollY}}}/>
+ return <Link {...props} onClick={event=>{positions.set(location.key,window.scrollY);onClick?.(event)}} state={{...state,adminReturn:{url:location.pathname+location.search,key:location.key,scroll:window.scrollY,previous:location.state?.adminReturn?{...location.state.adminReturn,previous:undefined}:undefined}}}/>
 }
 export function useAdminScroll(active:boolean){
  const location=useLocation(),current=useRef(location.key),previousPath=useRef(location.pathname)

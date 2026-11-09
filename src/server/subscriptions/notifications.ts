@@ -5,7 +5,7 @@ import { effectiveSubscription, plans } from '../../app/subscriptions/plans.ts'
 // Owner-only inbox notices. Delivery keys survive dismiss/read and prevent
 // refreshes or multiple workers from resurrecting the same reminder.
 export async function syncSubscriptionNotices(userId?: string, organizationId?: string, afterId?: string, includeActive = false, db: Prisma.TransactionClient = prisma) {
-  const owners = await db.organizationMember.findMany({ where: { role: 'OWNER', leftAt: null, user: { deletedAt: null }, organization: { deletedAt: null }, ...(userId ? { userId } : {}), ...(organizationId ? { organizationId } : {}), ...(afterId ? { id: { gt: afterId } } : {}) }, include: { organization: { include: { subscription: true } } }, orderBy: { id: 'asc' }, take: 200 })
+  const owners = await db.organizationMember.findMany({ where: { role: 'OWNER', leftAt: null, user: { deletedAt: null }, organization: { deletedAt: null,OR:[{serviceState:'ACTIVE'},{serviceUntil:{lte:new Date()}}] }, ...(userId ? { userId } : {}), ...(organizationId ? { organizationId } : {}), ...(afterId ? { id: { gt: afterId } } : {}) }, include: { organization: { include: { subscription: true } } }, orderBy: { id: 'asc' }, take: 200 })
   const freeOwners: Array<{ userId: string; organizationId: string }> = []
   for (const owner of owners) {
     const record = owner.organization.subscription

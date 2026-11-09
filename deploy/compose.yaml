@@ -143,6 +143,45 @@ services:
       timeout: 5s
       start_period: 45s
     depends_on: {migrate: {condition: service_completed_successfully}}
+  maintenance:
+    profiles: [maintenance]
+    build: {context: .., target: maintenance}
+    image: ${MAINTENANCE_IMAGE:-staffly-maintenance:local}
+    environment:
+      NODE_ENV: production
+      ADMIN_MANAGEMENT_DATABASE_URL: ${ADMIN_MANAGEMENT_DATABASE_URL:-}
+      BACKUP_DATABASE_URL: ${BACKUP_DATABASE_URL:-}
+      RESTORE_ADMIN_DATABASE_URL: ${RESTORE_ADMIN_DATABASE_URL:-}
+      ADMIN_BACKUP_DIRECTORY: /var/lib/staffly/database-backups
+      ADMIN_FILES_BACKUP_DIRECTORY: /var/lib/staffly/file-backups
+      ADMIN_DELETION_LEDGER_DIRECTORY: /var/lib/staffly/deletion-ledger
+      APP_ORIGIN: ${APP_ORIGIN:?Set APP_ORIGIN}
+      SMTP_HOST: ${SMTP_HOST:-smtp.yandex.ru}
+      SMTP_PORT: ${SMTP_PORT:-465}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_APP_PASSWORD: ${SMTP_APP_PASSWORD:-}
+      STORAGE_DRIVER: ${STORAGE_DRIVER:-s3}
+      S3_ACCESS_KEY_ID: ${S3_BACKUP_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_BACKUP_SECRET_ACCESS_KEY:-}
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-false}
+      LOCAL_STORAGE_ROOT: /var/lib/staffly/storage
+    volumes:
+      - database-backups:/var/lib/staffly/database-backups
+      - file-backups:/var/lib/staffly/file-backups
+      - deletion-ledger:/var/lib/staffly/deletion-ledger
+    read_only: true
+    tmpfs: ['/tmp:size=512m,mode=1777']
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 45s
+    mem_limit: 768m
+    networks: [backend]
+    depends_on: {migrate: {condition: service_completed_successfully}}
   edge:
     build: {context: .., target: edge}
     image: ${EDGE_IMAGE:-staffly-edge:local}
@@ -172,3 +211,6 @@ networks:
 volumes:
   postgres:
   file-processing-socket:
+  database-backups:
+  file-backups:
+  deletion-ledger:

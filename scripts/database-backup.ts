@@ -23,14 +23,15 @@ export function libpqEnvironment(databaseUrl: string) {
 }
 
 /** Database only: object-storage files require a separate versioned backup. */
-export async function createDatabaseBackup({ databaseUrl, file, pgBin = '', signal }: { databaseUrl?: string; file?: string; pgBin?: string; signal?: AbortSignal }) {
+export async function createDatabaseBackup({ databaseUrl, file, pgBin = '', signal,snapshot,snapshotAt }: { databaseUrl?: string; file?: string; pgBin?: string; signal?: AbortSignal;snapshot?:string;snapshotAt?:Date }) {
   if (!databaseUrl || !['postgres:', 'postgresql:'].includes(new URL(databaseUrl).protocol)) throw new Error('BACKUP_DATABASE_URL must be a PostgreSQL connection URL')
   if (!file || !file.endsWith('.dump')) throw new Error('Choose an explicit output path ending in .dump')
+  if(snapshot&&!/^[0-9A-Fa-f-]+$/.test(snapshot))throw new Error('Invalid exported snapshot')
   const destination = path.resolve(file), temporary = destination + '.' + randomUUID() + '.tmp'
   await mkdir(path.dirname(destination), { recursive: true, mode: 0o700 })
   const handle = await open(temporary, 'wx', 0o600); await handle.close()
   try {
-    const child = spawn(pgBin ? path.join(pgBin, 'pg_dump') : 'pg_dump', ['--format=custom', '--no-owner', '--no-privileges', '--lock-wait-timeout=10s', '--file', temporary], {
+    const child = spawn(pgBin ? path.join(pgBin, 'pg_dump') : 'pg_dump', ['--format=custom', '--no-owner', '--no-privileges', '--lock-wait-timeout=10s',...(snapshot?['--snapshot',snapshot]:[]), '--file', temporary], {
       // Individual libpq variables keep credentials out of argv/logs.
       env: libpqEnvironment(databaseUrl), stdio: ['ignore', 'ignore', 'pipe'], signal,
     })
@@ -40,7 +41,7 @@ export async function createDatabaseBackup({ databaseUrl, file, pgBin = '', sign
     const completed = await open(temporary, 'r+')
     try { await completed.sync() } finally { await completed.close() }
     await link(temporary, destination) // Fail rather than overwrite an existing backup.
-    try { await registerBackupRetention(destination) } catch (error) { await unlink(destination); throw error }
+    try { await registerBackupRetention(destination,snapshotAt) } catch (error) { await unlink(destination); throw error }
     return destination
   } finally { await unlink(temporary).catch(() => {}) }
 }

@@ -265,9 +265,10 @@ export function createAuthRouter({ sendCode = deliverSecurityCode }: { sendCode?
     const parsed = loginBody.safeParse(request.body)
     if (!parsed.success) { response.status(400).json({ message: invalidCredentials }); return }
     const user = await prisma.user.findUnique({ where: { email: parsed.data.email } })
-    const valid = await verifyLoginPassword(user?.passwordHash ?? null, parsed.data.password, parsed.data.email)
-    if (!user || !valid || user.deletedAt) { await recordSecurityEvent(prisma, { action: 'LOGIN_FAILED', userId: user?.id, outcome: 'DENIED', reasonCode: 'INVALID_CREDENTIALS' }); response.status(401).json({ message: invalidCredentials }); return }
-    if (!user.emailVerifiedAt) { response.status(403).json({ code: 'EMAIL_NOT_VERIFIED', message: 'Подтвердите email перед входом.' }); return }
+    let valid:boolean
+    try{valid=await verifyLoginPassword(user?.passwordHash??null,parsed.data.password,parsed.data.email)}catch(error){if(error instanceof ApiError&&error.code==='AUTH_ACCOUNT_LIMIT')await recordSecurityEvent(prisma,{action:'LOGIN_FAILED',userId:user?.id,outcome:'DENIED',reasonCode:'ACCOUNT_RATE_LIMIT'});throw error}
+    if (!user || !valid || user.deletedAt) { await recordSecurityEvent(prisma, { action: 'LOGIN_FAILED', userId: user?.id, outcome: 'DENIED', reasonCode: user?.deletedAt?'ACCOUNT_DELETING':!user?.passwordHash?'PASSWORD_UNAVAILABLE':'INVALID_CREDENTIALS' }); response.status(401).json({ message: invalidCredentials }); return }
+    if (!user.emailVerifiedAt) { await recordSecurityEvent(prisma,{action:'LOGIN_FAILED',userId:user.id,outcome:'DENIED',reasonCode:'EMAIL_UNVERIFIED'}); response.status(403).json({ code: 'EMAIL_NOT_VERIFIED', message: 'Подтвердите email перед входом.' }); return }
     response.json(await createSession(user, request, response))
   })
 

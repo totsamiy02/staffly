@@ -29,7 +29,7 @@ function RequestDiagnostics(){
   </Panel></>
 }
 export function SupportPage(){
-  return <><PageHead title="Поддержка"/>
+  return <><PageHead title="Поддержка" actions={<Link className="admin-btn" to="/admin/operations/access">Проверить доступ</Link>}/>
 
     <OperationsToolbar support label="Поиск диагностики" placeholder="Код поддержки, имя или организация" searchHelp={<AdminHelp label="Как найти обращение?">Код поддержки копируется из сообщения об ошибке. ID пользователя — в профиле; ID организации — в её профиле. Для неполученного письма достаточно пользователя и времени. Сообщение браузера не подтверждает серверную причину сбоя.</AdminHelp>}/><RequestDiagnostics/>
 

@@ -12,11 +12,13 @@ import { fileURLToPath } from 'node:url'
 import pg from 'pg'
 import { SignJWT } from 'jose'
 import { createArtifactDirectory, writeReport } from '../support/artifacts.mjs'
+import { resolveAdminSuite } from '../interface/admin-suites.mjs'
 
 // Always creates its own disposable PostgreSQL cluster. No .env or existing DB is used.
 // Run: npm run test:load -- --seconds=20
 const root = fileURLToPath(new URL('../../', import.meta.url))
 const options = Object.fromEntries(process.argv.slice(2).map(arg => arg.replace(/^--/, '').split('=')))
+if (options.profile === 'admin') options['admin-suite'] = resolveAdminSuite(options)
 const databaseTimezone = options['db-timezone'] ?? 'UTC'
 assert(/^[A-Za-z0-9_+/-]+$/.test(databaseTimezone), 'Invalid database timezone')
 new Intl.DateTimeFormat('en', { timeZone: databaseTimezone }).format()

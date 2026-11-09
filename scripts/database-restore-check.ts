@@ -1,6 +1,6 @@
 import { Pool } from 'pg'
 import { createReadStream } from 'node:fs'
-import { access,lstat,realpath } from 'node:fs/promises'
+import { access,lstat,realpath,readFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import path from 'node:path'
@@ -19,6 +19,8 @@ export async function checkDatabaseRestore({targetUrl,directory,backupId,sha256,
  if(!stat.isFile()||stat.isSymbolicLink()||stat.mode&0o077)throw new Error('Expected a private regular backup file')
  const hash=createHash('sha256');for await(const chunk of createReadStream(file))hash.update(chunk)
  if(hash.digest('hex')!==sha256)throw new Error('Backup checksum mismatch')
+ const manifestFile=file+'.retention.json',manifestStat=await lstat(manifestFile);if(!manifestStat.isFile()||manifestStat.isSymbolicLink()||manifestStat.mode&0o077||manifestStat.size>16384)throw new Error('BACKUP_MANIFEST_INVALID')
+ const manifest=JSON.parse(await readFile(manifestFile,'utf8'));if(manifest.format!=='staffly-database-backup-v1'||manifest.sha256!==sha256||manifest.file!==path.basename(file)||Date.parse(manifest.expiresAt)!==Date.parse(manifest.createdAt)+30*86400000||Date.parse(manifest.expiresAt)<=Date.now())throw new Error('BACKUP_MANIFEST_INVALID')
  const pool=new Pool({connectionString:targetUrl,max:1,connectionTimeoutMillis:10000,statement_timeout:15000})
  try{
   const db=await pool.connect()
@@ -29,7 +31,9 @@ export async function checkDatabaseRestore({targetUrl,directory,backupId,sha256,
   const code=await new Promise<number|null>((resolve,reject)=>{child.once('error',reject);child.once('exit',resolve)})
   if(code!==0)throw new Error('Restore rehearsal failed; target is separate and working data was not changed')
   const {rows:[counts]}=await db.query('SELECT (SELECT count(*)::int FROM public.users) users,(SELECT count(*)::int FROM public.organizations) organizations,(SELECT count(*)::int FROM public.stored_files) files')
-  return{restored:true,...counts}
+  const {rows:[schema]}=await db.query("SELECT (SELECT migration_name FROM public._prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL ORDER BY finished_at DESC LIMIT 1) AS version,(SELECT installation_id FROM staffly_admin.management_state WHERE id=1) AS installation_id,(SELECT count(*)::int FROM pg_constraint WHERE contype='f' AND NOT convalidated) AS invalid_constraints")
+  if(!schema.version||schema.invalid_constraints)throw new Error('RESTORE_VALIDATION_FAILED')
+  return{restored:true,...counts,schemaVersion:String(schema.version),installationId:String(schema.installation_id),foreignKeysValidated:true}
   }finally{db.release()}
  }finally{await pool.end()}
 }
@@ -38,5 +42,14 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1]
  const args=Object.fromEntries(process.argv.slice(2).map(value=>value.replace(/^--/,'').split('=')))
  if(!process.env.RESTORE_DATABASE_URL)throw new Error('Set RESTORE_DATABASE_URL to a separate empty database in the private operator environment')
  const defaultBin='/Applications/Postgres.app/Contents/Versions/18/bin',pgBin=process.env.PG_BIN||await access(defaultBin).then(()=>defaultBin,()=>'')
- try{console.log(JSON.stringify(await checkDatabaseRestore({targetUrl:process.env.RESTORE_DATABASE_URL,directory:process.env.ADMIN_BACKUP_DIRECTORY||'artifacts/backups',backupId:args['backup-id']??'',sha256:args.sha256??'',pgBin})))}catch{console.error('Restore rehearsal refused or failed. Check target emptiness, backup checksum and operator configuration.');process.exitCode=1}
+ const started=Date.now(),managementUrl=process.env.ADMIN_MANAGEMENT_DATABASE_URL
+ let result:Awaited<ReturnType<typeof checkDatabaseRestore>>|null=null,registered=false
+ try{result=await checkDatabaseRestore({targetUrl:process.env.RESTORE_DATABASE_URL,directory:process.env.ADMIN_BACKUP_DIRECTORY||'artifacts/backups',backupId:args['backup-id']??'',sha256:args.sha256??'',pgBin});}catch{console.error('Restore rehearsal refused or failed. Check target emptiness, backup checksum and operator configuration.');process.exitCode=1}
+ if(managementUrl){const pool=new Pool({connectionString:managementUrl,max:1,connectionTimeoutMillis:10000,statement_timeout:10000});try{
+  const {rows:[backup]}=await pool.query('SELECT b.id,s.installation_id FROM staffly_admin.backups b CROSS JOIN staffly_admin.management_state s WHERE b.id=$1 AND b.sha256=$2',[args['backup-id'],args.sha256])
+  if(!backup||result&&result.installationId!==backup.installation_id)throw new Error('RESTORE_DATABASE_MISMATCH')
+  await pool.query('INSERT INTO staffly_admin.restore_checks(backup_id,status,duration_ms,schema_version,checks,error_code) VALUES($1,$2,$3,$4,$5,$6)',[backup.id,result?'SUCCEEDED':'FAILED',Math.min(2147483647,Date.now()-started),result?.schemaVersion??null,JSON.stringify({databaseRestored:!!result,schemaValidated:!!result?.schemaVersion,foreignKeysValidated:!!result?.foreignKeysValidated,filesVerified:false,ledgerVerified:false}),result?null:'RESTORE_CHECK_FAILED'])
+  registered=true
+ }catch{console.error('Restore result was not registered; check the operator management database');process.exitCode=1}finally{await pool.end()}}
+ if(result)console.log(JSON.stringify({...result,registered}))
 }

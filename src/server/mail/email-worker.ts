@@ -13,7 +13,7 @@ export async function scheduleEmailReminders(now = new Date()) {
       JOIN organizations o ON o.id=d.organization_id JOIN organization_resource_budgets b ON b.organization_id=o.id
       JOIN organization_members m ON m.id=a.member_id JOIN users u ON u.id=m.user_id
       LEFT JOIN organization_locations l ON l.id=d.location_id
-      WHERE a.acknowledged_at IS NULL AND a.cancelled_at IS NULL AND d.deleted_at IS NULL AND o.deleted_at IS NULL
+      WHERE a.acknowledged_at IS NULL AND a.cancelled_at IS NULL AND d.deleted_at IS NULL AND o.deleted_at IS NULL AND public.platform_organization_available(o.id)
       AND m.left_at IS NULL AND u.deleted_at IS NULL AND u.email_notifications_enabled AND u.email_notification_categories->'documents'='true'::jsonb
       AND b.pending_emails<b.email_queue_limit
       AND a.deadline=(((${now}::timestamptz AT TIME ZONE COALESCE(l.timezone,o.timezone))::date)+1)
@@ -31,7 +31,7 @@ export async function scheduleEmailReminders(now = new Date()) {
       SELECT r.draft_id AS "draftId",r.member_id AS "memberId",row_number() OVER(PARTITION BY r.organization_id ORDER BY r.draft_id,r.member_id) AS turn
       FROM draft_recipients r JOIN schedule_drafts d ON d.id=r.draft_id JOIN organizations o ON o.id=r.organization_id
       JOIN organization_resource_budgets b ON b.organization_id=o.id JOIN organization_members m ON m.id=r.member_id JOIN users u ON u.id=m.user_id
-      WHERE d.status='OPEN' AND d.deadline>${now}::timestamptz AND d.deadline<=${soon}::timestamptz AND o.deleted_at IS NULL
+      WHERE d.status='OPEN' AND d.deadline>${now}::timestamptz AND d.deadline<=${soon}::timestamptz AND o.deleted_at IS NULL AND public.platform_organization_available(o.id)
       AND m.left_at IS NULL AND u.deleted_at IS NULL AND u.email_notifications_enabled AND u.email_notification_categories->'scheduleDiscussion'='true'::jsonb
       AND b.pending_emails<b.email_queue_limit AND (r.response IS NULL OR r.responded_revision IS DISTINCT FROM r.required_revision)
       AND NOT EXISTS(SELECT 1 FROM email_deliveries e WHERE e.source_key='draft-reminder:'||d.id::text||':'||m.id::text||':'||to_char(d.deadline AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
@@ -47,7 +47,7 @@ export async function scheduleEmailReminders(now = new Date()) {
         row_number() OVER(PARTITION BY c.organization_id ORDER BY c.due_at,c.id,m.id) AS turn
       FROM vacation_campaigns c JOIN organizations o ON o.id=c.organization_id JOIN organization_resource_budgets b ON b.organization_id=o.id
       JOIN organization_members m ON m.organization_id=o.id AND m.id=ANY(c.member_ids) JOIN users u ON u.id=m.user_id
-      WHERE c.closed_at IS NULL AND c.due_at>${now}::timestamptz AND c.due_at<=${soon}::timestamptz AND o.deleted_at IS NULL
+      WHERE c.closed_at IS NULL AND c.due_at>${now}::timestamptz AND c.due_at<=${soon}::timestamptz AND o.deleted_at IS NULL AND public.platform_organization_available(o.id)
       AND m.left_at IS NULL AND u.deleted_at IS NULL AND u.email_notifications_enabled AND u.email_notification_categories->'vacationCollection'='true'::jsonb
       AND b.pending_emails<b.email_queue_limit
       AND NOT EXISTS(SELECT 1 FROM requests r WHERE r.campaign_id=c.id AND r.created_by_member_id=m.id)

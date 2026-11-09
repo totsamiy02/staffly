@@ -1,3 +1,4 @@
+import { assertOrganizationAvailable } from './service-state.ts'
 import { requireCapacity, requireLocationInPlan } from '../subscriptions/access.ts'
 import { requirePermission } from './access/access.ts'
 import { locationWhere } from './location-context.ts'
@@ -105,7 +106,7 @@ export async function createCodeInvitation(actorUserId: string, organizationId: 
 
 export async function listPendingInvitations(userEmail: string) {
   const invitations = await prisma.organizationInvite.findMany({
-    where: { type: 'EMAIL', invitedEmail: userEmail, ...activeInviteWhere(), organization: { deletedAt: null } },
+    where: { type: 'EMAIL', invitedEmail: userEmail, ...activeInviteWhere(), organization: { deletedAt: null,OR:[{serviceState:'ACTIVE'},{serviceUntil:{lte:new Date()}}] } },
     include: { organization: true, invitedBy: { select: { email: true, firstName: true, lastName: true, middleName: true } } },
     orderBy: { createdAt: 'desc' },
   })
@@ -165,11 +166,12 @@ type ValidatableInvite = {
   acceptedAt: Date | null
   rejectedAt: Date | null
   revokedAt: Date | null
-  organization: { id: string; name: string; deletedAt: Date | null }
+  organization: { id: string; name: string; deletedAt: Date | null;serviceState:string;serviceUntil:Date|null }
 } | null
 
 function validateInvitation(invite: ValidatableInvite, type: 'EMAIL' | 'CODE'): asserts invite is Exclude<ValidatableInvite, null> {
   if (!invite || invite.type !== type) throw new ApiError(404, 'INVITATION_NOT_FOUND', 'Приглашение не найдено.')
+  assertOrganizationAvailable(invite.organization)
   if (invite.organization.deletedAt) throw new ApiError(404, 'ORGANIZATION_NOT_FOUND', 'Организация не найдена.')
   if (invite.acceptedAt) throw new ApiError(409, 'INVITATION_ALREADY_USED', 'Приглашение уже использовано.')
   if (invite.rejectedAt) throw new ApiError(409, 'INVITATION_REJECTED', 'Приглашение отклонено.')

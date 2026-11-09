@@ -1,3 +1,4 @@
+import { ApiError } from '../api-error.ts'
 import { safeError } from '../security/safe-error.ts'
 import { recordSecurityEvent } from '../security/journal.ts'
 import { randomUUID } from 'node:crypto'
@@ -46,7 +47,7 @@ export async function claimEmailDelivery(now = new Date()) {
     const rows = await tx.$queryRaw<Array<{id:string;organizationId:string|null;category:string|null}>>`
       SELECT e.id,e.organization_id AS "organizationId",e.category FROM email_deliveries e
       LEFT JOIN organization_resource_budgets b ON b.organization_id=e.organization_id
-      WHERE e.status='PENDING' AND e.available_at<=${now}::timestamptz AND (e.locked_until IS NULL OR e.locked_until<=${now}::timestamptz)
+      WHERE (e.organization_id IS NULL OR public.platform_organization_available(e.organization_id)) AND e.status='PENDING' AND e.available_at<=${now}::timestamptz AND (e.locked_until IS NULL OR e.locked_until<=${now}::timestamptz)
       AND (e.category IS NULL OR e.organization_id IS NULL OR
         b.organization_id IS NOT NULL AND (b.email_window_start<=${now}::timestamptz-interval '1 minute' OR b.email_window_count<b.email_minute_limit)
         AND NOT EXISTS(SELECT 1 FROM email_deliveries active WHERE active.organization_id=e.organization_id AND active.category IS NOT NULL AND active.status='PENDING' AND active.locked_until>${now}::timestamptz))
@@ -90,7 +91,7 @@ export async function processEmailDeliveries(options: { now?: Date; send?: typeo
         await send(recipient, renderEmail(content), job.id)
         await finish(job, 'SENT', now)
       } catch (error) {
-        if (error instanceof EmailDeliveryPausedError) { await releasePausedDelivery(job); return processed }
+        if (error instanceof EmailDeliveryPausedError || error instanceof ApiError&&error.code==='ORGANIZATION_SUSPENDED') { await releasePausedDelivery(job); return processed }
         // Do not store mail content, addresses, credentials or provider responses in the queue log.
         console.error('Email delivery attempt failed:', job.id, safeError(error))
         const status = job.attempts >= 7 || +now - +job.createdAt > 86400_000 ? 'FAILED' : 'PENDING'

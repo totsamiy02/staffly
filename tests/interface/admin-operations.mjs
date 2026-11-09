@@ -38,7 +38,7 @@ export async function checkOperations({page,nav,check,expect,org,user,pin,contex
     await page.evaluate(()=>Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async()=>{throw new Error('denied')}}}))
     await page.getByRole('button',{name:'Скопировать диагностику',exact:true}).click();await expect(page.locator('.admin-ops-copy [role=status]')).toContainText('Текст выделен')
     const selection=await page.getByRole('textbox',{name:'Диагностика для копирования',exact:true}).evaluate(node=>({selected:node.value.slice(node.selectionStart,node.selectionEnd),value:node.value}));assert.equal(selection.selected,selection.value);assert(selection.selected.includes(operationsErrorId));await noOverflow();await shot('diagnostic')
-    await page.getByRole('button',{name:'Вернуться назад',exact:true}).click();await expect(page.getByRole('heading',{name:'Поддержка',exact:true})).toBeVisible();await expect(page.getByRole('searchbox',{name:'Поиск диагностики',exact:true})).toHaveValue(operationsErrorId)
+    await page.getByRole('button',{name:/^К /}).click();await expect(page.getByRole('heading',{name:'Поддержка',exact:true})).toBeVisible();await expect(page.getByRole('searchbox',{name:'Поиск диагностики',exact:true})).toHaveValue(operationsErrorId)
     assert.equal(await page.locator('.admin-nav-item.active').count(),1)
     await page.getByRole('searchbox',{name:'Поиск диагностики',exact:true}).fill(operationsJob.id);await expect(page.locator('[data-admin-record]')).toHaveCount(1)
     await page.getByRole('combobox',{name:'Источник',exact:true}).click();await page.getByRole('option',{name:'Подготовка отчётов',exact:true}).click();await expect(page.locator('[data-admin-record]')).toHaveCount(1);await shot('support-report')

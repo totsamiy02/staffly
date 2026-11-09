@@ -11,10 +11,13 @@ export async function checkAdminLayout({page,nav,expect,org,userId,output,result
   ['overview','Обзор','Обзор сервиса'],['organizations','Организации','Организации'],['organization','Организации',org.name],['users','Пользователи','Пользователи'],['user','Пользователи',null],['online','Онлайн','Онлайн'],['analytics','Аналитика','Аналитика продукта'],['events','События','События сервиса'],
  ]
  if(operationsJobId&&operationsErrorId)routes.push(['service','Состояние сервиса','Состояние сервиса'],['jobs','Фоновые задачи','Фоновые задачи'],['job','Фоновые задачи','Диагностика задачи'],['support','Поддержка','Поддержка'],['diagnostic','Поддержка','Разбор сбоя'])
- for(const [route,section,title]of routes){
+ routes.push(['account-service','Пользователи','Обслуживание аккаунта','/admin/users/'+userId+'/service'],['organization-service','Организации','Обслуживание организации','/admin/organizations/'+org.id+'/service'],['access','Поддержка','Диагностика прав','/admin/operations/access'])
+ for(const tab of ['backups','cleanup','release','content','signals','reports'])routes.push(['maintenance-'+tab,'Состояние сервиса','Обслуживание сервиса','/admin/operations/maintenance?tab='+tab])
+ for(const [route,section,title,target]of routes){
   await page.setViewportSize({width:1600,height:1100})
   await expect(page.locator('.admin-root')).not.toHaveClass(/has-compact-navigation/)
   await nav(section)
+  if(target)await page.goto(new URL(target,page.url()).href)
   if(route==='organization')await page.locator(`a.admin-org-name[href="/admin/organizations/${org.id}"]`).click()
   if(route==='job')await page.locator(`a.admin-btn[href="/admin/operations/jobs/report/${operationsJobId}"]`).click()
   if(route==='diagnostic')await page.locator(`a.admin-btn[href="/admin/operations/support/${operationsErrorId}"]`).click()
