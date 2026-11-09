@@ -17,12 +17,21 @@ export async function checkAdminLayout({page,nav,expect,org,userId,output,result
   await page.setViewportSize({width:1600,height:1100})
   await expect(page.locator('.admin-root')).not.toHaveClass(/has-compact-navigation/)
   await nav(section)
-  if(target)await page.goto(new URL(target,page.url()).href)
+  // Exercise the app's own links/tabs. A hard document replacement immediately
+  // after sidebar navigation aborts the page's reads instead of testing reflow.
+  if(route==='organization-service')await page.locator(`a.admin-org-name[href="/admin/organizations/${org.id}"]`).click()
+  if(route.startsWith('maintenance-')){
+   await page.getByRole('link',{name:'Обслуживание сервиса',exact:true}).click()
+   const tab=new URL(target,page.url()).searchParams.get('tab')
+   const labels={backups:'Резервирование',cleanup:'Хранение и удаление',release:'Обслуживание и выпуск',content:'Публичный контент',signals:'Внешние сигналы',reports:'Отчёт команды'}
+   await page.getByRole('tab',{name:labels[tab],exact:true}).click()
+  }else if(target)await page.locator(`a[href="${target}"]`).first().click()
   if(route==='organization')await page.locator(`a.admin-org-name[href="/admin/organizations/${org.id}"]`).click()
   if(route==='job')await page.locator(`a.admin-btn[href="/admin/operations/jobs/report/${operationsJobId}"]`).click()
   if(route==='diagnostic')await page.locator(`a.admin-btn[href="/admin/operations/support/${operationsErrorId}"]`).click()
   if(route==='user')await page.locator(`a.admin-btn[href="/admin/users/${userId}"]`).click()
   await expect(page.locator('.admin-page-head h1')).toBeVisible();if(title)await expect(page.locator('.admin-page-head h1')).toHaveText(title)
+  await expect(page.locator('.admin-loading')).toHaveCount(0)
   assert.equal(await page.locator('.admin-auto-refresh,[aria-label="Обновить сейчас"]').count(),0,'Update controls must be absent')
   for(const [size,width,height]of sizes){
    const label=`${browser}/${route}/${size} (${width}×${height})`
