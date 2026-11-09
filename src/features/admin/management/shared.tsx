@@ -1,6 +1,7 @@
 /* oxlint-disable react/only-export-components -- Shared feature hooks and components. */
 import { useState,type ReactNode } from 'react'
 import type { AdminReadState } from '../admin-data.tsx'
+import ConsoleLayout,{consoleDescriptions} from '../console-layout.tsx'
 import { PageHead } from '../admin-elements.tsx'
 import { ReadError } from '../admin-feedback.tsx'
 import { ManagementActionDialog,type ProtectedAction } from './action-dialog.tsx'
@@ -11,4 +12,4 @@ export function useAction(refresh:()=>void){
  const messages={ACCESS_GRANT:'Административный доступ выдан.',ACCESS_REVOKE:'Административный доступ отозван.',SESSION_REVOKE:'Выбранный административный сеанс завершён.',ALERT_RULE:'Правило оповещения изменено.',BACKUP_CREATE:'Создание копии запрошено.'}
  return{open:setAction,feedback:<>{result&&(result.action==='BACKUP_CREATE'&&result.value.resourceId?<BackupJobFeedback id={result.value.resourceId}/>:<p className="admin-notice" role="status">{messages[result.action as keyof typeof messages]??'Действие выполнено. Обновлённые сведения показаны в разделе.'}</p>)}{action&&<ManagementActionDialog action={action} onClose={()=>{setAction(null);action.onReturn?.()}} onDone={value=>{setResult({action:action.spec.action,value});setAction(null);action.onCompleted?.();refresh()}}/>}</>}
 }
-export function Frame({title,children,error,refresh,readState}:{title:string;children:ReactNode;error:Error|null;refresh:()=>void;readState:AdminReadState}){return <><PageHead title={title}/><ReadError error={error} retry={refresh} state={readState}/>{children}</>}
+export function Frame({title,children,error,refresh,readState,actions,className=''}:{title:string;children:ReactNode;error:Error|null;refresh:()=>void;readState:AdminReadState;actions?:ReactNode;className?:string}){return <ConsoleLayout section="Управление сервисом" className={className}><PageHead title={title} subtitle={consoleDescriptions[title]} actions={actions}/><ReadError error={error} retry={refresh} state={readState}/>{children}</ConsoleLayout>}

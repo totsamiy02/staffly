@@ -12,7 +12,7 @@ import { AdminHelp,AdminBadge,AdminIcon,Empty,Pagination,Stat,count,date } from 
 import { jobLabels,jobProblem } from './presentation.ts'
 import type { JobStatus,JobsState,OperationalJob } from './contracts.ts'
 
-export function JobBadge({status}:{status:JobStatus}){return <AdminBadge tone={status==='DONE'?'green':status==='FAILED'||status==='RETRY'?'amber':status==='RUNNING'?'purple':'gray'}>{jobLabels[status]??'Неизвестно'}</AdminBadge>}
+export function JobBadge({status}:{status:JobStatus}){return <AdminBadge tone={status==='DONE'?'green':status==='FAILED'?'red':status==='RETRY'?'amber':status==='RUNNING'?'purple':'gray'}>{jobLabels[status]??'Неизвестно'}</AdminBadge>}
 export function EntityLinks({organizationId,organizationName,userId,userName,organizationPublicId,userPublicId,compact=false}:{compact?:boolean;organizationPublicId?:number|null;userPublicId?:number|null;organizationId:string|null;organizationName:string|null;userId:string|null;userName:string|null}){
   return <div className="admin-ops-entities">{organizationId?<Link to={'/admin/organizations/'+organizationId}><AdminIcon name="org"/>{organizationName??'Организация'}</Link>:<span>Вне организации</span>}{userId&&<Link to={'/admin/users/'+userId}><AdminIcon name="users"/>{userName||'Пользователь'}</Link>}{!compact&&organizationId&&<CopyReference value={String(organizationPublicId??organizationId)} label="ID организации"/>}{!compact&&userId&&<CopyReference value={String(userPublicId??userId)} label="ID пользователя"/>}</div>
 }
@@ -36,5 +36,5 @@ function RetrySurface({job,close,onDone,busy,setBusy}:{job:OperationalJob;close:
 }
 export function RetryReportDialog({job,onClose,onDone}:{job:OperationalJob;onClose:()=>void;onDone:()=>void}){
   const [busy,setBusy]=useState(false)
-  return <AnimatedOverlay variant="modal" className="admin-root admin-ops-overlay" onClose={onClose} dismissible={!busy}>{close=><RetrySurface job={job} busy={busy} setBusy={setBusy} close={close} onDone={()=>{onClose();onDone()}}/>}</AnimatedOverlay>
+  return <AnimatedOverlay variant="modal" className="admin-root admin-ops-overlay admin-console-overlay" onClose={onClose} dismissible={!busy}>{close=><RetrySurface job={job} busy={busy} setBusy={setBusy} close={close} onDone={()=>{onClose();onDone()}}/>}</AnimatedOverlay>
 }

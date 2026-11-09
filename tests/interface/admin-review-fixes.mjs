@@ -72,7 +72,7 @@ export async function checkReviewFixes({page,nav,check,expect,prisma,databasePoo
   }finally{await databasePool.query('DELETE FROM staffly_admin.backups WHERE id=$1',[id])}
   await databasePool.query("INSERT INTO staffly_admin.alerts(rule_id,measured,threshold) SELECT id,threshold,threshold FROM staffly_admin.alert_rules WHERE key='ADMIN_DENIALS' ON CONFLICT(rule_id) WHERE resolved_at IS NULL DO NOTHING")
   await nav('Оповещения');await choose('Важность','Критические');await expect(page.locator('.admin-management-alert').first()).toBeVisible();for(const alert of await page.locator('.admin-management-alert').all())await expect(alert).toContainText('Критическое')
-  await nav('Обзор');await expect(page.locator('.admin-stats')).toContainText('Активные организации за 30 дней')
+  await nav('Обзор');await expect(page.locator('.admin-overview-stats')).toContainText('Активные организации за 30 дней')
   await nav('Аналитика');await expect(page.getByRole('heading',{name:'Накопленные создания',exact:true})).toBeVisible();await page.getByRole('button',{name:'О накопительном учёте',exact:true}).click();await expect(page.getByRole('tooltip')).toContainText('Начало накопительного учёта:');await page.locator('.admin-topbar').click({position:{x:6,y:6}});await noOverflow();await shot('review-analytics')
  })
 }

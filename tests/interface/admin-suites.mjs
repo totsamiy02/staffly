@@ -3,7 +3,7 @@ const legacySuites = {
   'review-fixes': 'review-fixes', management: 'management', operations: 'operations',
   'admin-layout': 'layout',
 }
-export const adminSuites = Object.freeze(['media', 'charts', 'overview', 'monitoring', 'management', 'operations', 'workflow', 'polish', 'review-fixes', 'service', 'layout'])
+export const adminSuites = Object.freeze(['console', 'media', 'charts', 'overview', 'monitoring', 'management', 'operations', 'workflow', 'polish', 'review-fixes', 'service', 'layout'])
 
 // A typo must fail instead of silently running the default monitoring suite.
 export function resolveAdminSuite(options) {

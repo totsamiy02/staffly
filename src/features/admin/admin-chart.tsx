@@ -33,7 +33,7 @@ export default function AdminChart({ data, series = [{ key: 'users', label: 'ÐŸÐ
   const top = 18, bottom = 198, x = (i: number) => left + historyPosition(times[i], domain) * (right - left), y = (n: number) => bottom - n / scale.max * (bottom - top)
   const index = selected === null || last < 0 ? null : Math.min(last, selected), row = index === null ? null : data[index]
   const duration = Date.parse(domain.to) - Date.parse(domain.from)
-  const axisLabel = (time: number) => new Date(time).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', ...(duration <= 2 * 86400000 ? { hour: '2-digit', minute: '2-digit' } : duration > 365 * 86400000 ? { month: 'short', year: '2-digit' } : { day: 'numeric', month: 'short' }) })
+  const axisLabel = (time: number) => new Date(time).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', ...(duration <= 2 * 86400000 ? { ...(duration >= 20 * 3600000 ? { day: 'numeric', month: 'short' } : {}), hour: '2-digit', minute: '2-digit' } : duration > 365 * 86400000 ? { month: 'short', year: '2-digit' } : { day: 'numeric', month: 'short' }) })
   const curve = (s: Series, indices: number[]) => indices.map((i, n) => {
     if (!n) return `M${x(i)},${y(Number(data[i][s.key]))}`
     const previous = indices[n - 1], middle = (x(previous) + x(i)) / 2

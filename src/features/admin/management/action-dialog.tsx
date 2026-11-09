@@ -89,5 +89,5 @@ function ActionSurface({ action, close, onDone, busy, setBusy, onIssued }: {
 export function ManagementActionDialog({ action, onClose, onDone }: { action: ProtectedAction; onClose: () => void; onDone: (result: ManagementResult) => void }) {
   const [busy, setBusy] = useState(false), issued = useRef<string | null>(null), { request } = useAdmin()
   const cancel = () => { if (issued.current) void request('/management/actions/' + issued.current + '/cancel', { method: 'POST', body: {} }).catch(() => {}); onClose() }
-  return <AnimatedOverlay variant="modal" className="admin-root admin-ops-overlay" dismissible={!busy} onClose={cancel}>{close => <ActionSurface action={action} close={close} busy={busy} setBusy={setBusy} onIssued={id => { issued.current = id }} onDone={onDone} />}</AnimatedOverlay>
+  return <AnimatedOverlay variant="modal" className="admin-root admin-ops-overlay admin-console-overlay" dismissible={!busy} onClose={cancel}>{close => <ActionSurface action={action} close={close} busy={busy} setBusy={setBusy} onIssued={id => { issued.current = id }} onDone={onDone} />}</AnimatedOverlay>
 }
