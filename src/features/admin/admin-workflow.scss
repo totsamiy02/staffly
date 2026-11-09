@@ -81,3 +81,7 @@ html:not([data-theme=dark]) .admin-root{--theme-success:#2d6c52;--theme-warning:
 .admin-root .admin-ops-entities{font-size:13px;}
 .admin-root .admin-table-wrap .admin-ops-entities{gap:4px;>a{padding:4px 6px;}}
 .admin-root .admin-table-wrap td>strong:has(+.admin-detail-trigger){display:block;margin-bottom:6px;}
+
+.admin-root .admin-mark.media-avatar{overflow:hidden;img{display:block;width:100%;height:100%;object-fit:cover;}}
+.admin-heading-with-image{display:flex;align-items:center;gap:12px;min-width:0;h1{min-width:0;}.admin-heading-mark{width:44px;height:44px;border-radius:12px;}}
+.admin-root .admin-member-link .admin-member-identity{display:flex;align-items:center;gap:10px;min-width:0;>span:last-child{min-width:0;overflow-wrap:anywhere;}}

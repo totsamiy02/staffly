@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { databasePool, prisma } from '../db.ts'
+import { mediaUrl } from '../storage/image-service.ts'
 import { ApiError } from '../api-error.ts'
 import { activePresenceSql } from './collection.ts'
 import { adminPool } from './database.ts'
@@ -21,9 +22,9 @@ type Row=Record<string,unknown>
 function organizationDto(row:Row){
  const record:SubscriptionRecord={supportPlan:row.support_plan as string|null,supportStartsAt:row.support_starts_at as Date|null,supportEndsAt:row.support_ends_at as Date|null,plan:String(row.plan??'FREE'),periodStart:row.period_start as Date|null,periodEnd:row.period_end as Date|null,trialEndsAt:row.trial_ends_at as Date|null,trialStartedAt:row.trial_started_at as Date|null,nextPlan:row.next_plan as string|null,nextStartsAt:row.next_starts_at as Date|null,nextEndsAt:row.next_ends_at as Date|null}
  const subscription=effectiveSubscription(record)
- return {serviceState:row.service_state==='ACTIVE'||row.service_until&&+new Date(row.service_until as Date)<=Date.now()?'ACTIVE':'SUSPENDED',id:String(row.id),publicId:Number(row.public_id),name:String(row.name),timezone:String(row.timezone),createdAt:iso(row.created_at as Date),lastActiveAt:iso(row.last_active_at as Date|null),members:number(row.members),locations:number(row.locations),storageBytes:number(row.storage_bytes),online:number(row.online),onlineSessions:number(row.online_sessions),subscription,attention:number(row.members)>=subscription.limits.members*.8||number(row.locations)>=subscription.limits.locations*.8||number(row.storage_bytes)>=subscription.limits.storageBytes*.8}
+ return {serviceState:row.service_state==='ACTIVE'||row.service_until&&+new Date(row.service_until as Date)<=Date.now()?'ACTIVE':'SUSPENDED',id:String(row.id),publicId:Number(row.public_id),name:String(row.name),logoUrl:mediaUrl(row.logo_file_id as string|null),timezone:String(row.timezone),createdAt:iso(row.created_at as Date),lastActiveAt:iso(row.last_active_at as Date|null),members:number(row.members),locations:number(row.locations),storageBytes:number(row.storage_bytes),online:number(row.online),onlineSessions:number(row.online_sessions),subscription,attention:number(row.members)>=subscription.limits.members*.8||number(row.locations)>=subscription.limits.locations*.8||number(row.storage_bytes)>=subscription.limits.storageBytes*.8}
 }
-const organizationSelect=(withLimits=false)=>`SELECT ${withLimits?'limits.effective_plan,limits.storage_limit,limits.members_limit,limits.locations_limit,':''}o.id,o.public_id,o.name,o.timezone,o.created_at,o.service_state,o.service_until,sub.support_plan,sub.support_starts_at,sub.support_ends_at,sub.plan,sub.period_start,sub.period_end,sub.trial_ends_at,sub.trial_started_at,sub.next_plan,sub.next_starts_at,sub.next_ends_at,
+const organizationSelect=(withLimits=false)=>`SELECT ${withLimits?'limits.effective_plan,limits.storage_limit,limits.members_limit,limits.locations_limit,':''}o.id,o.public_id,o.name,o.logo_file_id,o.timezone,o.created_at,o.service_state,o.service_until,sub.support_plan,sub.support_starts_at,sub.support_ends_at,sub.plan,sub.period_start,sub.period_end,sub.trial_ends_at,sub.trial_started_at,sub.next_plan,sub.next_starts_at,sub.next_ends_at,
  COALESCE(b.storage_bytes,0) AS storage_bytes,
  (SELECT count(*)::int FROM organization_members m JOIN users u ON u.id=m.user_id WHERE m.organization_id=o.id AND m.left_at IS NULL AND u.deleted_at IS NULL) AS members,
  (SELECT count(*)::int FROM organization_locations l WHERE l.organization_id=o.id AND l.archived_at IS NULL) AS locations,
@@ -78,11 +79,11 @@ export async function monitoringOrganization(id:string,raw:unknown={}){
  return {...organizationDto(row),ownerId:owner?.user.id??null,ownerPublicId:owner?.user.publicId??null,ownerName:owner?[owner.user.lastName,owner.user.firstName].filter(Boolean).join(' ')||'Владелец организации':null,daily:dailyHistory.points,dailyRange:dailyHistory.range,features,events,startedAt}
 }
 function maskEmail(email:string){const at=email.lastIndexOf('@');return `${email.slice(0,1)}•••${email.slice(at)}`}
-const userSelect=`SELECT u.id,u.public_id,u.email,u.first_name,u.last_name,u.created_at,u.email_verified_at,u.last_seen_at,
+const userSelect=`SELECT u.id,u.public_id,u.avatar_file_id,u.email,u.first_name,u.last_name,u.created_at,u.email_verified_at,u.last_seen_at,
  (SELECT count(*)::int FROM organization_members m JOIN organizations o ON o.id=m.organization_id WHERE m.user_id=u.id AND m.left_at IS NULL AND o.deleted_at IS NULL) AS organizations,
  (SELECT count(*)::int FROM auth_sessions s WHERE s.user_id=u.id AND ${activeSession}) AS sessions,
  EXISTS(SELECT 1 FROM auth_sessions s WHERE s.user_id=u.id AND ${onlineSession}) AS online FROM users u`
-function userDto(row:Row){return {id:String(row.id),publicId:Number(row.public_id),displayName:[row.last_name,row.first_name].filter(Boolean).join(' ')||'Пользователь',email:maskEmail(String(row.email)),createdAt:iso(row.created_at as Date),emailVerified:Boolean(row.email_verified_at),lastSeenAt:iso(row.last_seen_at as Date|null),organizations:number(row.organizations),sessions:number(row.sessions),online:Boolean(row.online)}}
+function userDto(row:Row){return {id:String(row.id),publicId:Number(row.public_id),avatarUrl:row.avatar_file_id?`/api/admin/media/avatars/${row.avatar_file_id}`:null,displayName:[row.last_name,row.first_name].filter(Boolean).join(' ')||'Пользователь',email:maskEmail(String(row.email)),createdAt:iso(row.created_at as Date),emailVerified:Boolean(row.email_verified_at),lastSeenAt:iso(row.last_seen_at as Date|null),organizations:number(row.organizations),sessions:number(row.sessions),online:Boolean(row.online)}}
 export async function monitoringUsers(raw:unknown){
  const q=querySchema.parse(raw),search=escapeSearch(q.search)
  const condition=`u.deleted_at IS NULL AND (u.email ILIKE $1 OR concat_ws(' ',u.last_name,u.first_name) ILIKE $1 OR u.id::text ILIKE $1 OR u.public_id::text ILIKE $1)${q.status==='verified'?' AND u.email_verified_at IS NOT NULL':q.status==='pending'?' AND u.email_verified_at IS NULL':q.status==='online'?` AND EXISTS(SELECT 1 FROM auth_sessions s WHERE s.user_id=u.id AND ${onlineSession})`:''}`
@@ -97,10 +98,10 @@ export async function monitoringUser(id:string,raw:unknown={}){
  const {page,search}=querySchema.parse(raw)
  const {rows:[row]}=await databasePool.query(`${userSelect} WHERE u.id=$1 AND u.deleted_at IS NULL`,[id])
  if(!row)throw new ApiError(404,'ADMIN_USER_NOT_FOUND','Пользователь не найден.')
- const memberships=await prisma.organizationMember.findMany({where:{userId:id,leftAt:null,organization:{deletedAt:null,name:{contains:search,mode:'insensitive'}}},take:20,skip:(page-1)*20,orderBy:{joinedAt:'desc'},select:{role:true,organization:{select:{id:true,name:true}}}})
+ const memberships=await prisma.organizationMember.findMany({where:{userId:id,leftAt:null,organization:{deletedAt:null,name:{contains:search,mode:'insensitive'}}},take:20,skip:(page-1)*20,orderBy:{joinedAt:'desc'},select:{role:true,organization:{select:{id:true,name:true,logoFileId:true}}}})
  const membershipsTotal=await prisma.organizationMember.count({where:{userId:id,leftAt:null,organization:{deletedAt:null,name:{contains:search,mode:'insensitive'}}}})
  const grant=(await adminPool().query('SELECT enabled FROM staffly_admin.accounts WHERE user_id=$1',[id])).rows[0]
- return {...userDto(row),platformAdmin:grant?.enabled?'active':grant?'revoked':'none',memberships:memberships.map(m=>({id:m.organization.id,name:m.organization.name,role:m.role})),membershipsTotal,page,pageSize:20}
+ return {...userDto(row),platformAdmin:grant?.enabled?'active':grant?'revoked':'none',memberships:memberships.map(m=>({id:m.organization.id,name:m.organization.name,logoUrl:mediaUrl(m.organization.logoFileId),role:m.role})),membershipsTotal,page,pageSize:20}
 }
 export async function monitoringOnline(raw:unknown){
  const q=querySchema.parse(raw),startedAt=(await monitoringStarted())!

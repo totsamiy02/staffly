@@ -1,0 +1,17 @@
+.admin-root .admin-chart {
+  min-width: 0;
+  .admin-chart-frame { margin-top: 12px; border-radius: 8px; }
+  .admin-chart-frame svg { height: clamp(220px, 20vw, 280px); overflow: visible; }
+  text { font-family: inherit; font-size: 11px; }
+  .admin-chart-line, .admin-chart-line.is-provisional { stroke-dasharray: none; stroke-dashoffset: 0; animation: none; transition: none; }
+  .admin-chart-area { opacity: 1; animation: none; }
+  .admin-chart-series { animation: admin-chart-appear .3s ease-out both; }
+  .admin-legend { gap: 10px 18px; margin-top: 4px; align-items: center; button { font-size: 12px; min-height: 36px; padding: 5px 0; } i { width: 14px; height: 3px; border-radius: 2px; } }
+  .admin-chart-history-note { margin-left: auto; font-size: 11px; color: var(--admin-muted); }
+  .admin-chart-tooltip { border-radius: 10px; padding: 12px 14px; font-size: 12px; min-width: 180px; max-width: calc(100% - 12px); box-shadow: 0 6px 24px rgb(30 22 40 / 8%); backdrop-filter: none; background: var(--admin-surface); i { width: 7px; height: 7px; } small { display: block; margin-top: 7px; font-size: 11px; } }
+  .admin-chart-empty { min-height: 230px; padding: 24px 16px; gap: 7px; color: var(--admin-muted); background: transparent; strong { font-size: 14px; font-weight: 550; color: var(--admin-ink); } > span:last-child { max-width: 270px; font-size: 12px; line-height: 1.7; } }
+  .admin-chart-empty-symbol { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px; background: var(--admin-soft); color: var(--admin-accent); font-size: 20px; margin-bottom: 6px; }
+}
+@keyframes admin-chart-appear { from { opacity: 0; } to { opacity: 1; } }
+@media(max-width:600px) { .admin-root .admin-chart { .admin-chart-frame svg { height: 220px; } .admin-legend { gap: 6px 14px; } .admin-chart-history-note { flex-basis: 100%; margin-left: 0; } } }
+@media(prefers-reduced-motion:reduce) { .admin-root .admin-chart .admin-chart-series { animation: none; } }

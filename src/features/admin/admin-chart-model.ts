@@ -1,5 +1,14 @@
 import { historySegments,historyTime,type HistoryPoint,type HistoryRange } from '../../shared/monitoring-history.ts'
 export const chartKnown=(row:HistoryPoint,key:string)=>row[key]!==null&&row[key]!==undefined&&Number.isFinite(Number(row[key]))
+/** Integer counters never acquire fractional ticks; zero-only series use 0–1. */
+export function chartScale(values:number[],intervals=4){
+ const valid=values.filter(Number.isFinite),peak=Math.max(0,...valid),integer=valid.every(Number.isInteger)
+ if(peak===0)return{max:1,ticks:[0,1]}
+ const raw=peak/Math.max(2,intervals),power=10**Math.floor(Math.log10(raw))
+ const step=Math.max(integer?1:0,[1,2,5,10].map(n=>n*power).find(n=>n>=raw)??power*10)
+ const max=Number((Math.ceil(peak/step)*step).toPrecision(12))
+ return{max,ticks:Array.from({length:Math.round(max/step)+1},(_,i)=>Number((i*step).toPrecision(12)))}
+}
 /** Partial observations remain connected; missing observations remain distinct. */
 export function chartSeries(data:HistoryPoint[],key:string,stepMs:number){
  const runs=historySegments(data.map(row=>({...row,incomplete:false})),key,stepMs)

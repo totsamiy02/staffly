@@ -22,6 +22,7 @@ import { useAdminScroll } from './admin-link.tsx'
 import './admin.scss'
 import './admin-workflow.scss'
 import './admin-shell.scss'
+import './admin-charts.scss'
 
 export default function AdminPage(){
  const {pathname}=useLocation()

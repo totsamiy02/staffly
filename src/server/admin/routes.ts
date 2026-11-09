@@ -11,6 +11,7 @@ import { createOperationsRouter } from './operations/routes.ts'
 import { createManagementRouter } from './management/routes.ts'
 import { clearActionCookie,type ManagementMailer } from './management/actions.ts'
 import { accessState, activity, createChallenge, endAdminSession, lock, setPin, unlock, verifyChallenge, type AdminMailer } from './security.ts'
+import { adminAvatar } from './media.ts'
 import { monitoringEvents } from './events.ts'
 import { globalSearch,attentionState } from './workspace.ts'
 import { adminMeta } from './meta.ts'
@@ -55,6 +56,7 @@ export function createAdminRouter({sendCode=defaultMailer,sendNotice=defaultNoti
   router.use('/operations',createOperationsRouter())
   router.use('/management',createManagementRouter(sendManagementCode))
   router.use('/service',createServiceRouter())
+  router.get('/media/avatars/:fileId',adminAvatar)
   router.get('/monitoring/events',read('EVENTS',request=>monitoringEvents(request.query)))
   router.get('/monitoring/overview',read('OVERVIEW',request=>monitoringOverview(request.query)))
   router.get('/monitoring/organizations',read('ORGANIZATIONS',request=>monitoringOrganizations(request.query)))

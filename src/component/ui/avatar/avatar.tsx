@@ -16,7 +16,7 @@ export default function Avatar({ url, name, className, eager = false }: AvatarPr
     if (container.current) observer.observe(container.current)
     return () => observer.disconnect()
   }, [eager])
-  const privateMedia = !!session?.user && !!url?.startsWith('/api/media/')
+  const privateMedia = !!session?.user && !!url && (url.startsWith('/api/media/') || url.startsWith('/api/admin/media/avatars/'))
   const key = `${session?.user?.id ?? ''}:${url ?? ''}`
   const image = useQuery({ queryKey: ['private-media', key], enabled: privateMedia && visible,
     queryFn: ({ signal }) => session!.previewFile(url!.slice(4), 'GET', AbortSignal.any([signal, AbortSignal.timeout(15000)])),

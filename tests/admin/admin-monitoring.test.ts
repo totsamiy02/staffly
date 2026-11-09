@@ -1,3 +1,6 @@
+import storageRouter from '../../src/server/storage/routes.ts'
+import { replaceUserAvatar, replaceOrganizationLogo } from '../../src/server/storage/image-service.ts'
+import { storage } from '../../src/server/storage/provider.ts'
 import { serviceLifecycleScenarios } from './service-lifecycle-scenarios.ts'
 import { publicContentRouter } from '../../src/server/public-content.ts'
 import { workflowScenarios } from './workflow-scenarios.ts'
@@ -58,7 +61,7 @@ async function expireIdle(browser:Browser){await databasePool.query("UPDATE staf
 describe('Platform administrator boundary and monitoring',()=>{
  before(async()=>{
   hash=await passwordHash(password)
-  const app=express();app.set('trust proxy','loopback');app.use(securityContext);app.use(supportResponses);app.use(express.json({limit:'16kb'}));app.use(cookieParser());app.use('/api/public',publicContentRouter);app.use('/api/auth',authRouter);app.use('/api/admin',createAdminRouter({sendCode:async(email,code)=>{codes.set(email,code)},sendManagementCode:async(email,code)=>{codes.set(email,code)}}));app.use('/api',profileRouter);app.use('/api/support',createSupportRouter());app.get('/api/support-probe/:id',(_q,_s)=>{throw new ApiError(409,'CONCURRENT_UPDATE','Test conflict')})
+  const app=express();app.set('trust proxy','loopback');app.use(securityContext);app.use(supportResponses);app.use(express.json({limit:'16kb'}));app.use(cookieParser());app.use('/api/public',publicContentRouter);app.use('/api/auth',authRouter);app.use('/api/admin',createAdminRouter({sendCode:async(email,code)=>{codes.set(email,code)},sendManagementCode:async(email,code)=>{codes.set(email,code)}}));app.use('/api',profileRouter);app.use('/api',storageRouter);app.use('/api/support',createSupportRouter());app.get('/api/support-probe/:id',(_q,_s)=>{throw new ApiError(409,'CONCURRENT_UPDATE','Test conflict')})
   app.use((error:unknown,_request:express.Request,response:express.Response,_next:express.NextFunction)=>{response.locals.supportError=error;response.status(error instanceof ApiError?error.status:error instanceof ZodError?400:500).json({code:error instanceof ApiError?error.code:'INTERNAL_ERROR',message:error instanceof ApiError?error.message:'Не удалось выполнить действие.'})})
   server=app.listen(0,'127.0.0.1');await new Promise<void>(r=>server.once('listening',r));const address=server.address();assert(address&&typeof address!=='string');base=`http://127.0.0.1:${address.port}`
  })
@@ -74,6 +77,35 @@ describe('Platform administrator boundary and monitoring',()=>{
   await databasePool.query('DELETE FROM staffly_admin.audit_events WHERE user_id=ANY($1::uuid[])',[users])
   await closeAdminDatabase();await prisma.$disconnect()
  })
+ it('admin portraits expose attached images only to an unlocked elevated session',async()=>{
+  const viewer=await account(),owner=await account(false)
+  const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=','base64')
+  const avatar=await replaceUserAvatar(owner.userId,png),fileId=avatar!.split('/').at(-1)!,url='/api/admin/media/avatars/'+fileId
+  assert.equal((await viewer.request(url)).status,403)
+  await viewer.ready()
+  assert.equal((await viewer.request(avatar!)).status,404,'Ordinary avatar visibility is not broadened')
+  assert.equal((await owner.request(url)).status,403,'An ordinary signed-in user has no administrative media access')
+  const image=await viewer.request(url);assert.equal(image.status,200);assert.match(image.headers.get('content-type')??'',/^image\/webp/);assert.match(image.headers.get('cache-control')??'',/no-store/);assert((await image.arrayBuffer()).byteLength>0)
+  const profile=await viewer.request('/api/admin/monitoring/users/'+owner.userId).then(r=>r.json());assert.equal(profile.avatarUrl,url)
+  const users=await viewer.request('/api/admin/monitoring/users?search='+owner.userId).then(r=>r.json());assert.equal(users.items[0].avatarUrl,url)
+  const org=await createBusinessOrganization(owner.userId,{name:'Portrait test '+suffix,description:null,timezone:'Europe/Moscow'});organizations.push(org.id)
+  const logo=await replaceOrganizationLogo(owner.userId,org.id,png)
+  const orgs=await viewer.request('/api/admin/monitoring/organizations?search='+org.id).then(r=>r.json());assert.equal(orgs.items[0].logoUrl,logo)
+  const memberships=await viewer.request('/api/admin/monitoring/users/'+owner.userId).then(r=>r.json());assert.equal(memberships.memberships[0].logoUrl,logo)
+  assert.equal((await viewer.request('/api/admin/media/avatars/'+logo!.split('/').at(-1))).status,404,'The route cannot serve organization/document files')
+  await viewer.request('/api/admin/lock',{});assert.equal((await viewer.request(url)).status,423)
+  await viewer.request('/api/admin/unlock',{pin})
+  const replacement=await replaceUserAvatar(owner.userId,png);assert.equal((await viewer.request(url)).status,404,'Replaced avatars are no longer attached')
+  const replacementId=replacement!.split('/').at(-1)!
+  const original=storage.read;let release!:()=>void,started!:()=>void
+  const gate=new Promise<void>(resolve=>{release=resolve}),began=new Promise<void>(resolve=>{started=resolve})
+  storage.read=async key=>{const contents=await original(key);started();await gate;return contents}
+  try{
+   const response=viewer.request('/api/admin/media/avatars/'+replacementId);await began
+   await viewer.request('/api/admin/lock',{});release();assert.equal((await response).status,423,'Lock during storage read cannot publish the image')
+  }finally{release();storage.read=original}
+ })
+
  it('protects every operations route with ordinary authorization, elevation and server PIN lock',async()=>{
   const anonymous=new Browser(),ordinary=await account(false),admin=await account()
   const id=randomUUID(),paths=['/operations/service','/operations/jobs','/operations/jobs/report/'+id,'/operations/support','/operations/support/'+id]

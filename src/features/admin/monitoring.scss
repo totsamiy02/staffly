@@ -1,0 +1,50 @@
+.admin-root .admin-users {
+  .admin-table-wrap table { table-layout: auto; }
+  .admin-table-wrap th:last-child { width: 1%; }
+  .admin-table-wrap td:last-child { text-align: right; padding-right: 16px; }
+  .admin-table-wrap .admin-user-actions { justify-content: flex-end; flex-wrap: nowrap; gap: 8px; }
+  .admin-user-actions .admin-btn { min-height: 38px; border-radius: 9px; padding: 8px 12px; font-size: 12px; white-space: nowrap; flex: none; .admin-icon { width: 14px; height: 14px; } }
+  .admin-user-profile { background: var(--admin-soft); border-color: transparent; color: var(--admin-accent); }
+  .admin-person-trigger { min-width: 0; > span:last-child { min-width: 0; overflow-wrap: anywhere; } }
+  .admin-record-actions > div { display: block; }
+  .admin-record-actions .admin-user-actions { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1.3fr); gap: 8px; width: 100%; .admin-btn { min-width: 0; min-height: 42px; padding: 8px; white-space: normal; } }
+  .admin-stat { transition: none; &:hover { transform: none; box-shadow: none; } }
+}
+.admin-root .admin-analytics {
+  container: analytics / inline-size;
+  min-width: 0;
+  .admin-page-head { align-items: flex-start; gap: 20px; flex-wrap: wrap; p { font-size: 13px; } }
+  .admin-range { margin: 0; border-radius: 9px; }
+  > .admin-panel, > .admin-stats { margin-bottom: 20px; }
+  .admin-panel { padding: 22px; border-radius: 16px; min-width: 0; }
+  .admin-panel > header { align-items: flex-start; h2 { line-height: 1.4; } p { font-size: 12px; line-height: 1.6; } }
+  .admin-stat { border-radius: 16px; transition: none; &:hover { transform: none; box-shadow: none; } > div { min-height: 40px; align-items: flex-start; } strong { font-size: 30px; } }
+  .admin-lifetime-stats { display: grid; grid-template-columns: repeat(6,minmax(0,1fr)); gap: 20px; > div { min-width: 0; padding: 2px 0; border: 0; } strong { font-size: 28px; font-weight: 600; letter-spacing: -.7px; line-height: 1.2; overflow-wrap: anywhere; } span { margin-top: 8px; font-size: 12px; line-height: 1.5; } }
+  .admin-analytics-grid { display: grid; grid-template-columns: minmax(0,1.7fr) minmax(290px,1fr); gap: 20px; margin-bottom: 20px; > .admin-panel { display: flex; flex-direction: column; } .admin-chart { margin-top: auto; } }
+  .admin-activation-list { display: grid; gap: 22px; margin-top: 6px; }
+  .admin-funnel-row { margin: 0; > div:first-child { align-items: flex-start; gap: 16px; margin-bottom: 9px; font-size: 13px; } strong { font-size: 13px; font-weight: 550; } > small { display: block; margin-top: 6px; font-size: 12px; } }
+  .admin-funnel-bar { height: 7px; border-radius: 4px; background: var(--admin-soft); i { height: 100%; min-width: 0; padding: 0; background: var(--admin-chart-purple); border-radius: inherit; animation: none; } }
+  .admin-feature-row { display: block; margin: 0 0 22px; > div:first-child { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 9px; font-size: 13px; } strong { color: var(--admin-ink); font-weight: 550; } .admin-meter { width: 100%; height: 7px; } &:last-child { margin-bottom: 0; } }
+  .admin-meter i { animation: none; transition: width .3s; }
+  .admin-heatmap { grid-template-columns: minmax(135px,1.4fr) repeat(6,minmax(54px,1fr)); gap: 8px; min-width: 530px; font-size: 12px; > span { padding: 10px 8px; } .admin-heat { height: 44px; border-radius: 7px; animation: none; transition: none; color: var(--admin-ink); &:hover { transform: none; box-shadow: none; } &.is-future { background: transparent; opacity: .5; } } }
+  .admin-cohort-caption { display: flex; align-items: center; gap: 8px; margin-top: 14px; font-size: 12px; color: var(--admin-muted); }
+}
+@container analytics (max-width:1000px) {
+  .admin-root .admin-analytics {
+    .admin-analytics-grid { grid-template-columns: minmax(0,1fr); }
+    .admin-lifetime-stats { grid-template-columns: repeat(3,minmax(0,1fr)); gap: 24px 16px; }
+    .admin-stats { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  }
+}
+@container analytics (max-width:600px) {
+  .admin-root .admin-analytics {
+    .admin-panel { padding: 18px; }
+    .admin-panel h2 { font-size: 15px; }
+    .admin-lifetime-stats { grid-template-columns: repeat(2,minmax(0,1fr)); }
+    .admin-lifetime-stats strong { font-size: 26px; }
+    .admin-stats { gap: 12px; }
+    .admin-stat { padding: 16px; > div { font-size: 12px; min-height: 54px; } strong { font-size: 26px; } }
+    .admin-range { flex-wrap: wrap; button { min-height: 36px; } }
+    .admin-analytics-grid { gap: 16px; }
+  }
+}
