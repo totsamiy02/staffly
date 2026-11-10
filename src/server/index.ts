@@ -1,4 +1,5 @@
 import { publicContentRouter,maintenanceWriteGate } from './public-content.ts'
+import { createSiteRouter } from './site/router.ts'
 import { organizationServiceGate,suspendedWriteError } from './organizations/service-state.ts'
 import { securityCorrelationId } from './security/journal.ts'
 import adminRouter from './admin/routes.ts'
@@ -63,7 +64,9 @@ app.use((request, _response, next) => {
   if (request.method === 'GET' || request.method === 'HEAD') requestReads.run(new Map(), next)
   else next()
 })
-app.use(helmet({ contentSecurityPolicy: { directives: { imgSrc: ["'self'", 'data:', 'blob:'], frameSrc: ["'self'", 'blob:'] } } }))
+// HTML is now served through API as well as edge; keep the existing viewer
+// permissions from nginx (Wasm and local blob workers/media) in both policies.
+app.use(helmet({ contentSecurityPolicy: { directives: { scriptSrc: ["'self'", "'wasm-unsafe-eval'"], workerSrc: ["'self'", 'blob:'], mediaSrc: ["'self'", 'blob:'], imgSrc: ["'self'", 'data:', 'blob:'], frameSrc: ["'self'", 'blob:'] } } }))
 app.use('/api/organizations/:organizationId/shifts/batch', express.json({ limit: '64kb' }))
 app.use('/api/organizations/:organizationId/documents/:documentId/assign', express.json({ limit: '64kb' }))
 app.use('/api/organizations/:organizationId/events', express.json({ limit: '64kb' }))
@@ -75,6 +78,7 @@ app.use('/api/organizations/:organizationId/vacation-campaigns',express.json({li
 app.use(express.json({ limit: '16kb' }))
 app.use(cookieParser())
 app.use('/api', (request, response, next) => {
+  response.set('X-Robots-Tag', 'noindex, nofollow')
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     const origin = request.get('origin')
     if ((origin && origin !== appUrl) || (!origin && request.get('cookie'))) {
@@ -151,6 +155,7 @@ app.use('/api', documentsRouter)
 app.use('/api', eventsRouter)
 app.use('/api', teamPlanningRouter)
 app.use('/api', (_request, response) => response.status(404).json({ code: 'API_NOT_FOUND', message: 'Запрошенный адрес не найден.' }))
+app.use(createSiteRouter({ origin: appUrl, publications: async () => (await databasePool.query('SELECT key,title,left(body,1000) AS body,metadata FROM public.platform_public_content')).rows }))
 app.use((error: unknown, request: express.Request, response: express.Response, _next: express.NextFunction) => {
   if (response.headersSent || response.destroyed) { response.destroy(); return }
   if (error && typeof error === 'object' && 'type' in error && ['entity.parse.failed', 'request.aborted', 'request.size.invalid'].includes(String(error.type))) {

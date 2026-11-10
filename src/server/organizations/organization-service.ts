@@ -4,6 +4,7 @@ import { requireCapacity, subscriptionSnapshot } from '../subscriptions/access.t
 import { effectiveSubscription, TRIAL_DAYS } from '../../app/subscriptions/plans.ts'
 import { syncSubscriptionStorageLimit } from '../subscriptions/storage-limit.ts'
 import { hasPermission, requirePermission, ensureAccessRoles, locationsFor } from './access/access.ts'
+import { revokeMemberAccess } from './access/member-lifecycle.ts'
 import { locationMemberWhere, scopedLocationId } from './location-context.ts'
 import { listNotificationHistory } from './notification-service.ts'
 import { onlineSessions } from '../profile/presence.ts'
@@ -228,8 +229,7 @@ export async function removeMember(actorUserId: string, organizationId: string, 
     await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId}, 1))::text`
     await tx.documentAcknowledgement.updateMany({ where: { memberId: target.id, acknowledgedAt: null, cancelledAt: null, document: { organizationId } }, data: { cancelledAt: now } })
     await tx.workShift.updateMany({ where: { organizationId, memberId: target.id, status: 'SCHEDULED', scheduledStartAt: { gt: now } }, data: { status: 'CANCELLED', cancelledAt: now, cancelledByMemberId: actor.id, cancellationReason: 'Сотрудник покинул организацию' } })
-    await tx.locationMember.updateMany({ where: { memberId: target.id, organizationId, leftAt: null }, data: { leftAt: now } })
-    await tx.locationTeamMember.deleteMany({ where: { memberId: target.id, organizationId } })
+    await revokeMemberAccess(tx, organizationId, target.id, now)
     await tx.organizationMember.update({ where: { id: target.id }, data: { leftAt: now } })
     await recordSecurityEvent(tx, { action: 'MEMBER_DEPARTED', userId: actorUserId, organizationId, resourceType: 'MEMBER', resourceId: target.id })
     const pending = await tx.organizationRequest.findMany({ where: { organizationId, createdByMemberId: target.id, status: 'PENDING' }, select: { id: true } })

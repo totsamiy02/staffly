@@ -31,7 +31,7 @@ function LegalDocument({ title, updatedAt, sections }: LegalDocumentProps) {
         </header>
 
         <div className="legal-document__content">
-          {published?<PublishedMarkdown>{published.body}</PublishedMarkdown>:sections.map((section, index) => (
+          {published?<PublishedMarkdown preservedAnchors={sections.flatMap(section=>section.id?[section.id]:[])}>{published.body}</PublishedMarkdown>:sections.map((section, index) => (
             <section id={section.id} key={section.title}>
               <h2>
                 {index + 1}. {section.title}

@@ -1,6 +1,7 @@
 import { assertOrganizationAvailable } from './service-state.ts'
 import { requireCapacity, requireLocationInPlan } from '../subscriptions/access.ts'
-import { requirePermission } from './access/access.ts'
+import { ensureAccessRoles, requirePermission } from './access/access.ts'
+import { revokeMemberAccess } from './access/member-lifecycle.ts'
 import { locationWhere } from './location-context.ts'
 import { createHash, createCipheriv, createDecipheriv, randomBytes, randomInt } from 'node:crypto'
 import { prisma } from '../db.ts'
@@ -153,7 +154,7 @@ export async function previewCodeInvitation(userId: string, code: string) {
   const invite = await prisma.organizationInvite.findUnique({ where: { tokenHash: digest(code) }, include: { organization: true, invitedBy: { select: { email: true, firstName: true, lastName: true, middleName: true } } } })
   validateInvitation(invite, 'CODE')
   const membership = await prisma.organizationMember.findUnique({ where: { organizationId_userId: { organizationId: invite.organizationId, userId } } })
-  if (membership && !membership.leftAt) throw new ApiError(409, 'ALREADY_MEMBER', 'Вы уже состоите в этой организации.')
+  if (membership && !membership.leftAt && (!invite.locationId || await prisma.locationMember.findFirst({ where: { memberId: membership.id, locationId: invite.locationId, leftAt: null } }))) throw new ApiError(409, 'ALREADY_MEMBER', 'Вы уже состоите в этой организации.')
   return { organization: { id: invite.organization.id, name: invite.organization.name, logoUrl: mediaUrl(invite.organization.logoFileId) }, invitedBy: inviterIdentity(invite.invitedBy), expiresAt: invite.expiresAt }
 }
 
@@ -196,10 +197,20 @@ async function acceptInvitation(userId: string, userEmail: string, lookup: { id:
     if (!claimed.count) throw new ApiError(409, 'INVITATION_ALREADY_USED', 'Приглашение уже использовано.')
     if (invite.locationId && !await tx.organizationLocation.findFirst({ where: { id: invite.locationId, organizationId: invite.organizationId, archivedAt: null } })) throw new ApiError(410, 'LOCATION_CLOSED', 'Точка приглашения закрыта.')
     if (!existing || existing.leftAt) await requireCapacity(tx, invite.organizationId, 'members')
-    const member = existing ? existing.leftAt ? await tx.organizationMember.update({ where: { id: existing.id }, data: { leftAt: null, role: 'MEMBER' } }) : existing : await tx.organizationMember.create({ data: { organizationId: invite.organizationId, userId, role: 'MEMBER' } })
+    // Older departures may have retained roles or placements. A fresh invitation
+    // must never reactivate these privileges, including across other points.
+    if (existing?.leftAt) await revokeMemberAccess(tx, invite.organizationId, existing.id, new Date())
+    const member = existing ? existing.leftAt ? await tx.organizationMember.update({ where: { id: existing.id }, data: { leftAt: null, role: 'MEMBER', accessRoleId: null, accessConfigured: false } }) : existing : await tx.organizationMember.create({ data: { organizationId: invite.organizationId, userId, role: 'MEMBER' } })
     const locationId = invite.locationId ?? (await tx.organizationLocation.findFirstOrThrow({ where: { organizationId: invite.organizationId, archivedAt: null }, orderBy: { createdAt: 'asc' } })).id
     await requireLocationInPlan(tx, invite.organizationId, locationId)
     await tx.locationMember.upsert({ where: { locationId_memberId: { locationId, memberId: member.id } }, create: { organizationId: invite.organizationId, locationId, memberId: member.id }, update: { leftAt: null, role: 'MEMBER' } })
+    if (member.accessConfigured) {
+      const roles = await ensureAccessRoles(tx, invite.organizationId)
+      const role = roles.find(item => item.systemCode === 'MEMBER')!
+      // Explicit access does not inherit LocationMember.role. Grant the invited
+      // point's standard role, preserving any role already chosen by the owner.
+      await tx.accessAssignment.upsert({ where: { memberId_locationId: { memberId: member.id, locationId } }, create: { organizationId: invite.organizationId, memberId: member.id, locationId, roleId: role.id }, update: {} })
+    }
     return { organizationId: invite.organizationId }
   }, { isolationLevel: 'ReadCommitted' })
 }

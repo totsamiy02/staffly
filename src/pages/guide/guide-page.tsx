@@ -91,7 +91,7 @@ function GuideArticleView({ article }: { article: GuideArticle }) {
     <div className="guide-reading-layout"><GuideJourney collection={collection} activeSlug={article.slug}/><article className="guide-article-body">
       <header className="guide-article-heading"><p className="guide-article-chapter"><span>{String(chapterNumber).padStart(2, '0')}</span>{collection.title}</p><h1>{published?.title??article.title}</h1>{!published&&<p>{article.summary}</p>}<div className="guide-article-meta"><span>{audienceLabels[article.audience]}</span><span>{readingMinutes(article)} мин чтения</span><button type="button" onClick={() => void copyLink()}><GuideIcon name="link" />Скопировать ссылку</button></div></header>
 
-      {published?<PublishedMarkdown>{published.body}</PublishedMarkdown>:<GuideArticleContent article={article} />}
+      {published?<PublishedMarkdown preservedAnchors={[...(guideArticleBySlug.get(article.slug)?.sections.map(s=>s.id)??[]),...(guideArticleBySlug.get(article.slug)?.questions?.length?['questions']:[])]}>{published.body}</PublishedMarkdown>:<GuideArticleContent article={article} />}
       {article.related.length > 0 && <section className="guide-related"><h2>По этой теме</h2><div className="guide-article-list">{article.related.map(slug => guideArticleBySlug.get(slug)).filter((item): item is GuideArticle => Boolean(item)).map((item, index) => <ArticleRow key={item.slug} article={item} number={index + 1} />)}</div></section>}
       <footer className="guide-article-foot"><span>Обновлено {new Date(article.updated + 'T12:00:00').toLocaleDateString('ru-RU')}</span><Link to="/app">Перейти к работе</Link></footer>
     </article></div>
@@ -104,7 +104,6 @@ export default function GuidePage() {
   const location = useLocation()
   const catalog=usePublishedGuideCatalogState(),articleList=mergeGuideArticles(guideArticles,catalog.data??[])
   const article = slug ? articleList.find(a=>a.slug===slug) : undefined
-  const activeCollection = article ? guideCollectionFor(article.category) : guideCollections.find(item => item.id === categoryId) ?? (guideCategories.some(item => item.id === categoryId) ? guideCollectionFor(categoryId as GuideArticle['category']) : undefined)
   const home = location.pathname === '/guide' || location.pathname === '/guide/'
   const main = useRef<HTMLElement>(null)
   const root = useRef<HTMLDivElement>(null)
@@ -118,11 +117,6 @@ export default function GuidePage() {
     observer.observe(header)
     return () => observer.disconnect()
   }, [])
-  useEffect(() => {
-    const oldTitle = document.title
-    document.title = `${article?.title ?? activeCollection?.title ?? 'Справочник'} — Staffly`
-    return () => { document.title = oldTitle }
-  }, [article, activeCollection])
   useEffect(() => {
     let anchor = location.hash.slice(1)
     try { anchor = decodeURIComponent(anchor) } catch { /* Keep malformed fragments harmless. */ }

@@ -8,6 +8,7 @@ import { prisma } from '../db.ts'
 import { ApiError } from '../api-error.ts'
 import { getMembership } from './access/permissions.ts'
 import { hasPermission, requirePermission } from './access/access.ts'
+import { revokeMemberAccess } from './access/member-lifecycle.ts'
 import { locationContext } from './location-context.ts'
 import { mediaUrl } from '../storage/image-service.ts'
 import { eligible, closeOffer } from '../schedule/offer-service.ts'
@@ -167,15 +168,17 @@ export async function confirmDeparture(userId: string, organizationId: string, m
           await mutatePlannedShift(tx, actor, choice.action === 'cancel' ? { current: shift, reason } : { current: shift, startAt: shift.scheduledStartAt, endAt: shift.scheduledEndAt, input: { memberId: choice.memberId!, startDate: '', startTime: '', endDate: '', endTime: '', breakMinutes: shift.breakMinutes, positionId: shift.positionId, description: shift.description } })
         })
       }
-      const scopeWhere = { organizationId, memberId, ...(input.scope === 'location' ? { locationId: data.actor.locationId } : {}) }
-      await tx.locationMember.updateMany({ where: { ...scopeWhere, leftAt: null }, data: { leftAt: data.now } })
-      await tx.locationTeamMember.deleteMany({ where: { organizationId, memberId, ...(input.scope === 'location' ? { team: { locationId: data.actor.locationId } } : {}) } })
-      await tx.accessAssignment.deleteMany({ where: scopeWhere })
-      // End temporary access too, without destroying transfer history.
-      if (data.transfers.length) await tx.locationTransfer.updateMany({ where: { id: { in: data.transfers.map(t => t.id) } }, data: { revokedAt: data.now } })
       if (input.scope === 'organization') {
+        await revokeMemberAccess(tx, organizationId, memberId, data.now)
         await tx.organizationMember.update({ where: { id: memberId }, data: { leftAt: data.now } })
         await tx.documentAcknowledgement.updateMany({ where: { memberId, acknowledgedAt: null, cancelledAt: null, document: { organizationId } }, data: { cancelledAt: data.now } })
+      } else {
+        const scopeWhere = { organizationId, memberId, locationId: data.actor.locationId }
+        await tx.locationMember.updateMany({ where: { ...scopeWhere, leftAt: null }, data: { leftAt: data.now } })
+        await tx.locationTeamMember.deleteMany({ where: { organizationId, memberId, team: { locationId: data.actor.locationId } } })
+        await tx.accessAssignment.deleteMany({ where: scopeWhere })
+        // A point departure preserves organization-wide access and other points.
+        if (data.transfers.length) await tx.locationTransfer.updateMany({ where: { id: { in: data.transfers.map(t => t.id) } }, data: { revokedAt: data.now } })
       }
       const result: DepartureResult = { scope: input.scope, locationId: data.actor.locationId, cancelled: input.choices.filter(c => c.action === 'cancel').length, reassigned: input.choices.filter(c => c.action === 'reassign').length, retainedCurrent: current.length }
       await recordSecurityEvent(tx, { action: 'MEMBER_DEPARTED', userId, organizationId, resourceType: 'MEMBER', resourceId: memberId })

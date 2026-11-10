@@ -2,11 +2,13 @@ import { usePublishedContent,usePublishedGuideCatalog,PublishedMarkdown } from '
 import GuideExampleBlock from './guide-example-block.tsx'
 import type { GuideArticle } from './content/types.ts'
 import GuideIcon from './guide-icon.tsx'
+import { guideArticleBySlug } from './content/index.ts'
 
 /** Complete content shared by module readers and direct article links. */
 export default function GuideArticleContent({ article, continuous = false }: { article: GuideArticle; continuous?: boolean }) {
   const published=usePublishedGuideCatalog(),current=usePublishedContent('guide:'+article.slug,published.some(p=>p.key==='guide:'+article.slug)).item
-  if(current)return <PublishedMarkdown anchorPrefix={continuous?article.slug+'-':''}>{current.body}</PublishedMarkdown>
+  const base=guideArticleBySlug.get(article.slug)
+  if(current)return <PublishedMarkdown anchorPrefix={continuous?article.slug+'-':''} preservedAnchors={[...(base?.sections.map(s=>s.id)??[]),...(base?.questions?.length?['questions']:[])]}>{current.body}</PublishedMarkdown>
   const Heading = continuous ? 'h3' : 'h2'
   const StepHeading = continuous ? 'h4' : 'h3'
   return <>

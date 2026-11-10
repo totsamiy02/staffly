@@ -5,8 +5,8 @@ import type { Plugin } from 'vite'
 // requests are never buffered or replayed by the proxy.
 export function devApiProxy(port = 3001): Plugin {
   return { name: 'staffly-dev-api', configureServer(server) {
-    server.middlewares.use('/api', (request, response) => {
-      const upstream = httpRequest({ hostname: '127.0.0.1', port, path: '/api' + request.url, method: request.method, headers: request.headers }, result => {
+    for (const base of ['/api', '/robots.txt', '/sitemap.xml']) server.middlewares.use(base, (request, response) => {
+      const upstream = httpRequest({ hostname: '127.0.0.1', port, path: base + (base === '/api' ? request.url : ''), method: request.method, headers: request.headers }, result => {
         response.writeHead(result.statusCode ?? 502, result.headers)
         result.on('error', () => response.destroy())
         result.pipe(response)

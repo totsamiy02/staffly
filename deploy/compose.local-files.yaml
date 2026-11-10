@@ -11,5 +11,7 @@ services:
     volumes: *files
   worker:
     volumes: *files
+  maintenance:
+    volumes: ['local-files:/var/lib/staffly/storage:ro']
 volumes:
   local-files:

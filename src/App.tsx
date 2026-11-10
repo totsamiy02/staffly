@@ -8,6 +8,7 @@ import ProtectedRoute from './pages/app/shell/protected-route.tsx'
 import StatusPage from './pages/error/status-page.tsx'
 import ThemeToggle from './component/ui/theme-toggle/theme-toggle.tsx'
 import RouteAccessibility from './app/route/route-accessibility.tsx'
+import RouteMetadata from './app/route/route-metadata.tsx'
 
 const PrivacyPolicy = lazy(() => import('./pages/legal/privacy-policy.tsx'))
 const PersonalDataConsent = lazy(() => import('./pages/legal/personal-data-consent.tsx'))
@@ -27,6 +28,7 @@ const UserSettingsPage = lazy(() => import('./pages/app/settings/account/user-se
 const GuidePage = lazy(() => import('./pages/guide/guide-page.tsx'))
 
 const HomePage = lazy(() => import('./pages/home/home-page.tsx'))
+const ContactsPage = lazy(() => import('./pages/legal/contacts.tsx'))
 const AdminPage = lazy(() => import('./features/admin/admin-page.tsx'))
 
 function App() {
@@ -40,6 +42,7 @@ function App() {
   return (
     <>
       <RouteAccessibility />
+      <RouteMetadata />
       <PublicServiceNotice />
       {!hidePublicFrame && <Header />}
       {isAuthPage && <div className="auth-theme-control"><ThemeToggle /></div>}
@@ -64,6 +67,7 @@ function App() {
         <Route path="/app/settings" element={<ProtectedRoute><UserSettingsPage /></ProtectedRoute>} />
         <Route path="/app/organizations/:organizationId/*" element={<ProtectedRoute><OrganizationLayout /></ProtectedRoute>} />
         <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+        <Route path="/contacts" element={<ContactsPage />} />
         <Route path="/personal-data-consent" element={<PersonalDataConsent />} />
         <Route path="/terms" element={<Terms />} />
         <Route path="/offer" element={<Offer />} />

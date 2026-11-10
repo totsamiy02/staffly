@@ -4,7 +4,7 @@ export function interfaceRoutes(fixture) {
   const root = `/app/organizations/${fixture.org.id}`
   return [
     ['home', '/', false], ['auth', '/auth', false], ['register', '/auth?mode=register', false], ['verify', '/verify-email', false], ['forgot', '/forgot-password', false], ['reset', '/reset-password', false], ['yandex', '/auth/yandex', false],
-    ['privacy', '/privacy-policy', false], ['consent', '/personal-data-consent', false], ['terms', '/terms', false], ['offer', '/offer', false], ['not-found', '/not-a-real-page', false],
+    ['contacts', '/contacts', false], ['privacy', '/privacy-policy', false], ['consent', '/personal-data-consent', false], ['terms', '/terms', false], ['offer', '/offer', false], ['not-found', '/not-a-real-page', false],
     ['guide', '/guide', false], ['guide-category', '/guide/category/management', false], ['guide-article', '/guide/profile', false], ['guide-search', '/guide?q=смена', false],
     ...guideCollections.filter(c => c.id !== 'management').map(c => [`guide-category-${c.id}`, '/guide/category/' + c.id, false]),
     ['guide-search-empty', '/guide?q=несуществующийзапрос123', false], ['guide-member-filter', '/guide?audience=member', false],

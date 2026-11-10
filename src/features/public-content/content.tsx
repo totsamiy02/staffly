@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { guideExampleIds,type GuideExampleId } from '../../pages/guide/content/types.ts'
 /* oxlint-disable react/only-export-components -- Public content hook and renderer share the contract. */
-import { Children,isValidElement,lazy,Suspense,useEffect,useState,type ReactNode } from 'react'
+import { Children,isValidElement,lazy,Suspense,useEffect,useLayoutEffect,useRef,useState,type ReactNode } from 'react'
 import { useLocation } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -23,15 +23,22 @@ export function mergeGuideArticles(original:GuideArticle[],published:PublishedCo
  const map=new Map(original.map(a=>[a.slug,a]));for(const item of published){const slug=item.key.replace(/^guide:/,''),base=map.get(slug);if(query&&item.matches===false){map.delete(slug);continue}map.set(slug,{slug,category:item.metadata?.category??base?.category??'start',title:item.title,summary:item.metadata?.summary??item.summary??item.body?.replace(/[#*`]/g,'').slice(0,180)??'',audience:item.metadata?.audience??base?.audience??'everyone',updated:item.effective_at.slice(0,10),publishedReadingMinutes:item.reading_minutes,keywords:query?query.split(/\s+/):[],sections:[],related:base?.related??[],sources:base?.sources??[]})}return [...map.values()]
 }
 function headingText(value:ReactNode):string{return Children.toArray(value).map(child=>typeof child==='string'||typeof child==='number'?String(child):isValidElement<{children?:ReactNode}>(child)?headingText(child.props.children):'').join('')}
-export function PublishedMarkdown({children,anchorPrefix=''}:{children:string;anchorPrefix?:string}){
+export function PublishedMarkdown({children,anchorPrefix='',preservedAnchors=[]}:{children:string;anchorPrefix?:string;preservedAnchors?:string[]}){
+ const root=useRef<HTMLDivElement>(null),anchors=preservedAnchors.join('|')
+ useLayoutEffect(()=>{
+  if(!root.current)return
+  const existing=new Set([...root.current.querySelectorAll('[id]')].map(node=>node.id)),aliases:HTMLElement[]=[]
+  for(const id of anchors.split('|').filter(Boolean)){const full=anchorPrefix+id;if(!existing.has(full)){const alias=document.createElement('span');alias.id=full;alias.setAttribute('aria-hidden','true');root.current.prepend(alias);aliases.push(alias);existing.add(full)}}
+  return()=>aliases.forEach(node=>node.remove())
+ },[children,anchors,anchorPrefix])
  const heading=(Tag:'h2'|'h3',value:ReactNode)=>{const parts=Children.toArray(value),last=parts.at(-1),match=typeof last==='string'?last.match(/\s*\{#([a-zA-Z0-9_-]{1,100})\}$/):null;if(match&&typeof last==='string')parts[parts.length-1]=last.slice(0,-match[0].length);const id=anchorPrefix+(match?.[1]??headingText(parts).toLowerCase().replace(/[^\p{L}\p{N}]+/gu,'-').replace(/^-|-$/g,''));return <Tag id={id}>{parts}</Tag>}
- return <div className="published-content"><ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml components={{
+ return <div ref={root} className="published-content"><ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml components={{
  a:({children,href})=><a href={href?.startsWith('#')?'#'+anchorPrefix+href.slice(1):href} rel="noreferrer">{children}</a>,img:({alt})=><span>{alt}</span>,h2:({children})=>heading('h2',children),h3:({children})=>heading('h3',children),
  pre:({children,node})=>node?.children.some(child=>child.type==='element'&&child.properties?.className?.toString().includes('language-staffly-example'))?<div className="published-guide-example">{children}</div>:<pre>{children}</pre>,
  code:({children,className})=>className==='language-staffly-example'&&guideExampleIds.includes(String(children).trim() as GuideExampleId)?<Suspense fallback={<p role="status">Загружаем пример…</p>}><Example example={String(children).trim() as GuideExampleId}/></Suspense>:<code className={className}>{children}</code>
  }}>{children}</ReactMarkdown></div>
 }
-export function PublicContentSlot({name,children}:{name:string;children?:ReactNode}){const {item}=usePublishedContent(name);return item?<section className="public-content-section">{name==='home'?<h1>{item.title}</h1>:<h2>{item.title}</h2>}<PublishedMarkdown>{item.body}</PublishedMarkdown></section>:children??null}
+export function PublicContentSlot({name,children}:{name:string;children?:ReactNode}){const {item}=usePublishedContent(name),{pathname}=useLocation();return item?<section className="public-content-section">{name==='home'||pathname==='/contacts'?<h1>{item.title}</h1>:<h2>{item.title}</h2>}<PublishedMarkdown preservedAnchors={name==='home'?['about','benefits','pricing']:name==='contacts'?['contacts']:[]}>{item.body}</PublishedMarkdown></section>:children??null}
 export function PublicServiceNotice(){
  const {pathname}=useLocation(),announcement=usePublishedContent('announcement',!pathname.startsWith('/admin')),[windows,setWindows]=useState<Array<{id:string;starts_at:string;ends_at:string;announcement:string}>>([])
  useEffect(()=>{if(pathname.startsWith('/admin'))return;const controller=new AbortController();const read=()=>void fetch('/api/public/service-notice',{signal:controller.signal,credentials:'omit'}).then(r=>r.ok?r.json():{windows:[]}).then(r=>{if(!controller.signal.aborted)setWindows(r.windows)}).catch(()=>{});read();const timer=setInterval(read,30000);return()=>{controller.abort();clearInterval(timer)}},[pathname])
