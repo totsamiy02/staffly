@@ -18,7 +18,7 @@ const count=()=>performanceSnapshot().measurements.sql?.count??0
 const code=(c:string)=>(e:unknown)=>!!e&&typeof e==='object'&&'code' in e&&e.code===c
 async function member(name:string,locationId=first,options:{legacy?:boolean;global?:boolean;left?:boolean;deleted?:boolean;roleId?:string}={}) {
   const user=await prisma.user.create({data:{email:`batch-${randomUUID()}@example.test`,passwordHash:'test',emailVerifiedAt:new Date(),deletedAt:options.deleted?new Date():null}});users.push(user.id)
-  const m=await prisma.organizationMember.create({data:{organizationId:org,userId:user.id,role:options.legacy?'ADMIN':'MEMBER',accessConfigured:!options.legacy,accessRoleId:options.global?options.roleId??reviewerRole:null,leftAt:options.left?new Date():null}})
+  const m=await prisma.organizationMember.create({data:{organizationId:org,userId:user.id,joinedAt:new Date(Date.now()-86400000),role:options.legacy?'ADMIN':'MEMBER',accessConfigured:!options.legacy,accessRoleId:options.global?options.roleId??reviewerRole:null,leftAt:options.left?new Date():null}})
   await prisma.locationMember.create({data:{organizationId:org,locationId,memberId:m.id,role:options.legacy?'ADMIN':'MEMBER'}})
   if(!options.legacy&&!options.global)await prisma.accessAssignment.create({data:{organizationId:org,locationId,memberId:m.id,roleId:options.roleId??reviewerRole}})
   members[name]=m.id;return m

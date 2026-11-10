@@ -1,8 +1,7 @@
 import { organizationAvailable } from './service-state.ts'
 import { recordSecurityEvent } from '../security/journal.ts'
 import { requireCapacity, subscriptionSnapshot } from '../subscriptions/access.ts'
-import { effectiveSubscription, TRIAL_DAYS } from '../../app/subscriptions/plans.ts'
-import { syncSubscriptionStorageLimit } from '../subscriptions/storage-limit.ts'
+import { effectiveSubscription } from '../../app/subscriptions/plans.ts'
 import { hasPermission, requirePermission, ensureAccessRoles, locationsFor } from './access/access.ts'
 import { revokeMemberAccess } from './access/member-lifecycle.ts'
 import { locationMemberWhere, scopedLocationId } from './location-context.ts'
@@ -19,14 +18,9 @@ export type CreateOrganizationInput = { initialPlan?: 'FREE' | 'TRIAL'; name: st
 export type UpdateOrganizationInput = Pick<CreateOrganizationInput, 'name' | 'description' | 'timezone'> & { contactEmail: string | null; phone: string | null; website: string | null; address: string | null; logoUploadId?: string | null }
 
 export async function createOrganization(userId: string, input: CreateOrganizationInput) {
+  if (input.initialPlan === 'TRIAL') throw new ApiError(403,'SUBSCRIPTION_MANUAL_ONLY','Новые организации начинают с Бесплатного тарифа. После создания владелец может выбрать другой тариф в настройках без оплаты.')
   return prisma.$transaction(async (tx) => {
     const organization = await tx.organization.create({ data: { name: input.name, description: input.description, timezone: input.timezone, createdByUserId: userId } })
-    // Only an explicit trial request opts in; an omitted choice is always Free.
-    if (input.initialPlan === 'TRIAL') {
-      const now = new Date(), until = new Date(+now + TRIAL_DAYS * 86400000)
-      await tx.organizationSubscription.update({ where: { organizationId: organization.id }, data: { plan: 'BUSINESS', periodStart: now, periodEnd: until, trialStartedAt: now, trialEndsAt: until } })
-      await syncSubscriptionStorageLimit(tx, organization.id)
-    }
     await ensureAccessRoles(tx, organization.id)
     const owner = await tx.organizationMember.create({ data: { organizationId: organization.id, userId, role: 'OWNER' } })
     const locationInputs = [input.firstLocation ?? { name: 'Основная точка', city: '', address: '', timezone: input.timezone }, ...(input.locations ?? [])]

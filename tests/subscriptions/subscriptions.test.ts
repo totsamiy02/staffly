@@ -46,8 +46,10 @@ it('validates synthetic cards, expiry, CVC, holder, email and consent locally', 
   assert.deepEqual(validateDemoCard(fields, new Date('2026-10-30')), {})
   for (const patch of [{ number: '4242424242424241' }, { number: '4111111111111111' }, { expiry: '12 / 25' }, { expiry: '13 / 29' }, { cvc: 'ab1' }, { email: 'bad' }, { holder: 'Ярослав' }, { confirm: false }]) assert.ok(Object.keys(validateDemoCard({ ...fields, ...patch }, new Date('2026-10-30'))).length)
 })
-it('creates an explicit Free organization and a separate trial without granting other tenants a paid plan', async () => {
-  const a = await org(), b = await org('TRIAL')
+it('creates Free organizations, rejects self-service trials and preserves legacy purchase isolation', async () => {
+  const a = await org(), b = await org()
+  await assert.rejects(org('TRIAL'),code('SUBSCRIPTION_MANUAL_ONLY'))
+  await startBusinessTrial(people[0].id,b.id)
   assert.equal((await subscriptionDetails(people[0].id, a.id)).subscription.effectivePlan, 'FREE')
   assert.equal((await subscriptionDetails(people[0].id, b.id)).subscription.phase, 'trial')
   const first = await createCheckout(people[0].id, a.id, 'TEAM')
@@ -132,7 +134,7 @@ it('binds quotes to revision and expiry and enforces expired storage quotas even
   await prisma.organizationResourceBudget.update({ where: { organizationId: a.id }, data: { storageBytes: BigInt(plans.FREE.storageBytes) } })
   await assert.rejects(stageStoredFile({ objectKey: `organizations/${a.id}/documents/${randomUUID()}.txt`, purpose: 'DOCUMENT', uploadedByUserId: people[0].id, organizationId: a.id, size: 1, mimeType: 'text/plain', checksumSha256: '0'.repeat(64) }, Buffer.alloc(1)), code('ORGANIZATION_STORAGE_QUOTA'))
 })
-it('accepts only the safe test-activation body and leaves billing and reads accessible after expiry', async () => {
+it('rejects card data and all self-service paid activation while preserving reads after expiry', async () => {
   const a = await org(), order = await createCheckout(people[0].id, a.id, 'TEAM')
   const session = await prisma.authSession.create({ data: { userId: people[0].id, refreshTokenHash: randomUUID(), idleExpiresAt: new Date(Date.now() + 60000), absoluteExpiresAt: new Date(Date.now() + 60000) } })
   const token = await new SignJWT({ sid: session.id }).setProtectedHeader({ alg: 'HS256' }).setSubject(people[0].id).setIssuedAt().setExpirationTime('5m').sign(new TextEncoder().encode(process.env.JWT_SECRET!))
@@ -144,11 +146,13 @@ it('accepts only the safe test-activation body and leaves billing and reads acce
   const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body = { email: people[0].email, confirm: true, mode: 'test' }
   try {
     assert.equal((await fetch(`${base}/subscription/purchases/${order.id}/test-activation`, { method: 'POST', headers, body: JSON.stringify({ ...body, cardNumber: '4242424242424242', cvc: '123' }) })).status, 400)
-    assert.equal((await fetch(`${base}/subscription/purchases/${order.id}/test-activation`, { method: 'POST', headers, body: JSON.stringify(body) })).status, 200)
+    assert.equal((await fetch(`${base}/subscription/purchases/${order.id}/test-activation`, { method: 'POST', headers, body: JSON.stringify(body) })).status, 403)
+    await activateTestPurchase(people[0].id,a.id,order.id,people[0].email)
     await prisma.organizationSubscription.update({ where: { organizationId: a.id }, data: { periodStart: new Date(Date.now() - 40 * 86400000), periodEnd: new Date(Date.now() - 8 * 86400000) } })
     assert.equal((await fetch(`${base}/example`, { method: 'POST', headers, body: '{}' })).status, 403)
     assert.equal((await fetch(`${base}/subscription`, { headers })).status, 200)
-    assert.equal((await fetch(`${base}/subscription/checkout`, { method: 'POST', headers, body: JSON.stringify({ plan: 'BUSINESS' }) })).status, 201)
+    assert.equal((await fetch(`${base}/subscription/checkout`, { method: 'POST', headers, body: JSON.stringify({ plan: 'BUSINESS' }) })).status, 403)
+    assert.equal((await fetch(`${base}/subscription/trial`, { method:'POST',headers,body:JSON.stringify({confirm:true}) })).status,403)
     const stored = await prisma.subscriptionPurchase.findUniqueOrThrow({ where: { id: order.id } })
     assert.equal(stored.email, people[0].email); assert.ok(!('cardNumber' in stored)); assert.ok(!('cvc' in stored))
   } finally { await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())) }

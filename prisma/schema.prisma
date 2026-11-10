@@ -455,6 +455,7 @@ model AccountNotification {
 }
 
 model OrganizationMember {
+  employmentPeriods MemberEmploymentPeriod[]
   authoredDrafts ScheduleDraft[] @relation("DraftAuthor")
   draftRecipients DraftRecipient[]
   draftComments DraftComment[]
@@ -512,6 +513,19 @@ model OrganizationMember {
   @@index([organizationId, role])
   @@index([organizationId, leftAt])
   @@map("organization_members")
+}
+
+model MemberEmploymentPeriod {
+  id String @id @default(uuid()) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  memberId String @map("member_id") @db.Uuid
+  startedAt DateTime? @map("started_at") @db.Timestamptz(3)
+  endedAt DateTime? @map("ended_at") @db.Timestamptz(3)
+  source String @db.VarChar(16)
+  member OrganizationMember @relation(fields: [organizationId, memberId], references: [organizationId, id], onDelete: Cascade)
+  @@index([organizationId, memberId, startedAt], map: "member_employment_periods_member_idx")
+  @@index([organizationId, endedAt], map: "member_employment_periods_ended_idx")
+  @@map("member_employment_periods")
 }
 
 model ReportTemplate {

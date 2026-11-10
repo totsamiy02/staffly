@@ -46,7 +46,8 @@
     "data:retention": "node --env-file=src/server/.env --import tsx scripts/data-retention.ts",
     "db:backup:retention": "node --import tsx scripts/backup-retention.ts",
     "admin:observer": "node --import tsx scripts/service-observer.ts",
-    "admin:release:record": "node --import tsx scripts/record-release-check.ts"
+    "admin:release:record": "node --import tsx scripts/record-release-check.ts",
+    "test:personnel": "node --import tsx tests/performance/load-test.mjs --profile=personnel"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1158.0",

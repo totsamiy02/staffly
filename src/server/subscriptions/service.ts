@@ -33,7 +33,7 @@ export async function subscriptionDetails(userId: string, organizationId: string
   const actor = await getMembership(userId, organizationId)
   const [record, current] = await Promise.all([prisma.organizationSubscription.findUniqueOrThrow({ where: { organizationId } }), usage(prisma, organizationId)])
   const purchases = actor.owner ? await prisma.subscriptionPurchase.findMany({ where: { organizationId, status: 'SUCCEEDED' }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 30, select: { id: true, plan: true, amountMinor: true, activatedAt: true, periodStart: true, periodEnd: true, kind: true } }) : []
-  return { subscription: effectiveSubscription(record), usage: current, purchases, canManage: actor.owner, organization: { id: organizationId, name: actor.organization.name }, mode: 'test' as const }
+  return { subscription: effectiveSubscription(record), usage: current, purchases, canManage: actor.owner, organization: { id: organizationId, name: actor.organization.name }, revision: record.revision, mode: 'self-service' as const, selfService: true as const, paymentRequired: false as const }
 }
 export async function startBusinessTrial(userId: string, organizationId: string) {
   return prisma.$transaction(async db => {
@@ -112,5 +112,39 @@ export async function cancelScheduledChange(userId: string, organizationId: stri
     if (record.nextStartsAt && record.nextStartsAt <= new Date()) throw new ApiError(409, 'SUBSCRIPTION_CHANGE_APPLIED', 'Изменение тарифа уже вступило в силу.')
     if (record.nextPlan && record.nextPlan !== 'FREE') throw new ApiError(409, 'SUBSCRIPTION_CHANGE_PAID', 'Изменение уже оплачено в тестовом режиме. Дождитесь начала периода.')
     return effectiveSubscription(await db.organizationSubscription.update({ where: { organizationId }, data: { nextPlan: null, nextStartsAt: null, nextEndsAt: null, revision: { increment: 1 } } }))
+  })
+}
+
+// Owner-initiated, no-payment selection in the existing subscription record.
+// The organization lock and base revision prevent duplicate renewals and stale writes.
+export async function selectOrganizationPlan(userId: string, organizationId: string, plan: PlanId, expectedRevision: number) {
+  return prisma.$transaction(async db => {
+    const actor = await lockedOwner(db, userId, organizationId)
+    const record = await db.organizationSubscription.findUniqueOrThrow({ where: { organizationId } })
+    if (record.revision !== expectedRevision) {
+      if (record.revision === expectedRevision + 1 && record.plan === plan) {
+        const receipt = await db.accessAudit.findFirst({ where: { organizationId, actorMemberId: actor.id, action: 'SUBSCRIPTION_PLAN_SELECTED', details: { path: ['fromRevision'], equals: expectedRevision } }, orderBy: { createdAt: 'desc' } })
+        if (receipt && (receipt.details as { plan?: string })?.plan === plan) return { subscription: effectiveSubscription(record), revision: record.revision }
+      }
+      throw new ApiError(409, 'SUBSCRIPTION_CHANGED', 'Тариф уже изменился. Обновите условия и подтвердите выбор заново.')
+    }
+    const current = effectiveSubscription(record), now = new Date()
+    if (plan === 'FREE' && current.effectivePlan === 'FREE' && current.phase === 'free' && !record.supportPlan && !record.nextPlan) return { subscription: current, revision: record.revision }
+    await fits(db, organizationId, plan)
+    const renewal = plan !== 'FREE' && record.plan === plan && current.phase === 'active' && !record.supportPlan && !record.nextPlan && !!record.periodEnd && record.periodEnd > now
+    const saved = await db.organizationSubscription.update({ where: { organizationId }, data: {
+      plan, version: PLAN_VERSION, revision: { increment: 1 },
+      periodStart: plan === 'FREE' ? null : renewal ? record.periodStart : now,
+      periodEnd: plan === 'FREE' ? null : nextMonth(renewal ? record.periodEnd! : now),
+      trialEndsAt: null, nextPlan: null, nextStartsAt: null, nextEndsAt: null,
+      supportPlan: null, supportStartsAt: null, supportEndsAt: null,
+    } })
+    await syncSubscriptionStorageLimit(db, organizationId)
+    await db.accessAudit.create({ data: { organizationId, actorMemberId: actor.id, action: 'SUBSCRIPTION_PLAN_SELECTED', details: {
+      plan, fromRevision: expectedRevision, renewal, paymentRequired: false,
+      previousPlan: record.plan, previousSupportPlan: record.supportPlan, previousNextPlan: record.nextPlan,
+      until: saved.periodEnd?.toISOString() ?? null,
+    } } })
+    return { subscription: effectiveSubscription(saved), revision: saved.revision }
   })
 }

@@ -1,6 +1,6 @@
 import type { Prisma } from '../../generated/prisma/client.ts'
 import type { Actor } from './request-policy.ts'
-import { locationsFor } from '../organizations/access/access.ts'
+import { hasPermission, locationsFor } from '../organizations/access/access.ts'
 
 // Profile identity is visible only within a permitted point. Historical shifts
 // keep a former profile readable, but never grant access to a former avatar.
@@ -13,6 +13,7 @@ export function memberIdentityWhere(actor: Actor, points = locationsFor(actor,'m
       { accessAssignments: { some: { locationId: { in: points } } } },
       { locationTransfers: { some: { toLocationId: { in: points }, temporary: true, revokedAt: null, endAt: { gt: new Date() } } } },
       ...(historical ? [{ workShifts: { some: { locationId: { in: points } } } }] : []),
+      ...(historical ? [{ locationMemberships: { some: { locationId: { in: points.filter(id=>hasPermission(actor,'members.remove',id)) } } } }] : []),
     ] : []),
   ] }
 }

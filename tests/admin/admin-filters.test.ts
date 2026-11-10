@@ -22,7 +22,7 @@ test('attention handles an empty result and every plan/resource immediately belo
     const memberCount = Math.ceil(plan.members * .8), locationCount = Math.ceil(plan.locations * .8)
     const people = Array.from({ length: memberCount }, () => ({ id: randomUUID(), email: `member-${randomUUID()}@example.test`, firstName: 'Участник' }))
     await prisma.user.createMany({ data: people })
-    await prisma.organizationMember.createMany({ data: people.map(user => ({ organizationId: org.id, userId: user.id, leftAt: new Date() })) })
+    await prisma.organizationMember.createMany({ data: people.map(user => ({ organizationId: org.id, userId: user.id, joinedAt: new Date(Date.now()-86400000), leftAt: new Date() })) })
     const locations = Array.from({ length: locationCount + 1 }, (_, i) => ({ id: randomUUID(), organizationId: org.id, name: 'Точка ' + i, city: '', address: '', timezone: 'Europe/Moscow', archivedAt: new Date() }))
     await prisma.organizationLocation.createMany({ data: locations })
     for (const resource of ['members', 'locations', 'storageBytes'] as const) {

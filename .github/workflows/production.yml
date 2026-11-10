@@ -1,34 +1,7 @@
 name: Production smoke
 
 on:
-  pull_request:
-    paths:
-      - Dockerfile
-      - .dockerignore
-      - deploy/**
-      - tests/production/**
-      - src/server/production-config.ts
-      - src/server/database-policy.ts
-      - src/server/file-processing/**
-      - src/server/file-preview/**
-      - src/server/storage/**
-      - src/server/schedule/reports/**
-      - src/server/worker*.ts
-      - src/server/admin/**
-      - src/server/organizations/service-state.ts
-      - src/server/public-content.ts
-      - src/features/admin/**
-      - scripts/admin-*.ts
-      - scripts/service-observer.ts
-      - scripts/database-*.ts
-      - tests/admin/**
-      - tests/interface/admin-*
-      - prisma/**
-      - package*.json
-      - .github/workflows/production.yml
-      - .github/workflows/ci.yml
-  push:
-    tags: ['v*']
+  workflow_call:
   workflow_dispatch:
 
 permissions:

@@ -9,7 +9,7 @@ import Select from '../../../component/ui/select/select.tsx'
 import { ServiceDialog,DateTimeField,defaultStart,localDateTime,isoDateTime,serviceStates } from './elements.tsx'
 import OwnerField from './owner-field.tsx'
 import type { maintenanceState } from '../../../server/admin/service/read-model.ts'
-const checkNames:Record<string,string>={database:'Схема БД',backup:'Свежий полный комплект и пробное восстановление',release:'Отчёт CI для текущего выпуска',workers:'Обработчики на связи',build:'Сборка',types:'Типы',lint:'Проверка кода',serverTests:'Серверные тесты',browserTests:'Браузерные тесты',migrations:'Миграции',secrets:'Проверка секретов'}
+const checkNames:Record<string,string>={database:'Схема БД',backup:'Свежий полный комплект и пробное восстановление',release:'Отчёт CI для текущего выпуска',workers:'Обработчики на связи',build:'Сборка',types:'Типы',lint:'Проверка кода',serverTests:'Серверные тесты',browserTests:'Браузерные тесты',personnelTests:'Кадровая браузерная приёмка',containerTests:'Контейнеры production',migrations:'Миграции',secrets:'Проверка секретов'}
 function CheckDetails({checks}:{checks:Record<string,unknown>}){return <dl className="admin-key-values">{Object.entries(checks).filter(([key])=>checkNames[key]).map(([key,passed])=><div key={key}><dt>{checkNames[key]}</dt><dd>{passed===true?'Пройдено':'Не подтверждено'}</dd></div>)}</dl>}
 type State=Awaited<ReturnType<typeof maintenanceState>>
 export default function ReleasePanel({data,refresh}:{data:State;refresh:()=>void}){

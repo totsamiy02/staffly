@@ -4,14 +4,14 @@ import { writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 
-// Isolated test browser, disposable users/database, synthetic purchases only.
+// Isolated browser with synthetic organizations and explicit manual access fixtures.
 export async function runUiSmoke({ prisma, owner, org, origin, port, output, connect }) {
   const { createOrganization } = await import('../../src/server/organizations/organization-service.ts')
   const free = await createOrganization(owner.id, { name: 'Пробный тариф — тестовая команда', description: 'Работаем вместе каждый день.', timezone: 'Europe/Moscow' })
   const extraOrganizations = []
   for (let i = 0; i < 2; i++) extraOrganizations.push(await createOrganization(owner.id, { name: `Ещё одна команда ${i + 1}`, description: null, timezone: 'Europe/Moscow' }))
   const target = await (await fetch(`http://127.0.0.1:${port}/json/new?about:blank`, { method: 'PUT' })).json()
-  const cdp = await connect(target.webSocketDebuggerUrl), errors = [], checks = [], screenshots = [], bodies = []
+  const cdp = await connect(target.webSocketDebuggerUrl), errors = [], checks = [], screenshots = []
   const evaluate = async expression => {
     const value = await cdp.call('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true })
     if (value.exceptionDetails) throw new Error(value.exceptionDetails.exception?.description ?? value.exceptionDetails.text)
@@ -42,7 +42,6 @@ export async function runUiSmoke({ prisma, owner, org, origin, port, output, con
   }
   try {
     cdp.on('Runtime.exceptionThrown', event => errors.push(event.exceptionDetails.exception?.description ?? event.exceptionDetails.text))
-    cdp.on('Network.requestWillBeSent', event => { if (event.request.url.includes('/test-activation')) bodies.push(JSON.parse(event.request.postData)) })
     await cdp.call('Page.enable'); await cdp.call('Runtime.enable'); await cdp.call('Network.enable')
     await cdp.call('Page.addScriptToEvaluateOnNewDocument', { source: "localStorage.setItem('staffly.theme','light');localStorage.removeItem('staffly:sidebar-collapsed')" })
     const raw = randomUUID() + randomUUID()
@@ -63,7 +62,7 @@ export async function runUiSmoke({ prisma, owner, org, origin, port, output, con
         if (name === 'organizations') assert(await evaluate("[...document.querySelectorAll('.organization-card')].every(e=>{const r=e.getBoundingClientRect(),a=e.querySelector('.organization-card__avatar').getBoundingClientRect();return r.width<=360&&Math.abs(r.x+r.width/2-a.x-a.width/2)<1&&e.scrollWidth<=e.clientWidth+1})"), 'Centered organization cards must fit their cells')
         if (name === 'organizations') await checkOrganizationRows()
         if (name === 'plans') {
-          assert(await evaluate("!!document.querySelector('.subscription-trial-button')"), 'Manual trial missing')
+          assert.equal(await evaluate("document.querySelectorAll('.subscription-trial-button,.subscription-checkout').length"),0)
           await evaluate("document.querySelector('.subscription-plans').scrollIntoView({block:'start',behavior:'instant'})")
         }
         await shot(`${name}-${width}`)
@@ -117,42 +116,13 @@ export async function runUiSmoke({ prisma, owner, org, origin, port, output, con
     await click('Не сейчас')
     await wait("!document.querySelector('.subscription-gate')", 'Close upgrade dialog')
     await navigate(`/app/organizations/${free.id}/settings?section=subscription`, '.subscription-plans')
-    // Trial is a deliberate confirmation, never a side effect of entering an org.
-    assert.equal((await prisma.organizationSubscription.findUniqueOrThrow({ where: { organizationId: free.id } })).plan, 'FREE')
-    await evaluate("document.querySelector('.subscription-trial-button').click()")
-    await wait("!!document.querySelector('.subscription-trial-preview')", 'Trial confirmation')
-    await shot('trial-confirmation')
-    await click('Начать пробный период')
-    await wait("!document.querySelector('.subscription-trial-preview')&&!document.querySelector('.subscription-trial-button')", 'Trial activation')
-    assert.equal((await prisma.organizationSubscription.findUniqueOrThrow({ where: { organizationId: free.id } })).plan, 'BUSINESS')
-    assert.equal(await evaluate("document.querySelectorAll('.workspace-content>.subscription-banner,.workspace-content>div>.subscription-banner').length"), 0)
-    await evaluate("document.querySelector('button[aria-label^=\"Уведомления\"]').click()")
-    await wait("!!document.querySelector('button[aria-label=\"Закрыть уведомление о тарифе\"]')", 'Owner inbox notice')
-    await shot('trial-notification')
-    await evaluate("document.querySelector('button[aria-label=\"Закрыть уведомление о тарифе\"]').click()")
-    await wait("!document.querySelector('button[aria-label=\"Закрыть уведомление о тарифе\"]')", 'Dismiss subscription notice')
-    await navigate(`/app/organizations/${free.id}/settings?section=subscription`, '.subscription-plans')
-    assert.equal(await prisma.accountNotification.count({ where: { organizationId: free.id, type: 'SUBSCRIPTION_STATUS', hiddenAt: null } }), 0)
-    checks.push('manual one-time trial activates only its organization; owner notice is in the inbox and dismissal persists')
-    await click('Выбрать бесплатный'); await click('Подтвердить переход')
-    await wait("document.querySelector('.subscription-current h3')?.textContent==='Бесплатный'", 'Free plan')
-    await click('Выбрать Команду')
-    await wait("!!document.querySelector('input[name=number]')", 'Checkout')
-    await click('Купить за 990 ₽')
-    await wait("!!document.querySelector('#card-error-number')", 'Card validation')
-    await click('Заполнить тестовые данные')
-    await evaluate("document.querySelector('input[name=confirm]').click()")
-    await shot('checkout-desktop')
-    await cdp.call('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true })
-    assert(await evaluate('document.documentElement.scrollWidth<=innerWidth+1'), 'Mobile checkout overflow')
-    await shot('checkout-mobile')
-    await click('Купить за 990 ₽')
-    await wait("!!document.querySelector('.subscription-success')", 'Test purchase success')
-    assert.equal(bodies.length, 1); assert.deepEqual(Object.keys(bodies[0]).sort(), ['confirm', 'email', 'mode'])
-    assert.equal((await prisma.organizationSubscription.findUniqueOrThrow({ where: { organizationId: free.id } })).plan, 'TEAM')
-    assert.equal((await prisma.organizationSubscription.findUniqueOrThrow({ where: { organizationId: org.id } })).plan, 'BUSINESS')
-    await shot('purchase-success-mobile')
-    checks.push('checkout validates fields, activates Team for the selected organization, and sends no card data')
+    assert.equal((await prisma.organizationSubscription.findUniqueOrThrow({where:{organizationId:free.id}})).plan,'FREE')
+    assert.equal(await evaluate("document.querySelectorAll('input[name=number],input[name=cvc],.subscription-checkout,.subscription-trial-button').length"),0)
+    assert(await evaluate("document.querySelector('.subscription-settings').textContent.includes('Владелец каждой организации может выбрать и подключить тариф')"))
+    checks.push('Free start and owner plan choice have no checkout, bank fields or trial')
+    // Explicit local fixture for the remaining feature/layout checks; no public activation.
+    await prisma.organizationSubscription.update({where:{organizationId:free.id},data:{supportPlan:'BUSINESS',supportStartsAt:new Date(),supportEndsAt:new Date(Date.now()+86400000)}})
+    await prisma.$executeRaw`SELECT public.staffly_sync_subscription_storage_limit(${free.id}::uuid)`
     // The system folder is a live view over original request attachments.
     const { createRequestType } = await import('../../src/server/requests/type-service.ts')
     const { createRequest, submitRequest } = await import('../../src/server/requests/request-submission.ts')

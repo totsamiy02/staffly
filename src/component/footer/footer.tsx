@@ -25,7 +25,7 @@ const footerLinks = [
     title: 'Информация',
     links: [
       { label: 'Политика cookie', href: '/privacy-policy#cookies' },
-      { label: 'Оплата и отмена подписки', href: '/offer#payment' },
+      { label: 'Режим без оплаты', href: '/offer#payment' },
       { label: 'Реквизиты', href: '/offer#details' },
       { label: 'Контакты', href: '/contacts' },
     ],

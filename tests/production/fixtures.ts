@@ -15,7 +15,9 @@ try {
     const passwordHash = await hash(process.env.AUDIT_PASSWORD!)
     const owner = await prisma.user.create({ data: { email: 'owner@example.test', firstName: 'ПродакшенАудит', passwordHash, emailVerifiedAt: new Date() } })
     const employee = await prisma.user.create({ data: { email: 'employee@example.test', firstName: 'ПолучательАудита', passwordHash, emailVerifiedAt: new Date() } })
-    const org = await createOrganization(owner.id, { name: 'Production audit', description: null, timezone: 'Europe/Moscow', initialPlan: 'TRIAL' })
+    const org = await createOrganization(owner.id, { name: 'Production audit', description: null, timezone: 'Europe/Moscow', initialPlan: 'FREE' })
+    await prisma.organizationSubscription.update({where:{organizationId:org.id},data:{plan:'BUSINESS',periodStart:new Date(),periodEnd:new Date(Date.now()+14*86400000)}})
+    await prisma.$executeRaw`SELECT public.staffly_sync_subscription_storage_limit(${org.id}::uuid)`
     const member = await prisma.organizationMember.findUniqueOrThrow({ where: { organizationId_userId: { organizationId: org.id, userId: owner.id } } })
     const recipient = await prisma.organizationMember.create({ data: { organizationId: org.id, userId: employee.id } })
     await prisma.locationMember.create({ data: { organizationId: org.id, locationId: org.locationId!, memberId: recipient.id } })
@@ -27,10 +29,10 @@ try {
     const role = (await databasePool.query('SELECT current_user AS name, rolsuper, rolcreatedb, rolcreaterole, rolbypassrls FROM pg_roles WHERE rolname=current_user')).rows[0]
     assert.equal(role.name, 'staffly_app')
     assert.equal(role.rolsuper || role.rolcreatedb || role.rolcreaterole || role.rolbypassrls, false)
-    for (const sql of ['CREATE TABLE public.audit_forbidden (id int)', 'ALTER TABLE public.users ADD COLUMN audit_forbidden int', 'CREATE ROLE audit_forbidden', 'SET ROLE staffly_migrator', 'DELETE FROM public._prisma_migrations', 'UPDATE public.security_events SET reason_code=NULL', 'UPDATE public.organization_resource_budgets SET storage_limit_bytes=1']) {
+    for (const sql of ['CREATE TABLE public.audit_forbidden (id int)', 'ALTER TABLE public.users ADD COLUMN audit_forbidden int', 'CREATE ROLE audit_forbidden', 'SET ROLE staffly_migrator', 'DELETE FROM public._prisma_migrations', 'UPDATE public.security_events SET reason_code=NULL', 'UPDATE public.organization_resource_budgets SET storage_limit_bytes=1', 'UPDATE public.member_employment_periods SET started_at=now()']) {
       await assert.rejects(databasePool.query(sql), { code: '42501' })
     }
-    console.log(JSON.stringify({ runtimeRole: role.name, deniedOperations: 7 }))
+    console.log(JSON.stringify({ runtimeRole: role.name, deniedOperations: 8 }))
   } else if (action === 'revoke') {
     const fixture = JSON.parse(process.env.AUDIT_FIXTURE!)
     await prisma.locationMember.updateMany({ where: { memberId: fixture.employeeId }, data: { leftAt: new Date() } })

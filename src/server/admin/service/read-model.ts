@@ -1,3 +1,4 @@
+import { verifiedReleaseChecks } from '../../../shared/release-check.ts'
 import { passwordAttemptState } from '../../auth/attempt-limits.ts'
 import { prisma,databasePool } from '../../db.ts'
 import { adminPool } from '../database.ts'
@@ -30,7 +31,7 @@ export async function organizationService(id:string){
  return{id,publicId:organization.publicId,name:organization.name,deleted:!!organization.deletedAt,state:organizationAvailable(organization)?'ACTIVE':'SUSPENDED',reason:organization.serviceReason,until:iso(organization.serviceUntil),version:organization.serviceRevision,
   subscription:organization.subscription?effectiveSubscription(organization.subscription):null,subscriptionVersion:organization.subscription?.revision??0,
   resources:{members:organization._count.members,locations:organization._count.locations,files:organization._count.files,storageBytes:Number(organization.resourceBudget?.storageBytes??0),jobs},plans:Object.values(plans).map(({id,name,members,locations,storageBytes,features})=>({id,name,members,locations,storageBytes,features})),
-  history:history.rows.map(h=>({id:h.id,action:h.action,reason:h.reason,actor:h.actor_name??'Администратор',actorId:h.actor_id,before:h.before_value,after:h.after_value,createdAt:iso(h.created_at)})),paymentMode:'test' as const}
+  history:history.rows.map(h=>({id:h.id,action:h.action,reason:h.reason,actor:h.actor_name??'Администратор',actorId:h.actor_id,before:h.before_value,after:h.after_value,createdAt:iso(h.created_at)})),paymentMode:'manual' as const}
 }
 export async function maintenanceState(){
  const db=adminPool(),[schedule,components,checks,windows,delivery,probe,schema,releases,jobs,signals,runner,set]=await Promise.all([
@@ -45,7 +46,7 @@ export async function maintenanceState(){
   db.query('SELECT id,kind,target_id,status,attempts,created_at,finished_at,error_code,result FROM staffly_admin.service_jobs ORDER BY created_at DESC,id LIMIT 40'),
   db.query('SELECT * FROM staffly_admin.signal_deliveries ORDER BY attempted_at DESC,id LIMIT 30'),db.query('SELECT r.*,GREATEST(r.heartbeat_at,m.maintenance_heartbeat) AS heartbeat_at FROM staffly_admin.service_runner_state r CROSS JOIN staffly_admin.management_state m WHERE r.id=1 AND m.id=1'),backupSetState()
  ])
- return{runner:runner.rows[0],backupSet:set,schedule:schedule.rows[0],components:components.rows,restoreChecks:checks.rows,windows:windows.rows,delivery:delivery.rows[0],probe:probe.rows[0],schema:schema.rows[0],releases:releases.rows,jobs:jobs.rows,signals:signals.rows,version:process.env.APP_VERSION||null,deployedAt:process.env.APP_DEPLOYED_AT||null,now:new Date().toISOString(),purgeEnabled:process.env.DATA_PURGE_ENABLED==='true',externalConfigured:{webhook:!!process.env.ADMIN_SIGNAL_WEBHOOK_URL,email:!!process.env.SMTP_USER&&!!process.env.SMTP_APP_PASSWORD,telegram:!!process.env.ADMIN_SIGNAL_TELEGRAM_TOKEN},probeConfigured:!!process.env.ADMIN_PROBE_URL,restoreConfigured:!!process.env.RESTORE_DATABASE_URL}
+ return{runner:runner.rows[0],backupSet:set,schedule:schedule.rows[0],components:components.rows,restoreChecks:checks.rows,windows:windows.rows,delivery:delivery.rows[0],probe:probe.rows[0],schema:schema.rows[0],releases:releases.rows.map(row=>({...row,passed:row.passed&&verifiedReleaseChecks(row.checks,row.app_version)})),jobs:jobs.rows,signals:signals.rows,version:process.env.APP_VERSION||null,deployedAt:process.env.APP_DEPLOYED_AT||null,now:new Date().toISOString(),purgeEnabled:process.env.DATA_PURGE_ENABLED==='true',externalConfigured:{webhook:!!process.env.ADMIN_SIGNAL_WEBHOOK_URL,email:!!process.env.SMTP_USER&&!!process.env.SMTP_APP_PASSWORD,telegram:!!process.env.ADMIN_SIGNAL_TELEGRAM_TOKEN},probeConfigured:!!process.env.ADMIN_PROBE_URL,restoreConfigured:!!process.env.RESTORE_DATABASE_URL}
 }
 export async function cleanupState(query:unknown){
  const q=listQuery.parse(query),pattern='%'+q.search.replace(/[\\%_]/g,'\\$&')+'%',where=`(d.id::text ILIKE $1 OR d.subject_id::text ILIKE $1) AND ($2='all' OR $2='held' AND d.hold AND d.completed_at IS NULL OR $2='completed' AND d.completed_at IS NOT NULL OR $2='failed' AND d.last_error_code IS NOT NULL AND d.completed_at IS NULL OR $2='pending' AND NOT d.hold AND d.completed_at IS NULL AND d.last_error_code IS NULL)`

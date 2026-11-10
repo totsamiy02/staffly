@@ -4,6 +4,7 @@ import { securityHistory } from '../security/history-service.ts'
 import { organizationResources } from '../resources/quotas.ts'
 import { previewDeparture, confirmDeparture, departureCandidates, departureBody, departureScope } from './departure-service.ts'
 import { memberProfile } from './member-profile-service.ts'
+import { listFormerMembers } from './member-archive.ts'
 import { requirePermission } from './access/access.ts'
 import { mediaUrl } from '../storage/image-service.ts'
 import { prisma } from '../db.ts'
@@ -87,6 +88,11 @@ router.patch('/organizations/:organizationId', async (request, response) => {
 
 router.get('/organizations/:organizationId/members', async (request, response) => {
   const { organizationId } = parse(organizationIdParams, request.params)
+  if (request.query.state === 'former') {
+    const options = parse(z.object({ state:z.literal('former'),page:z.coerce.number().int().min(1).max(100000).default(1),pageSize:z.coerce.number().int().min(1).max(50).default(20),search:z.string().trim().max(100).optional(),pointId:z.uuid().optional(),departedFrom:z.iso.date().optional(),departedTo:z.iso.date().optional() }).refine(v=>!v.departedFrom||!v.departedTo||v.departedFrom<=v.departedTo,'Проверьте период исключения.'),request.query)
+    response.set('Cache-Control','private, no-store').json(await listFormerMembers(auth(request).userId,organizationId,options))
+    return
+  }
   const options = parse(memberListQuery, request.query)
   if (options.accessRoleId || options.page || options.pageSize || options.role || options.search || options.positionId || options.directory || options.pointId) {
     response.json(await listMembersPage(auth(request).userId, organizationId, options))
@@ -181,6 +187,16 @@ router.post('/invitations/email/preview', async (request, response) => {
   response.json({ invitation: await previewEmailInvitation(auth(request).email, token) })
 })
 
+router.post('/invitations/code/preview', sensitiveLimiter, async (request, response) => {
+  const { code } = parse(inviteCodeBody, request.body)
+  response.json({ invitation: await previewCodeInvitation(auth(request).userId, code) })
+})
+
+router.post('/invitations/code/accept', sensitiveLimiter, async (request, response) => {
+  const { code } = parse(inviteCodeBody, request.body)
+  response.json(await acceptCodeInvitation(auth(request).userId, auth(request).email, code))
+})
+
 router.post('/invitations/:inviteId/accept', async (request, response) => {
   const { inviteId } = parse(inviteParams, request.params)
   response.json(await acceptEmailInvitation(auth(request).userId, auth(request).email, inviteId))
@@ -190,16 +206,6 @@ router.post('/invitations/:inviteId/reject', async (request, response) => {
   const { inviteId } = parse(inviteParams, request.params)
   await rejectEmailInvitation(auth(request).email, inviteId)
   response.status(204).end()
-})
-
-router.post('/invitations/code/preview', sensitiveLimiter, async (request, response) => {
-  const { code } = parse(inviteCodeBody, request.body)
-  response.json({ invitation: await previewCodeInvitation(auth(request).userId, code) })
-})
-
-router.post('/invitations/code/accept', sensitiveLimiter, async (request, response) => {
-  const { code } = parse(inviteCodeBody, request.body)
-  response.json(await acceptCodeInvitation(auth(request).userId, auth(request).email, code))
 })
 
 router.post('/organizations/:organizationId/ownership-transfer/request', sensitiveLimiter, async (request, response) => {

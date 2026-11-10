@@ -21,7 +21,7 @@ export async function requireCapacity(db: DB, organizationId: string, kind: 'mem
   // plan changes cannot both consume the last remaining seat.
   await db.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId}, 1))::text`
   const snapshot = await subscriptionSnapshot(organizationId, db)
-  if (snapshot.readOnly) throw new ApiError(403, 'SUBSCRIPTION_EXPIRED', 'Подписка завершилась. Продлите её или выберите бесплатный тариф.', { organizationId })
+  if (snapshot.readOnly) throw new ApiError(403, 'SUBSCRIPTION_EXPIRED', 'Подписка завершилась. Подключите или продлите тариф в настройках без оплаты.', { organizationId })
   const used = kind === 'members' ? await db.organizationMember.count({ where: { organizationId, leftAt: null, user: { deletedAt: null } } }) : await db.organizationLocation.count({ where: { organizationId, archivedAt: null } })
   const limit = snapshot.limits[kind]
   if (used + additional > limit) {

@@ -1,3 +1,6 @@
+import { useSearchParams } from 'react-router-dom'
+import SegmentedNav from '../../../component/ui/segmented-nav/segmented-nav.tsx'
+import MemberArchive from './member-archive.tsx'
 import { useModuleFilters } from '../../../app/workspace/module-filters.ts'
 import { useSubscription } from '../../../app/subscriptions/context.ts'
 import PageHeading from '../../../component/ui/page-heading/page-heading.tsx'
@@ -32,6 +35,11 @@ function memberCountLabel(count: number) {
 }
 
 export default function OrganizationMembers({ organization }: { organization: OrganizationSummary }) {
+  const [params,setParams]=useSearchParams()
+  const archive=params.get('tab')==='archive',allowed=canAccess(organization,'members.remove')
+  return <>{allowed&&<SegmentedNav label="Список сотрудников"><button type="button" aria-pressed={!archive} onClick={()=>setParams(p=>{p.delete('tab');return p})}>Действующие</button><button type="button" aria-pressed={archive} onClick={()=>setParams(p=>{p.set('tab','archive');return p})}>Архив сотрудников</button></SegmentedNav>}{archive&&allowed?<MemberArchive organization={organization}/>:<ActiveMembers organization={organization}/>}</>
+}
+function ActiveMembers({ organization }: { organization: OrganizationSummary }) {
   const subscription = useSubscription()
   const { apiRequest, user } = useAuth()
   const queryClient = useQueryClient()

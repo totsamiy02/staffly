@@ -5,26 +5,33 @@ import { accountRateLimit } from '../security/rate-limit.ts'
 import { ApiError } from '../api-error.ts'
 import { getMembership } from '../organizations/access/permissions.ts'
 import { subscriptionSnapshot } from './access.ts'
-import { activateTestPurchase, cancelScheduledChange, createCheckout, selectFreePlan, startBusinessTrial, subscriptionDetails } from './service.ts'
+import { cancelScheduledChange, selectFreePlan, selectOrganizationPlan, subscriptionDetails } from './service.ts'
 const router = Router(), base = '/organizations/:organizationId/subscription'
 const ids = z.object({ organizationId: z.uuid(), orderId: z.uuid().optional() })
 const actor = (request: unknown) => (request as AuthenticatedRequest).auth!.userId
 const mutation = accountRateLimit('subscription', 20, 60000)
 router.use(base, requireAuth, (_q, response, next) => { response.set('Cache-Control', 'private, no-store'); next() })
 router.get(base, async (request, response) => response.json(await subscriptionDetails(actor(request), ids.parse(request.params).organizationId)))
-router.post(base + '/trial', mutation, async (request, response) => {
+router.post(base + '/select', mutation, async (request,response) => {
+  const { plan, revision } = z.object({ plan:z.enum(['FREE','TEAM','BUSINESS']),revision:z.number().int().min(0).max(2147483647),confirm:z.literal(true) }).strict().parse(request.body)
+  response.json(await selectOrganizationPlan(actor(request),ids.parse(request.params).organizationId,plan,revision))
+})
+async function manualOnly(request: unknown, organizationId: string): Promise<never> {
+  const member = await getMembership(actor(request), organizationId)
+  if (!member.owner) throw new ApiError(403, 'OWNER_REQUIRED', 'Выбрать тариф может только владелец организации.')
+  throw new ApiError(403, 'SUBSCRIPTION_MANUAL_ONLY', 'Оплата не требуется. Выберите тариф в настройках организации и подтвердите подключение.')
+}
+router.post(base + '/trial', mutation, async (request) => {
   z.object({ confirm: z.literal(true) }).strict().parse(request.body)
-  response.json({ subscription: await startBusinessTrial(actor(request), ids.parse(request.params).organizationId) })
+  await manualOnly(request, ids.parse(request.params).organizationId)
 })
-router.post(base + '/checkout', mutation, async (request, response) => {
-  const { plan } = z.object({ plan: z.enum(['TEAM', 'BUSINESS']) }).strict().parse(request.body)
-  response.status(201).json({ order: await createCheckout(actor(request), ids.parse(request.params).organizationId, plan) })
+router.post(base + '/checkout', mutation, async (request) => {
+  z.object({ plan: z.enum(['TEAM','BUSINESS']) }).strict().parse(request.body)
+  await manualOnly(request, ids.parse(request.params).organizationId)
 })
-router.post(base + '/purchases/:orderId/test-activation', mutation, async (request, response) => {
-  // No PAN, expiry or CVC is accepted or persisted, even in this test mode.
-  const { email } = z.object({ email: z.email().max(254), confirm: z.literal(true), mode: z.literal('test') }).strict().parse(request.body)
-  const { organizationId, orderId } = ids.parse(request.params)
-  response.json(await activateTestPurchase(actor(request), organizationId, orderId!, email))
+router.post(base + '/purchases/:orderId/test-activation', mutation, async (request) => {
+  z.object({ email:z.email().max(254),confirm:z.literal(true),mode:z.literal('test') }).strict().parse(request.body)
+  await manualOnly(request, ids.parse(request.params).organizationId)
 })
 router.post(base + '/free', mutation, async (request, response) => {
   const { immediate } = z.object({ confirm: z.literal(true), immediate: z.boolean().default(false) }).strict().parse(request.body)

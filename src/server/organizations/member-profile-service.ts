@@ -19,6 +19,7 @@ export async function memberProfile(userId: string, organizationId: string, memb
     user: { select: { email: true, firstName: true, lastName: true, middleName: true, phone: true, bio: true, avatarFileId: true, lastSeenAt: true, sessions: { where: onlineSessions(), select: { id: true }, take: 1 } } },
     locationTransfers: { where: { toLocationId: actor.locationId, temporary: true, revokedAt: null, endAt: { gt: new Date() } }, select: { id: true }, take: 1 },
     accessRole: { select: { name: true } }, accessAssignments: { include: { role: { select: { name: true } } } },
+    employmentPeriods: { orderBy: [{startedAt:'asc'},{id:'asc'}] },
     positions: { where: { position: { isActive: true } }, include: { position: { select: { id: true, name: true } } } },
     locationMemberships: { where: { leftAt: null, location: { archivedAt: null } }, include: { location: { select: { id: true, name: true, timezone: true } } } },
   } })
@@ -44,6 +45,7 @@ export async function memberProfile(userId: string, organizationId: string, memb
     email: (own || memberFieldVisible(actor, target, 'members.contacts')) ? target.user.email : '', phone: (own || memberFieldVisible(actor, target, 'members.contacts')) ? target.user.phone : null,
     bio: target.user.bio, avatarUrl: mediaUrl(target.user.avatarFileId), role: target.role,
     roleName: target.accessRole?.name ?? target.accessAssignments.find(item => item.locationId === actor.locationId)?.role.name ?? null,
+    employmentPeriods: hasPermission(actor,'members.remove') ? target.employmentPeriods.map(p=>({id:p.id,startedAt:p.startedAt,endedAt:p.endedAt,incomplete:p.source==='LEGACY'})) : [],
     joinedAt: target.joinedAt, leftAt: target.leftAt, online: target.user.sessions.length > 0, lastSeenAt: target.user.lastSeenAt,
     positions: target.positions.map(item => item.position), locations: permittedPoints.map(item => item.location),
   }

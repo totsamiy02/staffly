@@ -59,7 +59,7 @@ it('restores into a generated isolated database, reconciles newer deletion recor
  try{
   await exportDeletionLedger(db,directories().ledgerDirectory,backupId)
   const result=await runRestoreRehearsal({management:db,backupId,restoreAdminUrl:source,...directories(),pgBin});assert.equal(result.restored,true);assert.equal(result.checks.filesVerified,true);assert.equal(result.checks.ledgerVerified,true);assert.equal(result.checks.ledgerReconciled,true);assert.equal(result.checks.ledgerReconciliationRequired,false)
-  const {rows:[check]}=await db.query('SELECT * FROM staffly_admin.restore_checks WHERE backup_id=$1 ORDER BY checked_at DESC LIMIT 1',[backupId]);assert.equal(check.status,'SUCCEEDED');assert.equal((await backupSetState())?.recovery,true);assert(check.duration_ms>0);assert(check.schema_version.includes('service_lifecycle_support'));assert(!JSON.stringify(check).includes(bytes.toString()))
+  const {rows:[check]}=await db.query('SELECT * FROM staffly_admin.restore_checks WHERE backup_id=$1 ORDER BY checked_at DESC LIMIT 1',[backupId]);assert.equal(check.status,'SUCCEEDED');assert.equal((await backupSetState())?.recovery,true);assert(check.duration_ms>0);assert.equal(check.schema_version,(await db.query('SELECT version FROM staffly_admin.release_schema_state')).rows[0].version);assert(!JSON.stringify(check).includes(bytes.toString()))
  }finally{db.release()}
  assert.deepEqual((await databasePool.query("SELECT datname FROM pg_database WHERE datname LIKE 'staffly_rehearsal_%'")).rows.map(r=>r.datname),before)
  assert.equal((await prisma.user.findUniqueOrThrow({where:{id:userId}})).deletedAt,null)
