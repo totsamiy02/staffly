@@ -6,7 +6,7 @@ import { ApiError } from '../api-error.ts'
 import { requireAuth, assertActiveSession, type AuthenticatedRequest } from '../auth.ts'
 import { prisma } from '../db.ts'
 import { organizationIdParams } from '../organizations/schemas.ts'
-import { MAX_IMAGE_BYTES, removeOrganizationLogo, removeUserAvatar, replaceOrganizationLogo, replaceUserAvatar, stageProfileImage } from './image-service.ts'
+import { MAX_IMAGE_BYTES, removeOrganizationLogo, removeUserAvatar, replaceOrganizationLogo, replaceUserAvatar, stageProfileImage, stageOrganizationLogoDraft } from './image-service.ts'
 import { storage } from './provider.ts'
 import { freshFileAccess } from './guarded-delivery.ts'
 
@@ -48,6 +48,10 @@ router.get(['/media/:fileId', '/media/v2/:fileId'], async (request, response, ne
 router.put('/profile/avatar/stage', requireAuth, uploadLimiter, imageBody, async (request, response) => {
   const file = await stageProfileImage(auth(request).userId, request.body)
   response.status(201).json({ uploadId: file.id })
+})
+router.put('/organization-logos/stage',requireAuth,uploadLimiter,imageBody,async(request,response)=>{
+  const file=await stageOrganizationLogoDraft(auth(request).userId,request.body)
+  response.status(201).json({uploadId:file.id})
 })
 router.put('/organizations/:organizationId/logo/stage', requireAuth, uploadLimiter, imageBody, async (request, response) => {
   const { organizationId } = organizationIdParams.parse(request.params)

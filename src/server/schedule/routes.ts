@@ -126,7 +126,7 @@ for (const kind of ['positions', 'templates'] as const) {
 router.post('/organizations/:organizationId/shifts/batch', mutationLimiter, async (request, response) => {
   const { organizationId } = parse(organizationParams, request.params)
   const body = parse(batchShiftBody, request.body)
-  response.status(201).json(await createShiftBatch(auth(request).userId, organizationId, body.shifts.map(shift => ({ ...shift, acknowledgeAbsence: body.acknowledgeAbsence })), body.acknowledgeWorkload))
+  response.status(201).json(await createShiftBatch(auth(request).userId, organizationId, body.shifts.map(shift => ({ ...shift, acknowledgeAbsence: body.acknowledgeAbsence })), body.acknowledgeWorkload,body.openingHoursConfirmation))
 })
 
 router.get('/organizations/:organizationId/schedule', async (request, response) => {

@@ -1,3 +1,4 @@
+import { locationMetadata } from './organization-service.ts'
 import { recordSecurityEvent } from '../security/journal.ts'
 import { requireCapacity, requireLocationInPlan, requireSubscriptionWritable } from '../subscriptions/access.ts'
 import { enqueueEmail } from '../mail/email-outbox.ts'
@@ -11,7 +12,6 @@ import type { Prisma } from '../../generated/prisma/client.ts'
 import { prisma } from '../db.ts'
 import { ApiError } from '../api-error.ts'
 import { getMembership, requireOrganizationRole } from './access/permissions.ts'
-import { locationBody } from './schemas.ts'
 import { scopedLocationId } from './location-context.ts'
 
 export const teamBody = z.object({ name: z.string().trim().min(2).max(120), memberIds: z.array(z.uuid()).max(500).default([]) })
@@ -41,15 +41,19 @@ export async function listLocations(userId: string, organizationId: string) {
   const roles = await ensureAccessRoles(prisma, organizationId)
   return locations.filter(l => actor.owner || actor.readableLocationIds.includes(l.id) || hasPermission(actor, 'locations.browse')).map(({ members, _count, ...item }) => ({ ...item, permissions: Object.keys(actor.permissionLocations).filter(key => actor.permissionLocations[key].includes(item.id)), roleName: actor.owner ? 'Владелец' : roles.find(r => r.id === actor.accessAssignments.find(a => a.locationId === item.id)?.roleId)?.name ?? roles.find(r => r.id === actor.accessRoleId)?.name ?? 'Без роли', role: actor.organizationRole === 'OWNER' ? 'OWNER' : members[0]?.role ?? 'MEMBER', memberCount: _count.members }))
 }
-export async function saveLocation(userId: string, organizationId: string, locationId: string | null, input: z.infer<typeof locationBody>) {
+export async function saveLocation(userId: string, organizationId: string, locationId: string | null, input: Parameters<typeof locationMetadata>[0]) {
   return prisma.$transaction(async tx => {
     await lock(tx, organizationId)
     const actor = await actorIn(tx, userId, organizationId)
     requirePermission(actor, locationId ? 'locations.edit' : 'locations.create', locationId ?? null)
-    if (locationId && !await tx.organizationLocation.findFirst({ where: { id: locationId, organizationId, archivedAt: null } })) throw new ApiError(404, 'LOCATION_NOT_FOUND', 'Точка не найдена.')
+    const current=locationId?await tx.organizationLocation.findFirst({where:{id:locationId,organizationId,archivedAt:null}}):null
+    if(locationId&&!current)throw new ApiError(404,'LOCATION_NOT_FOUND','Точка не найдена.')
+    if(current&&input.revision!==undefined&&input.revision!==current.revision)throw new ApiError(409,'LOCATION_CHANGED','Точка уже изменена. Обновите сведения перед сохранением.')
     if (!locationId) await requireCapacity(tx, organizationId, 'locations')
-    const { teamNames, ...metadata } = input
-    const location = locationId ? await tx.organizationLocation.update({ where: { id: locationId }, data: metadata }) : await tx.organizationLocation.create({ data: { ...metadata, organizationId } })
+    const {teamNames}=input
+    const timezone=(await tx.organization.findUniqueOrThrow({where:{id:organizationId},select:{timezone:true}})).timezone
+    const metadata=locationMetadata(input,timezone)
+    const location = locationId ? await tx.organizationLocation.update({ where: { id: locationId }, data: {...metadata,revision:{increment:1}} }) : await tx.organizationLocation.create({ data: { ...metadata, organizationId } })
     if (!locationId && (teamNames ?? []).length) await tx.locationTeam.createMany({ data: (teamNames ?? []).map(name => ({ organizationId, locationId: location.id, name })) })
     if (!locationId) await tx.locationMember.create({ data: { organizationId, locationId: location.id, memberId: actor.id } })
     return location

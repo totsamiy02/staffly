@@ -1,3 +1,6 @@
+import { createHash } from 'node:crypto'
+import { stableJson } from '../../shared/stable-json.ts'
+import type { LocationProfile } from '../../shared/organization-profile.ts'
 import { organizationAvailable } from './service-state.ts'
 import { recordSecurityEvent } from '../security/journal.ts'
 import { requireCapacity, subscriptionSnapshot } from '../subscriptions/access.ts'
@@ -7,35 +10,51 @@ import { revokeMemberAccess } from './access/member-lifecycle.ts'
 import { locationMemberWhere, scopedLocationId } from './location-context.ts'
 import { listNotificationHistory } from './notification-service.ts'
 import { onlineSessions } from '../profile/presence.ts'
-import type { OrganizationRole, Prisma } from '../../generated/prisma/client.ts'
+import { Prisma, type OrganizationRole } from '../../generated/prisma/client.ts'
 import { prisma } from '../db.ts'
 import { ApiError } from '../api-error.ts'
 import { assertCanChangeRole, assertCanRemoveMember, getMembership } from './access/permissions.ts'
-import { bindProfileImage, mediaUrl } from '../storage/image-service.ts'
+import { bindOrganizationLogoDraft, bindProfileImage, mediaUrl } from '../storage/image-service.ts'
 import { seedSystemRequestTypes } from '../requests/service.ts'
 
-export type CreateOrganizationInput = { initialPlan?: 'FREE' | 'TRIAL'; name: string; description: string | null; timezone: string; firstLocation?: { name: string; city: string; address: string; timezone: string; teamNames?: string[] }; locations?: Array<{ name: string; city: string; address: string; timezone: string; teamNames?: string[] }> }
-export type UpdateOrganizationInput = Pick<CreateOrganizationInput, 'name' | 'description' | 'timezone'> & { contactEmail: string | null; phone: string | null; website: string | null; address: string | null; logoUploadId?: string | null }
+type NewLocation = {name:string;city:string;address:string;timezone:string;teamNames?:string[]} & LocationProfile
+export type CreateOrganizationInput = {initialPlan?:'FREE'|'TRIAL';name:string;description:string|null;timezone:string;industry?:string|null;contactEmail?:string|null;phone?:string|null;website?:string|null;address?:string|null;logoUploadId?:string|null;creationKey?:string;firstLocation?:NewLocation;locations?:NewLocation[]}
+export type UpdateOrganizationInput = Pick<CreateOrganizationInput,'name'|'description'|'timezone'|'industry'> & {contactEmail:string|null;phone:string|null;website:string|null;address:string|null;logoUploadId?:string|null;profileRevision?:number}
+function fingerprint(value:unknown):string {return createHash('sha256').update(stableJson(value)).digest('hex')}
 
-export async function createOrganization(userId: string, input: CreateOrganizationInput) {
-  if (input.initialPlan === 'TRIAL') throw new ApiError(403,'SUBSCRIPTION_MANUAL_ONLY','Новые организации начинают с Бесплатного тарифа. После создания владелец может выбрать другой тариф в настройках без оплаты.')
-  return prisma.$transaction(async (tx) => {
-    const organization = await tx.organization.create({ data: { name: input.name, description: input.description, timezone: input.timezone, createdByUserId: userId } })
-    await ensureAccessRoles(tx, organization.id)
-    const owner = await tx.organizationMember.create({ data: { organizationId: organization.id, userId, role: 'OWNER' } })
-    const locationInputs = [input.firstLocation ?? { name: 'Основная точка', city: '', address: '', timezone: input.timezone }, ...(input.locations ?? [])]
-    const locations = []
-    await requireCapacity(tx, organization.id, 'locations', locationInputs.length)
-    for (const item of locationInputs) {
-      const location = await tx.organizationLocation.create({ data: { name: item.name, city: item.city, address: item.address, timezone: item.timezone, organizationId: organization.id } })
-      await tx.locationMember.create({ data: { organizationId: organization.id, locationId: location.id, memberId: owner.id } })
-      if ('teamNames' in item && item.teamNames?.length) await tx.locationTeam.createMany({ data: [...new Set(item.teamNames.filter(Boolean))].map(name => ({ organizationId: organization.id, locationId: location.id, name })) })
-      locations.push({ ...location, role: 'OWNER' as const })
-    }
-    await seedSystemRequestTypes(tx, organization.id)
-    await tx.documentFolder.createMany({ data: [{ organizationId: organization.id, name: 'Главная' }, { organizationId: organization.id, name: 'Документы сотрудников', systemKey: 'employees:shared' }] })
-    return { ...organization, logoUrl: null, role: 'OWNER' as const, organizationRole: 'OWNER' as const, locations, locationId: locations[0].id, memberCount: 1 }
-  })
+export function locationMetadata(item:NewLocation,timezone:string){
+ return {name:item.name,city:item.kind==='REMOTE'?'':item.city,address:item.kind==='REMOTE'?'':item.address,timezone:item.inheritsTimezone?timezone:item.timezone,kind:item.kind??'PHYSICAL',phone:item.phone??null,description:item.description??null,inheritsTimezone:item.inheritsTimezone??false,openingHours:item.openingHours==null?Prisma.DbNull:item.openingHours}
+}
+export async function createOrganization(userId:string,input:CreateOrganizationInput){
+ if(input.initialPlan==='TRIAL')throw new ApiError(403,'SUBSCRIPTION_MANUAL_ONLY','Новые организации начинают с Бесплатного тарифа. После создания владелец может выбрать другой тариф в настройках без оплаты.')
+ return prisma.$transaction(async tx=>{
+  if(input.creationKey){
+   await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${userId},519721))::text`
+   const previous=await tx.organization.findUnique({where:{createdByUserId_creationKey:{createdByUserId:userId,creationKey:input.creationKey}},include:{locations:{orderBy:[{createdAt:'asc'},{id:'asc'}]}}})
+   if(previous){
+    if(previous.creationFingerprint!==fingerprint(input))throw new ApiError(409,'CREATION_CHANGED','Данные уже отправленного создания изменились. Проверьте список организаций перед новым созданием.')
+    const member=await getMembership(userId,previous.id,tx)
+    if(!member.owner)throw new ApiError(403,'OWNER_REQUIRED','Организация уже создана. Проверьте текущие права в списке организаций.')
+    return {...previous,logoUrl:mediaUrl(previous.logoFileId),role:'OWNER' as const,organizationRole:'OWNER' as const,locations:previous.locations.map(point=>({...point,role:'OWNER' as const})),locationId:previous.locations[0].id,memberCount:await tx.organizationMember.count({where:{organizationId:previous.id,leftAt:null}})}
+   }
+  }
+  const organization=await tx.organization.create({data:{name:input.name,description:input.description,industry:input.industry??null,timezone:input.timezone,contactEmail:input.contactEmail??null,phone:input.phone??null,website:input.website??null,address:input.address??null,createdByUserId:userId,creationKey:input.creationKey,creationFingerprint:input.creationKey?fingerprint(input):null}})
+  await ensureAccessRoles(tx,organization.id)
+  const owner=await tx.organizationMember.create({data:{organizationId:organization.id,userId,role:'OWNER'}})
+  const locationInputs=[input.firstLocation??{name:'Основная точка',city:'',address:'',timezone:input.timezone},...(input.locations??[])],locations=[]
+  await requireCapacity(tx,organization.id,'locations',locationInputs.length)
+  for(const item of locationInputs){
+   const location=await tx.organizationLocation.create({data:{...locationMetadata(item,input.timezone),organizationId:organization.id}})
+   await tx.locationMember.create({data:{organizationId:organization.id,locationId:location.id,memberId:owner.id}})
+   if(item.teamNames?.length)await tx.locationTeam.createMany({data:[...new Set(item.teamNames.filter(Boolean))].map(name=>({organizationId:organization.id,locationId:location.id,name}))})
+   locations.push({...location,role:'OWNER' as const})
+  }
+  const logoFileId=input.logoUploadId?await bindOrganizationLogoDraft(tx,userId,organization.id,input.logoUploadId):null
+  if(logoFileId)await tx.organization.update({where:{id:organization.id},data:{logoFileId}})
+  await seedSystemRequestTypes(tx,organization.id)
+  await tx.documentFolder.createMany({data:[{organizationId:organization.id,name:'Главная'},{organizationId:organization.id,name:'Документы сотрудников',systemKey:'employees:shared'}]})
+  return {...organization,logoFileId,logoUrl:mediaUrl(logoFileId),role:'OWNER' as const,organizationRole:'OWNER' as const,locations,locationId:locations[0].id,memberCount:1}
+ })
 }
 
 export async function listOrganizations(userId: string) {
@@ -53,6 +72,7 @@ export async function listOrganizations(userId: string) {
     createdByViewer: organization.createdByUserId === userId,
     name: organization.name,
     description: organization.description,
+    industry:organization.industry, profileRevision:organization.profileRevision,
     timezone: organization.timezone,
     role,
     joinedAt,
@@ -74,6 +94,7 @@ export async function getOrganization(userId: string, organizationId: string) {
     publicId:membership.organization.publicId,
     name: membership.organization.name,
     description: membership.organization.description,
+    industry:membership.organization.industry, profileRevision:membership.organization.profileRevision,
     timezone: membership.organization.timezone,
     role: membership.role,
     owner: membership.owner, permissions: membership.permissions, organizationPermissions: membership.organizationPermissions, permissionLocations: membership.permissionLocations, roleName: membership.roleName,
@@ -95,14 +116,16 @@ export async function getOrganization(userId: string, organizationId: string) {
 export async function updateOrganization(userId: string, organizationId: string, input: UpdateOrganizationInput) {
   const membership = await getMembership(userId, organizationId)
   requirePermission(membership, 'organization.edit', null)
-  const { logoUploadId, ...fields } = input
+  const { logoUploadId, profileRevision, ...fields } = input
   return prisma.$transaction(async tx => {
     await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId},1))::text`
     requirePermission(await getMembership(userId, organizationId, tx), 'organization.edit', null)
     await tx.$queryRaw`SELECT id FROM organizations WHERE id=${organizationId}::uuid FOR UPDATE`
-    const current = await tx.organization.findUniqueOrThrow({ where: { id: organizationId }, select: { logoFileId: true } })
+    const current = await tx.organization.findUniqueOrThrow({ where: { id: organizationId }, select: { logoFileId: true, profileRevision:true } })
+    if(profileRevision!==undefined&&profileRevision!==current.profileRevision)throw new ApiError(409,'PROFILE_CHANGED','Профиль уже изменился. Обновите сведения перед сохранением.')
     const logoFileId = logoUploadId === undefined ? current.logoFileId : await bindProfileImage(tx, userId, current.logoFileId, logoUploadId, organizationId)
-    return tx.organization.update({ where: { id: organizationId }, data: { ...fields, logoFileId } })
+    await tx.organizationLocation.updateMany({where:{organizationId,inheritsTimezone:true,timezone:{not:input.timezone}},data:{timezone:input.timezone,revision:{increment:1}}})
+    return tx.organization.update({ where: { id: organizationId }, data: { ...fields, logoFileId,profileRevision:{increment:1} } })
   })
 }
 

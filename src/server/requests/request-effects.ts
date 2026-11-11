@@ -1,3 +1,5 @@
+import {requireLocationInPlan} from '../subscriptions/access.ts'
+import {checkOpeningHours} from '../schedule/opening-hours.ts'
 import type { Prisma,RequestSystemCode } from '../../generated/prisma/client.ts'
 import { publishRequestNotices } from './request-notifications.ts'
 
@@ -18,7 +20,7 @@ import type { RequestDefinition } from '../../app/requests/workflow.ts'
 import { conflictsFor } from './request-conflicts.ts'
 import type { RequestActor } from './request-model.ts'
 import { cancelStaffingResponses } from './staffing-service.ts'
-export type DecisionContext = { tx: Prisma.TransactionClient; current: Prisma.OrganizationRequestGetPayload<{include:{creator:true}}>; actor: RequestActor; organizationId: string; requestId: string; decision: 'APPROVED' | 'REJECTED'; acknowledgeWorkload: boolean; acknowledgeAbsence: boolean; cancelConflictingShifts: boolean; liveConflicts: Awaited<ReturnType<typeof conflictsFor>>; definition: RequestDefinition }
+export type DecisionContext = { tx: Prisma.TransactionClient; current: Prisma.OrganizationRequestGetPayload<{include:{creator:true}}>; actor: RequestActor; organizationId: string; requestId: string; decision: 'APPROVED' | 'REJECTED'; acknowledgeWorkload: boolean; acknowledgeAbsence: boolean; openingHoursConfirmation?:string; cancelConflictingShifts: boolean; liveConflicts: Awaited<ReturnType<typeof conflictsFor>>; definition: RequestDefinition }
 type ApprovalHandler = (context: DecisionContext) => Promise<void>
 
 async function approveStaffing(context: DecisionContext) {
@@ -32,8 +34,10 @@ if (decision === 'APPROVED' && current.systemCodeSnapshot === 'STAFFING_RESPONSE
       await tx.locationTransfer.create({ data: { organizationId, memberId: current.createdByMemberId, createdByMemberId: actor.id, fromLocationId: source.locationId, toLocationId: current.locationId, temporary: true, startAt: offer.proposedStartAt, endAt: offer.proposedEndAt } })
       await activeTarget(tx, organizationId, current.createdByMemberId, offer.proposedStartAt, offer.proposedEndAt)
       await assertNoApprovedAbsence(organizationId, current.createdByMemberId, offer.proposedStartAt, offer.proposedEndAt, actor.organization.timezone, tx, acknowledgeAbsence)
+      await checkOpeningHours(tx,organizationId,current.locationId,[{start:offer.proposedStartAt,end:offer.proposedEndAt}],context.openingHoursConfirmation)
       await checkMonthlyWorkload(tx, organizationId, current.createdByMemberId, actor.organization.timezone, actor.organization.monthlyWorkMinutes, [{ start: offer.proposedStartAt, end: offer.proposedEndAt }], [], acknowledgeWorkload)
       if (await tx.workShift.findFirst({ where: { organizationId, memberId: current.createdByMemberId, status: 'SCHEDULED', scheduledStartAt: { lt: offer.proposedEndAt }, scheduledEndAt: { gt: offer.proposedStartAt } } })) throw new ApiError(409, 'SHIFT_OVERLAP', 'В это время у сотрудника уже есть смена в одной из точек.')
+      await requireLocationInPlan(tx,organizationId,current.locationId)
       const shift = await tx.workShift.create({ data: { organizationId, locationId: current.locationId, memberId: current.createdByMemberId, createdByMemberId: actor.id, scheduledStartAt: offer.proposedStartAt, scheduledEndAt: offer.proposedEndAt, positionId: offer.staffingPositionId, positionNameSnapshot: offer.staffingPositionName, description: offer.comment?.slice(0, 500) }, include: { member: true } })
       await tx.organizationRequest.update({ where: { id: current.id }, data: { relatedShiftId: shift.id } })
       await tx.organizationRequest.update({ where: { id: offer.id }, data: { status: 'APPROVED', resolvedAt: new Date(), resolvedByMemberId: actor.id, relatedShiftId: shift.id } })
@@ -49,11 +53,13 @@ async function approveShiftProposal(context: DecisionContext) {
       if (!current.proposedStartAt || !current.proposedEndAt || current.proposedStartAt <= new Date()) throw new ApiError(409, 'SHIFT_PROPOSAL_PAST', 'Предложенная смена уже началась или не указана.')
       if (current.proposedStartAt && current.proposedEndAt) await activeTarget(tx, organizationId, current.createdByMemberId, current.proposedStartAt, current.proposedEndAt)
       if (current.creator.leftAt || !await tx.organizationMember.findFirst({ where: { id: current.createdByMemberId, organizationId, leftAt: null, user: { deletedAt: null } } })) throw new ApiError(409, 'MEMBER_LEFT', 'Сотрудник больше не состоит в организации.')
+      await checkOpeningHours(tx,organizationId,current.locationId,[{start:current.proposedStartAt!,end:current.proposedEndAt!}],context.openingHoursConfirmation)
       await checkMonthlyWorkload(tx, organizationId, current.createdByMemberId, actor.organization.timezone, actor.organization.monthlyWorkMinutes, [{ start: current.proposedStartAt, end: current.proposedEndAt }], current.relatedShiftId ? [current.relatedShiftId] : [], acknowledgeWorkload)
     }
 if (decision === 'APPROVED' && current.systemCodeSnapshot === 'SHIFT_PROPOSAL') {
       await assertNoApprovedAbsence(organizationId, current.createdByMemberId, current.proposedStartAt!, current.proposedEndAt!, actor.organization.timezone, tx, acknowledgeAbsence)
       if (await tx.workShift.findFirst({ where: { organizationId, memberId: current.createdByMemberId, status: 'SCHEDULED', scheduledStartAt: { lt: current.proposedEndAt! }, scheduledEndAt: { gt: current.proposedStartAt! } } })) throw new ApiError(409, 'SHIFT_OVERLAP', 'В предложенное время уже есть смена.')
+      await requireLocationInPlan(tx,organizationId,current.locationId)
       const createdShift = await tx.workShift.create({ data: { organizationId, locationId: current.locationId, memberId: current.createdByMemberId, createdByMemberId: actor.id, scheduledStartAt: current.proposedStartAt!, scheduledEndAt: current.proposedEndAt!, description: current.comment?.slice(0, 500) }, include: { member: true } })
       await tx.organizationRequest.update({ where: { id: requestId }, data: { relatedShiftId: createdShift.id } })
       await recordShiftNotification(tx, createdShift, 'SHIFT_ASSIGNED', actor.organization.timezone)
@@ -66,6 +72,7 @@ async function approveShiftChange(context: DecisionContext) {
       if (!current.proposedStartAt || !current.proposedEndAt || current.proposedStartAt <= new Date()) throw new ApiError(409, 'SHIFT_PROPOSAL_PAST', 'Предложенная смена уже началась или не указана.')
       if (current.proposedStartAt && current.proposedEndAt) await activeTarget(tx, organizationId, current.createdByMemberId, current.proposedStartAt, current.proposedEndAt)
       if (current.creator.leftAt || !await tx.organizationMember.findFirst({ where: { id: current.createdByMemberId, organizationId, leftAt: null, user: { deletedAt: null } } })) throw new ApiError(409, 'MEMBER_LEFT', 'Сотрудник больше не состоит в организации.')
+      await checkOpeningHours(tx,organizationId,current.locationId,[{start:current.proposedStartAt!,end:current.proposedEndAt!}],context.openingHoursConfirmation)
       await checkMonthlyWorkload(tx, organizationId, current.createdByMemberId, actor.organization.timezone, actor.organization.monthlyWorkMinutes, [{ start: current.proposedStartAt, end: current.proposedEndAt }], current.relatedShiftId ? [current.relatedShiftId] : [], acknowledgeWorkload)
     }
 if (decision==='APPROVED' && current.systemCodeSnapshot==='SHIFT_CHANGE') requirePermission(actor,'schedule.edit',current.locationId)

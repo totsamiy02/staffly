@@ -1,3 +1,4 @@
+import {checkOpeningHours} from '../opening-hours.ts'
 import { requirePlanFeature, subscriptionSnapshot } from '../../subscriptions/access.ts'
 import { randomUUID } from 'node:crypto'
 import type { Prisma, ScheduleDraft, DraftShift } from '../../../generated/prisma/client.ts'
@@ -328,6 +329,7 @@ async function validateDraftIn(tx:DB,actor:Actor,d:ScheduleDraft):Promise<DraftV
     const load=await checkMonthlyWorkload(tx,d.organizationId,memberId,d.timezone,actor.organization.monthlyWorkMinutes,additions.filter(p=>p.proposed.memberId===memberId).map(p=>({start:new Date(p.proposed.scheduledStartAt),end:new Date(p.proposed.scheduledEndAt)})),excluded,true)
     for(const w of load) warnings.push({code:'WORKLOAD_WARNING',message:(additions.find(p=>p.proposed.memberId===memberId)?.proposed.memberName??'Сотрудник')+': '+w.month+' — '+(w.minutes/60).toFixed(1)+' ч при норме '+(w.limit/60).toFixed(1)+' ч.'})
   }
+  try{await checkOpeningHours(tx,d.organizationId,d.locationId,additions.map(p=>({start:new Date(p.proposed.scheduledStartAt),end:new Date(p.proposed.scheduledEndAt)})))}catch(e){if(e instanceof ApiError&&e.code==='OPENING_HOURS_WARNING')warnings.push({code:e.code,message:e.message});else throw e}
   const picture=await workPicture(tx,actor,d,(await tx.draftShift.findMany({where:{draftId:d.id}})).map(proposal))
   const coverage=await coverageFor(tx,actor,dateText(d.fromDate),addCalendarDays(dateText(d.toDate),1),picture)
   const shortage=coverage.reduce((sum,day)=>sum+day.shortageIntervals,0),surplus=coverage.reduce((sum,day)=>sum+day.surplusIntervals,0)
@@ -399,6 +401,7 @@ export async function actOnDraft(userId:string,organizationId:string,id:string,i
       const validation=await validateDraftIn(tx,actor,d)
       if(validation.errors.length)throw new ApiError(409,'DRAFT_CONFLICTS',validation.errors.map(e=>e.message).join(' '),validation)
       if(validation.warnings.some(w=>w.code==='WORKLOAD_WARNING')&&!input.acknowledgeWorkload)throw new ApiError(409,'WORKLOAD_WARNING','Подтвердите применение с превышением месячной нормы.',validation)
+      await checkOpeningHours(tx,d.organizationId,d.locationId,changes.filter(p=>p.kind!=='CANCEL').map(p=>({start:new Date(p.proposed.scheduledStartAt),end:new Date(p.proposed.scheduledEndAt)})),input.openingHoursConfirmation)
       const openComments=await tx.draftComment.count({where:{draftId:id,status:'OPEN'}})
       if(openComments && (!input.confirm||input.explanation.length<3))throw new ApiError(400,'OPEN_COMMENTS','Есть открытые замечания. Подтвердите применение и укажите объяснение руководителя.')
       snapshot=await workPicture(tx,actor,d,proposals)
@@ -406,7 +409,7 @@ export async function actOnDraft(userId:string,organizationId:string,id:string,i
       for(const p of changes) {
         const current=p.sourceShiftId?await tx.workShift.findUniqueOrThrow({where:{id:p.sourceShiftId}}):undefined
         const s=p.proposed
-        const effect=await mutatePlannedShift(tx,actor,p.kind==='CANCEL'?{current,reason:'Отмена по предварительному графику «'+d.title.slice(0,160)+'»'}:{current,input:{memberId:s.memberId,positionId:s.positionId,breakMinutes:s.breakMinutes,description:s.description,startDate:'',endDate:'',startTime:'',endTime:''},startAt:new Date(s.scheduledStartAt),endAt:new Date(s.scheduledEndAt)})
+        const effect=await mutatePlannedShift(tx,actor,p.kind==='CANCEL'?{current,reason:'Отмена по предварительному графику «'+d.title.slice(0,160)+'»'}:{current,openingHoursValidated:true,input:{memberId:s.memberId,positionId:s.positionId,breakMinutes:s.breakMinutes,description:s.description,startDate:'',endDate:'',startTime:'',endTime:''},startAt:new Date(s.scheduledStartAt),endAt:new Date(s.scheduledEndAt)})
         effects.push(effect)
         await tx.draftShift.update({where:{id:p.id},data:{appliedShiftId:effect.changed.id}})
         if(p.kind!=='CANCEL')snapshot=snapshot.map(shift=>shift.id===s.id?{...s,id:effect.changed.id}:shift)

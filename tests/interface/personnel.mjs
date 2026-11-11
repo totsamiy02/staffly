@@ -1,7 +1,7 @@
 import AxeBuilder from '@axe-core/playwright'
 import { hash } from 'argon2'
 import assert from 'node:assert/strict'
-import { randomUUID, createHash } from 'node:crypto'
+import { randomUUID, randomBytes, createHash } from 'node:crypto'
 import { writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { createServer as socketServer } from 'node:net'
@@ -19,7 +19,7 @@ export async function runPersonnel({ prisma, env, root, output, options, tempora
   const socket=socketServer();await new Promise(r=>socket.listen(0,'127.0.0.1',r));const port=socket.address().port;await new Promise(r=>socket.close(r))
   const origin='http://127.0.0.1:'+port;env.APP_ORIGIN=origin;env.RUN_BACKGROUND_WORKERS='false'
   const api=await startApi(),{devApiProxy}=await import('../../scripts/dev-api-proxy.ts')
-  const server=await createServer({configFile:false,root,plugins:[react(),devApiProxy(Number(new URL(api).port))],server:{host:'127.0.0.1',port,strictPort:true,watch:{ignored:['**/artifacts/**','**/storage/**','**/docs/**','**/src/server/**','**/src/generated/**']}},logLevel:'error'})
+  const server=await createServer({configFile:false,root,cacheDir:path.join(temporary,'vite-cache'),plugins:[react(),devApiProxy(Number(new URL(api).port))],server:{host:'127.0.0.1',port,strictPort:true,watch:{ignored:['**/artifacts/**','**/storage/**','**/docs/**','**/src/server/**','**/src/generated/**']}},logLevel:'error'})
   await server.listen()
   const result={status:'running',theme,checks:[],errors:[],screenshots:[]}
   const save=()=>writeFile(path.join(output,'personnel.json'),JSON.stringify(result,null,2))
@@ -39,8 +39,8 @@ export async function runPersonnel({ prisma, env, root, output, options, tempora
         const context=await browser.newContext({viewport:viewport==='mobile'?{width:390,height:844}:{width:1440,height:1000},locale:'ru-RU',timezoneId:'Europe/Moscow',reducedMotion:'reduce'})
         contexts.push(context)
         await context.addInitScript(theme=>{localStorage.setItem('staffly.theme',theme);localStorage.setItem('staffly-cookie-consent','necessary')},theme)
-        const token=randomUUID()+randomUUID();await prisma.authSession.create({data:{userId:person.id,refreshTokenHash:createHash('sha256').update(token).digest('hex'),idleExpiresAt:new Date(Date.now()+3600000),absoluteExpiresAt:new Date(Date.now()+3600000)}})
-        await context.addCookies([{name:'staffly_refresh',value:token,domain:'127.0.0.1',path:'/api/auth',httpOnly:true,sameSite:'Lax'}])
+        const token=randomUUID()+randomUUID(),browserToken=randomBytes(48).toString('base64url');await prisma.authSession.create({data:{userId:person.id,browserTokenHash:createHash('sha256').update(browserToken).digest('hex'),refreshTokenHash:createHash('sha256').update(token).digest('hex'),idleExpiresAt:new Date(Date.now()+3600000),absoluteExpiresAt:new Date(Date.now()+3600000)}})
+        await context.addCookies([{name:'staffly_refresh',value:token,domain:'127.0.0.1',path:'/api/auth',httpOnly:true,sameSite:'Lax'},{name:'staffly_browser',value:browserToken,domain:'127.0.0.1',path:'/api/auth',httpOnly:true,sameSite:'Lax'}])
         const page=await context.newPage();pages.push(page);page.on('request',request=>{const authorization=request.headers().authorization;if(authorization)tokens.set(page,authorization)});page.on('pageerror',error=>result.errors.push({viewport,error:error.message}))
       }
       const [op,mp,ep]=pages

@@ -19,7 +19,7 @@ export async function runWorkspaceSafety({ prisma, env, root, temporary, output,
   env.APP_ORIGIN = origin; env.RUN_BACKGROUND_WORKERS = 'false'
   const api = await startApi(), apiPort = Number(new URL(api).port)
   const { devApiProxy } = await import('../../scripts/dev-api-proxy.ts')
-  const server = await createServer({ configFile: false, root, plugins: [react(), devApiProxy(apiPort)], server: { host: '127.0.0.1', port, strictPort: true, watch: { ignored: ['**/artifacts/**', '**/storage/**', '**/docs/**', '**/src/server/**', '**/src/generated/**'] } }, logLevel: 'error' })
+  const server = await createServer({ configFile: false, root, cacheDir: path.join(temporary, 'vite-cache'), plugins: [react(), devApiProxy(apiPort)], server: { host: '127.0.0.1', port, strictPort: true, watch: { ignored: ['**/artifacts/**', '**/storage/**', '**/docs/**', '**/src/server/**', '**/src/generated/**'] } }, logLevel: 'error' })
   await server.listen()
   const firefoxHome = path.join(temporary, 'firefox-app-data'); await mkdir(firefoxHome, { recursive: true })
   const launch = {

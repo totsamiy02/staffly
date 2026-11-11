@@ -304,6 +304,10 @@ enum RequestEventType {
 }
 
 model Organization {
+  industry String? @db.VarChar(120)
+  profileRevision Int @default(1) @map("profile_revision")
+  creationKey String? @map("creation_key") @db.Uuid
+  creationFingerprint String? @map("creation_fingerprint") @db.VarChar(64)
   serviceState String @default("ACTIVE") @map("service_state") @db.VarChar(16)
   serviceReason String? @map("service_reason") @db.VarChar(1000)
   serviceUntil DateTime? @map("service_until") @db.Timestamptz(3)
@@ -368,6 +372,7 @@ model Organization {
 
   @@index([createdByUserId])
   @@index([deletedAt])
+  @@unique([createdByUserId, creationKey])
   @@map("organizations")
 }
 
@@ -1099,6 +1104,12 @@ enum LocationRole {
 }
 
 model OrganizationLocation {
+  kind String @default("PHYSICAL") @db.VarChar(16)
+  phone String? @db.VarChar(12)
+  description String? @db.VarChar(1000)
+  openingHours Json? @map("opening_hours")
+  inheritsTimezone Boolean @default(false) @map("inherits_timezone")
+  revision Int @default(1)
   coverageEnabled Boolean @default(false) @map("coverage_enabled")
   discussionEnabled Boolean @default(false) @map("discussion_enabled")
   discussionHours Int @default(24) @map("discussion_hours")

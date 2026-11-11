@@ -18,9 +18,10 @@ type ImageUploadProps = {
   onBusyChange?: (busy: boolean) => void
   onDraftChange?: (file: File | null) => void
   floatingControls?: boolean
+  draftHint?:string
 }
 
-export default function ImageUpload({ endpoint, imageUrl, name, avatarClassName, disabled = false, onChange, onMessage, onError, onBusyChange, onDraftChange, floatingControls = false }: ImageUploadProps) {
+export default function ImageUpload({ endpoint, imageUrl, name, avatarClassName, disabled = false, onChange, onMessage, onError, onBusyChange, onDraftChange, floatingControls = false, draftHint='Фото изменится после сохранения профиля.' }: ImageUploadProps) {
   const { apiRequest, uploadImage } = useAuth()
   const [busy, setBusy] = useState(false)
   const picker = useRef<HTMLInputElement>(null)
@@ -63,6 +64,6 @@ export default function ImageUpload({ endpoint, imageUrl, name, avatarClassName,
       <FilePicker compact value={[]} label="Фотография" buttonLabel={busy ? 'Обрабатываем…' : imageUrl ? 'Заменить фото' : 'Загрузить фото'} accept="image/jpeg,image/png,image/webp" maxBytes={MAX_IMAGE_BYTES} disabled={busy} onChange={files => void selectFile(files[0])}/>
       {imageUrl && <button className="image-upload__remove" type="button" disabled={busy} onClick={() => void remove()}>Удалить</button>}
     </div>
-    <p className="image-upload__hint">JPG, PNG, WebP · до 8 МБ{onDraftChange && <><br />Фото изменится после сохранения профиля.</>}</p></div>}
+    <p className="image-upload__hint">JPG, PNG, WebP · до 8 МБ{onDraftChange && <><br />{draftHint}</>}</p></div>}
   </div>
 }

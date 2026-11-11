@@ -291,6 +291,10 @@ try {
   if (options.profile === 'admin') {
     const { runAdminInterface } = await import('../interface/admin-monitoring.mjs')
     results.admin = await runAdminInterface({ prisma, env, root, temporary, output, options })
+  } else if (options.profile === 'organization-profile') {
+    results.methodology='Real Chromium desktop/mobile organization creation, staged logo upload, validation rejection and lost-response retry, profile and point editing, and deliberate error-boundary rendering. Disposable PostgreSQL, temporary storage and isolated Vite cache only.'
+    const {runOrganizationProfiles}=await import('../interface/organization-profiles.mjs')
+    results.organizationProfiles=await runOrganizationProfiles({prisma,env,root,temporary,output,options,startApi})
   } else if (options.profile === 'personnel') {
     results.methodology = 'Real Chromium owner/manager/employee workflows on desktop/mobile in a fresh PostgreSQL cluster and temporary file storage. Synthetic accounts only; no external SMTP, real payments or production data. API authorization, network failures, lost responses, acknowledgement, archive and rehire are checked.'
     const { runPersonnel } = await import('../interface/personnel.mjs')

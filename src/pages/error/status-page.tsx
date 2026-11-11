@@ -5,7 +5,7 @@ export default function StatusPage({ status = 404 }: { status?: 404 | 500 }) {
   const missing = status === 404
   return <main className="status-page" role="main">
     <section>
-      <span>{status}</span>
+      <span className="status-page__code">{status}</span>
       <p>{missing ? 'Страница не найдена' : 'Произошла ошибка'}</p>
       <h1>{missing ? 'Такой страницы нет' : 'Не удалось открыть страницу'}</h1>
       <p>{missing ? 'Возможно, ссылка устарела или в адресе есть ошибка.' : 'Обновите страницу или попробуйте снова немного позже.'}</p>

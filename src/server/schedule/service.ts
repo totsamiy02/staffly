@@ -1,3 +1,5 @@
+import {requireLocationInPlan} from '../subscriptions/access.ts'
+import {checkOpeningHours} from './opening-hours.ts'
 import { hasPermission, requirePermission } from '../organizations/access/access.ts'
 import { displayDate, shiftTimeRange, zonedDateAndTime } from '../../app/schedule/date-utils.ts'
 import { requireLocationManager } from '../organizations/location-service.ts'
@@ -20,7 +22,7 @@ export function shiftConflictMessage(shift: {scheduledStartAt:Date|string;schedu
   return `Уже назначена смена ${displayDate(zonedDateAndTime(start,timezone).date)}, ${shiftTimeRange(start,end,timezone)}. Две смены одного сотрудника не могут совпадать по времени. Измените время или выберите другого сотрудника.`
 }
 
-export type ShiftInput = { memberId: string; startDate: string; startTime: string; endDate: string; endTime: string; breakMinutes: number; description: string | null; positionId?: string | null; acknowledgeWorkload?: boolean; acknowledgeAbsence?: boolean }
+export type ShiftInput = { memberId: string; startDate: string; startTime: string; endDate: string; endTime: string; breakMinutes: number; description: string | null; positionId?: string | null; acknowledgeWorkload?: boolean; acknowledgeAbsence?: boolean; openingHoursConfirmation?:string }
 export type ActualInput = Omit<ShiftInput, 'memberId' | 'description'> & { reason: string }
 
 function isOverlapError(error: unknown) {
@@ -165,10 +167,10 @@ export async function listMyUpcomingShifts(userId: string, organizationId: strin
 }
 
 export async function createShift(userId: string, organizationId: string, input: ShiftInput) {
-  return (await createShiftBatch(userId, organizationId, [input], input.acknowledgeWorkload)).shifts[0]
+  return (await createShiftBatch(userId, organizationId, [input], input.acknowledgeWorkload,input.openingHoursConfirmation)).shifts[0]
 }
 
-export async function createShiftBatch(userId: string, organizationId: string, inputs: ShiftInput[], acknowledgeWorkload = false) {
+export async function createShiftBatch(userId: string, organizationId: string, inputs: ShiftInput[], acknowledgeWorkload = false,openingHoursConfirmation?:string) {
   const actor = await getMembership(userId, organizationId)
   requirePermission(actor, 'schedule.create')
   if (!inputs.length || inputs.length > 62) throw new ApiError(400, 'BATCH_SIZE', 'Выберите от 1 до 62 смен.')
@@ -181,6 +183,8 @@ export async function createShiftBatch(userId: string, organizationId: string, i
   try {
     const result = await prisma.$transaction(async tx => {
       if (scopedLocationId(organizationId)) { await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId}, 1))::text`; await requireLocationManager(tx, userId, organizationId, actor.locationId, 'schedule.create') }
+      await requireLocationInPlan(tx,organizationId,actor.locationId)
+      await checkOpeningHours(tx,organizationId,actor.locationId,prepared,openingHoursConfirmation)
       const records = []
       for (const memberId of [...new Set(inputs.map(input => input.memberId))].sort()) {
         await activeTarget(tx, organizationId, memberId)
@@ -193,10 +197,10 @@ export async function createShiftBatch(userId: string, organizationId: string, i
           const conflict = await tx.workShift.findFirst({ where: { organizationId, memberId: input.memberId, status: 'SCHEDULED', scheduledStartAt: { lt: end }, scheduledEndAt: { gt: start } } }); if (conflict) throw new ApiError(409, 'SHIFT_OVERLAP', shiftConflictMessage(conflict,actor.organization.timezone))
           const position = input.positionId ? await tx.organizationPosition.findFirst({ where: { id: input.positionId, organizationId, isActive: true, members: { some: { memberId: input.memberId } } } }) : null
           if (input.positionId && !position) throw new ApiError(400, 'POSITION_NOT_ASSIGNED', 'Должность не назначена сотруднику или неактивна.')
-          const mutation = await mutatePlannedShift(tx, actor, { input, startAt: start, endAt: end })
+          const mutation = await mutatePlannedShift(tx, actor, { input, startAt: start, endAt: end,openingHoursValidated:true })
           records.push({ created: mutation.changed, notification: mutation.notification! })
         } catch (error) {
-          if (error instanceof ApiError) throw new ApiError(error.status, error.code, input.startDate + ': ' + error.message + ' Пакет не сохранён.', { date: input.startDate })
+          if (error instanceof ApiError) throw new ApiError(error.status, error.code, input.startDate + ': ' + error.message + ' Пакет не сохранён.', { ...(error.details&&typeof error.details==='object'?error.details:{}),date: input.startDate })
           throw error
         }
       }
@@ -318,7 +322,7 @@ export async function correctActualTime(userId: string, organizationId: string, 
 
 // The transaction-level operation is shared by ordinary assignment and draft application.
 // Callers validate the complete final set and workload before invoking it.
-export async function mutatePlannedShift(tx: Prisma.TransactionClient, actor: Awaited<ReturnType<typeof getMembership>>, change: { current?: WorkShift; input?: ShiftInput; startAt?: Date; endAt?: Date; reason?: string }) {
+export async function mutatePlannedShift(tx: Prisma.TransactionClient, actor: Awaited<ReturnType<typeof getMembership>>, change: { current?: WorkShift; input?: ShiftInput; startAt?: Date; endAt?: Date; reason?: string;openingHoursValidated?:boolean }) {
   const { current, input, startAt, endAt } = change
   let previousAssignment = null
   if (!input) {
@@ -335,6 +339,8 @@ export async function mutatePlannedShift(tx: Prisma.TransactionClient, actor: Aw
   await assertNoApprovedAbsence(actor.organizationId, input.memberId, startAt, endAt, actor.organization.timezone, tx, input.acknowledgeAbsence)
   const position = input.positionId ? await tx.organizationPosition.findFirst({ where: { id: input.positionId, organizationId: actor.organizationId, isActive: true, members: { some: { memberId: input.memberId } } } }) : null
   if (input.positionId && !position) throw new ApiError(400, 'POSITION_NOT_ASSIGNED', 'Должность не назначена сотруднику или неактивна.')
+  if(!current)await requireLocationInPlan(tx,actor.organizationId,actor.locationId)
+  if(!change.openingHoursValidated&&(!current||+current.scheduledStartAt!==+startAt||+current.scheduledEndAt!==+endAt))await checkOpeningHours(tx,actor.organizationId,current?.locationId??actor.locationId,[{start:startAt,end:endAt}],input.openingHoursConfirmation)
   const assignmentChanged = !current || current.memberId !== input.memberId || +current.scheduledStartAt !== +startAt || +current.scheduledEndAt !== +endAt || current.positionId !== (input.positionId ?? null)
   const data = { memberId: input.memberId, positionId: position?.id ?? null, positionNameSnapshot: position?.name ?? null, scheduledStartAt: startAt, scheduledEndAt: endAt, breakMinutes: input.breakMinutes, description: input.description, ...(assignmentChanged ? { assignmentReadAt: null } : {}) }
   const changed = current ? await tx.workShift.update({ where: { id: current.id }, data, include: shiftInclude }) : await tx.workShift.create({ data: { ...data, organizationId: actor.organizationId, locationId: actor.locationId, createdByMemberId: actor.id }, include: shiftInclude })

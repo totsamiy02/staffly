@@ -39,5 +39,5 @@ export async function requireSubscriptionWritable(db: DB, organizationId: string
 export async function requireLocationInPlan(db: DB, organizationId: string, locationId: string) {
   const snapshot = await requireSubscriptionWritable(db, organizationId)
   const included = await db.organizationLocation.findMany({ where: { organizationId, archivedAt: null }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], take: snapshot.limits.locations, select: { id: true } })
-  if (!included.some(location => location.id === locationId)) throw new ApiError(409, 'SUBSCRIPTION_LIMIT_REACHED', 'Точка сохранена из предыдущего тарифа. Чтобы добавлять в неё сотрудников и назначать новый доступ, выберите тариф с большим числом точек.', { organizationId, kind: 'locations', limit: snapshot.limits.locations, requiredPlan: snapshot.effectivePlan === 'FREE' ? 'TEAM' : snapshot.effectivePlan === 'TEAM' ? 'BUSINESS' : null })
+  if (!included.some(location => location.id === locationId)) throw new ApiError(409, 'SUBSCRIPTION_LIMIT_REACHED', 'Точка сохранена из предыдущего тарифа. Чтобы добавлять в неё сотрудников, создавать смены и назначать новый доступ, выберите тариф с большим числом точек.', { organizationId, kind: 'locations', limit: snapshot.limits.locations, requiredPlan: snapshot.effectivePlan === 'FREE' ? 'TEAM' : snapshot.effectivePlan === 'TEAM' ? 'BUSINESS' : null })
 }

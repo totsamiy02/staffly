@@ -22,6 +22,7 @@ export const shiftBody = z.object({
   positionId: uuid.nullish(),
   acknowledgeAbsence: z.boolean().optional().default(false),
   acknowledgeWorkload: z.boolean().default(false),
+  openingHoursConfirmation: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   startDate: date,
   startTime: time,
   endDate: date,
@@ -64,4 +65,4 @@ export const statisticsQuery = z.object({
   if (value.from && value.to && value.from >= value.to) context.addIssue({ code: 'custom', message: 'Конец периода должен быть позже начала.' })
 })
 
-export const batchShiftBody = z.object({ shifts: z.array(shiftBody).min(1).max(62), acknowledgeWorkload: z.boolean().default(false), acknowledgeAbsence: z.boolean().default(false) })
+export const batchShiftBody = z.object({ openingHoursConfirmation:z.string().regex(/^[a-f0-9]{64}$/).optional(), shifts: z.array(shiftBody).min(1).max(62), acknowledgeWorkload: z.boolean().default(false), acknowledgeAbsence: z.boolean().default(false) })

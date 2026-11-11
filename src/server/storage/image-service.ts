@@ -101,6 +101,18 @@ export async function stageProfileImage(userId: string, input: unknown, organiza
   return stageStoredFile({ objectKey, mimeType: 'image/webp', size: image.buffer.length, checksumSha256: image.checksum, purpose, uploadedByUserId: userId, organizationId }, image.buffer)
 }
 
+// Reuse the staged-upload lifecycle; a new logo has no organization until the
+// organization and its initial point commit successfully in the same transaction.
+export async function stageOrganizationLogoDraft(userId:string,input:unknown){
+  const image=await normalizeImage(input)
+  return stageStoredFile({objectKey:`users/${userId}/organization-logos/${randomUUID()}.webp`,mimeType:'image/webp',size:image.buffer.length,checksumSha256:image.checksum,purpose:'ORGANIZATION_LOGO',uploadedByUserId:userId},image.buffer)
+}
+export async function bindOrganizationLogoDraft(tx:Prisma.TransactionClient,userId:string,organizationId:string,uploadId:string){
+  const changed=await tx.storedFile.updateMany({where:{id:uploadId,uploadedByUserId:userId,organizationId:null,purpose:'ORGANIZATION_LOGO',purgedAt:null,pendingDeletionAt:{gt:new Date()}},data:{organizationId,pendingDeletionAt:null}})
+  if(!changed.count)throw new ApiError(409,'IMAGE_UPLOAD_UNAVAILABLE','Выбранный логотип больше недоступен. Выберите его заново.')
+  return uploadId
+}
+
 // The owning profile row must be locked by the caller. Binding and profile fields
 // commit together; an abandoned upload retains the existing cleanup deadline.
 export async function bindProfileImage(tx: Prisma.TransactionClient, userId: string, previousId: string | null, uploadId: string | null, organizationId?: string) {

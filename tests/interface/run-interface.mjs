@@ -48,7 +48,7 @@ export async function runInterface({ prisma, env, root, temporary, output, optio
   env.APP_ORIGIN = origin
   const api = await startApi(), apiPort = Number(new URL(api).port)
   const { devApiProxy } = await import('../../scripts/dev-api-proxy.ts')
-  const server = await createServer({ configFile: false, root, plugins: [react(), devApiProxy(apiPort)], server: { host: '127.0.0.1', port, strictPort: true, watch: { ignored: ['**/artifacts/**', '**/storage/**', '**/docs/**', '**/src/server/**', '**/src/generated/**'] } }, logLevel: 'error' })
+  const server = await createServer({ configFile: false, root, cacheDir: path.join(temporary, 'vite-cache'), plugins: [react(), devApiProxy(apiPort)], server: { host: '127.0.0.1', port, strictPort: true, watch: { ignored: ['**/artifacts/**', '**/storage/**', '**/docs/**', '**/src/server/**', '**/src/generated/**'] } }, logLevel: 'error' })
   await server.listen()
   await writeFile(path.join(output, 'fixture.json'), JSON.stringify({ origin, organizationId: fixture.org.id, email: fixture.owner.email }), { mode: 0o600 })
   console.log(`Isolated interface server: ${origin}`)

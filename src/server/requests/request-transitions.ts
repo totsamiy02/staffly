@@ -21,7 +21,7 @@ import { requestForAccess } from './request-access.ts'
 import { conflictsFor } from './request-conflicts.ts'
 import { cancelStaffingResponses } from './staffing-service.ts'
 
-export async function resolveRequest(userId: string, organizationId: string, requestId: string, decision: 'APPROVED' | 'REJECTED', comment: string | null | undefined, cancelConflictingShifts = false, acknowledgeWorkload = false, acknowledgeAbsence = false) {
+export async function resolveRequest(userId: string, organizationId: string, requestId: string, decision: 'APPROVED' | 'REJECTED', comment: string | null | undefined, cancelConflictingShifts = false, acknowledgeWorkload = false, acknowledgeAbsence = false,openingHoursConfirmation?:string) {
   const actor = await getMembership(userId, organizationId)
   if (!hasPermission(actor,'requests.resolve') && !hasPermission(actor,'staffing.resolve')&&!hasPermission(actor,'vacations.resolve')) requirePermission(actor,'requests.resolve')
   await reconcileShiftRequests(organizationId)
@@ -56,7 +56,7 @@ export async function resolveRequest(userId: string, organizationId: string, req
     if (current.relatedShiftId) await lockShift(tx, current.relatedShiftId)
     const changed = await tx.organizationRequest.updateMany({ where: { id: requestId, organizationId, ...locationWhere(organizationId), updatedAt: current.updatedAt, status: 'PENDING' }, data: { status: decision, resolvedAt: new Date(), resolvedByMemberId: actor.id, resolutionComment: comment?.trim() || null } })
     if (!changed.count) throw new ApiError(409, 'REQUEST_ALREADY_RESOLVED', 'Заявка уже была обработана.')
-    await applyRequestDecision({tx,current,actor,organizationId,requestId,decision,acknowledgeWorkload,acknowledgeAbsence,cancelConflictingShifts,liveConflicts,definition})
+    await applyRequestDecision({tx,current,actor,organizationId,requestId,decision,acknowledgeWorkload,acknowledgeAbsence,openingHoursConfirmation,cancelConflictingShifts,liveConflicts,definition})
     
     await tx.requestEvent.create({ data: { requestId, actorMemberId: actor.id, type: decision, comment: comment?.trim() || null } })
     await markRequestNoticesRead(tx, { requestId, type: 'REQUEST_CREATED', readAt: null }, new Date())

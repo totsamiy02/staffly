@@ -50,7 +50,7 @@ export default function OrganizationInfoDialog({ organization, onClose }: { orga
   if (organization.locationId) settingsParams.set('location', organization.locationId)
 
   return <DocumentDialog title="Об организации" eyebrow="" className="organization-info-dialog" scrollBody onClose={onClose}>
-    <div className="organization-info__identity"><Avatar eager url={organization.logoUrl} name={organization.name} className="organization-info__logo" /><div><h3>{organization.name}</h3><p>Общие сведения для всей команды</p></div></div>
+    <div className="organization-info__identity"><Avatar eager url={organization.logoUrl} name={organization.name} className="organization-info__logo" /><div><h3>{organization.name}</h3><p>{organization.industry||'Общие сведения для всей команды'}</p></div></div>
     {organization.description?.trim() && <p className="organization-info__description">{organization.description.trim()}</p>}
     <dl className={`organization-info__fields${fields.length === 1 ? ' organization-info__fields--single' : ''}`}>
       {fields.map(field => <div key={field.kind} className={`organization-info__field${field.wide ? ' organization-info__field--wide' : ''}`}>

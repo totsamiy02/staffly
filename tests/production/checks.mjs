@@ -152,8 +152,11 @@ export async function runChecks({ origin, ca, password, fixture, check, compose,
     assert.equal(await limit(),10*1024**3)
     ok(await owner.request(base + '/subscription/free' + point,{method:'POST',json:{confirm:true,immediate:true}}))
     assert.equal(await limit(),250*1024**2)
-    const order = ok(await owner.request(base + '/subscription/checkout' + point,{method:'POST',json:{plan:'TEAM'}}),201).json.order
-    ok(await owner.request(base + '/subscription/purchases/' + order.id + '/test-activation' + point,{method:'POST',json:{confirm:true,mode:'test',email:'owner@example.test'}}))
+    const current = ok(await owner.request(base + '/subscription' + point)).json
+    const selection = {plan:'TEAM',revision:current.revision,confirm:true}
+    const activated = ok(await owner.request(base + '/subscription/select' + point,{method:'POST',json:selection})).json
+    const repeated = ok(await owner.request(base + '/subscription/select' + point,{method:'POST',json:selection})).json
+    assert.equal(repeated.subscription.validUntil,activated.subscription.validUntil)
     assert.equal(await limit(),2*1024**3)
   })
   await check('nginx continues serving after one API stops and the pool recovers after restart', async () => {

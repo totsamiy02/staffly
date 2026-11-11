@@ -96,7 +96,7 @@ export default function OrganizationLayout() {
   const organizationPath = `/app/organizations/${organization.id}`
   const currentSegment = location.pathname.slice(organizationPath.length).split('/').filter(Boolean)[0] ?? ''
   const points = locations.data?.locations ?? (organization.location ? [organization.location] : [])
-  const locationAddress = [organization.location?.city, organization.location?.address].filter(Boolean).join(' · ')
+  const locationAddress = organization.location?.kind==='REMOTE'?'Удалённая точка':[organization.location?.city, organization.location?.address].filter(Boolean).join(' · ')
   const allowed = location.pathname.startsWith(organizationPath+'/schedule/drafts') || !currentSegment || currentSegment==='settings' && (organization.owner || sectionParams.get('section') === 'subscription') || (modulePermissions[currentSegment]??[]).some(p=>canAccess(organization,p))
   const module = (content: ReactNode) => !allowed ? <section className="workspace-problem"><h1>Раздел недоступен</h1><p>Владелец может изменить вашу роль и доступ к этой точке.</p><Link className="app-secondary" to={organizationPath}>На главную</Link></section> : <ModuleErrorBoundary key={location.pathname + organization.locationId} organizationPath={organizationPath}><Suspense fallback={<section className="route-loading" role="status">Загрузка раздела…</section>}>{content}</Suspense></ModuleErrorBoundary>
   function toggleSidebar() {

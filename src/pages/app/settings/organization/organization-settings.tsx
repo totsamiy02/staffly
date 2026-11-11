@@ -62,6 +62,8 @@ export default function OrganizationSettings({ organization }: { organization: O
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [name, setName] = useState(organization.name)
+  const [industry,setIndustry]=useState(organization.industry??'')
+  const [expectedRevision,setExpectedRevision]=useState(organization.profileRevision)
   const [description, setDescription] = useState(organization.description ?? '')
   const [timezone, setTimezone] = useState(organization.organizationTimezone ?? organization.timezone)
   const [contactEmail, setContactEmail] = useState(organization.contactEmail ?? '')
@@ -71,12 +73,12 @@ export default function OrganizationSettings({ organization }: { organization: O
   const planningAllowed = organization.organizationPermissions?.includes('schedule.settings') || ['coverage.manage','schedule.settings','schedule.templates','positions.manage','offers.settings'].some(key=>organization.owner || organization.permissions?.includes(key))
   const canEditProfile = canAccess(organization, 'organization.edit')
   const editing = profileEditing && canEditProfile
-  const profileSafety = useFormSafety({ scope: 'organization-profile:' + organization.id, value: { name, description, timezone, contactEmail, phone, website, address }, active: editing, busy: busy || imageBusy, extraDirty: logoDraft.dirty })
+  const profileSafety = useFormSafety({ scope: 'organization-profile:' + organization.id, value: { name, description, industry, timezone, contactEmail, phone, website, address }, active: editing, busy: busy || imageBusy, extraDirty: logoDraft.dirty })
   useEffect(() => { setProfileEditing(false); resetLogo() }, [section, organization.id, canEditProfile, resetLogo])
 
   function editProfile(value: boolean) {
     logoDraft.reset()
-    setName(organization.name); setDescription(organization.description ?? '')
+    setExpectedRevision(organization.profileRevision);setIndustry(organization.industry??'');setName(organization.name); setDescription(organization.description ?? '')
     setTimezone(organization.organizationTimezone ?? organization.timezone)
     setContactEmail(organization.contactEmail ?? ''); setPhone(formatRussianPhone(organization.phone ?? ''))
     setWebsite(organization.website ?? ''); setAddress(organization.address ?? '')
@@ -129,7 +131,7 @@ export default function OrganizationSettings({ organization }: { organization: O
       if (!isCompleteRussianPhone(phone)) throw new Error('Введите российский номер полностью: +7 (999) 123-45-67.')
       if (website && !/^https?:\/\/[^\s]+$/i.test(website)) throw new Error('Адрес сайта должен начинаться с http:// или https://.')
       const logoUploadId = await logoDraft.prepare()
-      await apiRequest(`/organizations/${organization.id}`, { method: 'PATCH', body: { name, description, timezone, contactEmail, phone, website, address, logoUploadId } })
+      await apiRequest(`/organizations/${organization.id}`, { method: 'PATCH', body: { name, description, industry, timezone, contactEmail, phone, website, address, logoUploadId,profileRevision:expectedRevision } })
       await Promise.all([queryClient.invalidateQueries({ queryKey: ['organization', organization.id] }), queryClient.invalidateQueries({ queryKey: ['organizations'] })])
       profileSafety.markSaved(); logoDraft.reset()
       setMessage('Профиль организации сохранён.')
@@ -139,18 +141,19 @@ export default function OrganizationSettings({ organization }: { organization: O
 
   const candidates = members.data?.members.filter((member) => member.role !== 'OWNER') ?? []
 
-  return <section className="settings-page"><PageHeading title="Настройки" description={canEditProfile ? 'Профиль организации и управление настройками.' : 'Публичная информация вашей организации.'}/>
+  return <section className="settings-page"><PageHeading title="Настройки" description={canEditProfile ? 'Профиль организации и управление настройками.' : 'Сведения об организации для команды.'}/>
     <SegmentedNav label="Разделы настроек">{[['profile', 'Профиль организации'], ['locations', 'Точки'], ['subscription', 'Тариф'], ...(planningAllowed ? [['schedule','Расписание']] : []), ...(canAccess(organization,'requestTypes.manage') ? [['requests','Типы заявок']] : []), ...(organization.owner ? [['roles','Роли и доступ'],['access','Владение']] : [])].map(([key, label]) => <button key={key} type="button" aria-pressed={section === key} onClick={() => changeSection(key)}>{label}</button>)}</SegmentedNav>
     {section !== 'schedule' && error && <p className="app-alert app-alert--error">{error}</p>}
     {section === 'subscription' && <SubscriptionSettings organization={organization} />}
     {section === 'roles' && organization.role === 'OWNER' && <AccessSettings organization={organization} />}
     {section === 'profile' && <article className="organization-profile-editor">
-      <div className="profile-settings-heading"><div><p className="app-eyebrow">Публичная информация</p><h2>Профиль организации</h2><p>Эти данные доступны всем участникам организации.</p></div>{canEditProfile && <ProfileEditActions editing={false} busy={editing} onEdit={() => editProfile(true)} onCancel={() => void profileSafety.close(() => editProfile(false))} />}</div>
+      <div className="profile-settings-heading"><div><p className="app-eyebrow">Общие сведения</p><h2>Профиль организации</h2><p>Эти данные доступны участникам организации и не публикуются на сайте автоматически.</p></div>{canEditProfile && <ProfileEditActions editing={false} busy={editing} onEdit={() => editProfile(true)} onCancel={() => void profileSafety.close(() => editProfile(false))} />}</div>
       <div className="organization-logo-editor"><ImageUpload floatingControls endpoint={`/organizations/${organization.id}/logo`} imageUrl={logoDraft.url} onDraftChange={logoDraft.change} name={organization.name} avatarClassName="organization-logo-editor__preview" disabled={!editing || busy} onBusyChange={setImageBusy} onChange={async () => { await Promise.all([queryClient.invalidateQueries({ queryKey: ['organization', organization.id] }), queryClient.invalidateQueries({ queryKey: ['organizations'] })]) }} onMessage={setMessage} onError={setError} /></div>
       <form onSubmit={saveOrganization} className="organization-profile-form"><fieldset className="profile-edit-fields" disabled={busy || imageBusy}><div className="profile-details-groups">
         <ProfileDetails title="Об организации" icon="building" editing={editing} items={[
           ...(organization.owner&&organization.publicId?[{ label: 'ID организации', value: <CopyReference hideLabel value={String(organization.publicId)} label="ID организации" />, wide:true }]:[]),
           { label: 'Название', value: organization.name, editor: <input aria-label="Название" value={name} onChange={e => setName(e.target.value)} minLength={2} maxLength={120} required /> },
+          { label:'Сфера деятельности',value:organization.industry,editor:<input aria-label="Сфера деятельности" maxLength={120} value={industry} onChange={e=>setIndustry(e.target.value)}/> },
           { label: 'Часовой пояс', value: RUSSIAN_TIMEZONES.find(item => item.value === (organization.organizationTimezone ?? organization.timezone))?.label ?? organization.organizationTimezone ?? organization.timezone, editor: <Select aria-label="Часовой пояс" disabled={busy || imageBusy} value={timezone} onChange={e => setTimezone(e.target.value)}>{RUSSIAN_TIMEZONES.map(item => <option value={item.value} key={item.value}>{item.label}</option>)}</Select> },
         ]} />
         <ProfileDetails title="Контакты и адрес" icon="mail" editing={editing} items={[
