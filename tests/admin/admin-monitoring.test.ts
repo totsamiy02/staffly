@@ -77,6 +77,18 @@ describe('Platform administrator boundary and monitoring',()=>{
   await databasePool.query('DELETE FROM staffly_admin.audit_events WHERE user_id=ANY($1::uuid[])',[users])
   await closeAdminDatabase();await prisma.$disconnect()
  })
+ it('personnel reads and history require an unlocked admin and remain scoped to the requested organization',async()=>{
+  const viewer=await account(),owner=await account(false),org=await createBusinessOrganization(owner.userId,{name:'Personnel monitoring '+suffix,description:null,timezone:'Europe/Moscow'});organizations.push(org.id)
+  const {updateMemberPersonnel}=await import('../../src/server/organizations/member-personnel-service.ts'),{personnelBody}=await import('../../src/shared/member-personnel.ts')
+  const member=await prisma.organizationMember.findFirstOrThrow({where:{organizationId:org.id,userId:owner.userId}})
+  await updateMemberPersonnel(owner.userId,org.id,member.id,personnelBody.parse({mode:'personnel',revision:1,personnelFirstName:'Иван',personnelLastName:'Кадровый',personnelMiddleName:'',personnelNumber:'MON-01',workEmail:'work@example.test',workPhone:''}))
+  const url='/api/admin/monitoring/organizations/'+org.id+'/personnel',history=url+'/'+member.id+'/history'
+  assert.equal((await owner.request(url)).status,403);assert.equal((await viewer.request(url)).status,403)
+  await viewer.ready();const list=await viewer.request(url);assert.equal(list.status,200);assert.match(list.headers.get('cache-control')??'',/no-store/);assert.equal((await list.json()).items[0].record.personnelNumber,'MON-01')
+  assert.equal((await viewer.request(history).then(r=>r.json())).total,1)
+  assert.equal((await viewer.request('/api/admin/monitoring/organizations/'+randomUUID()+'/personnel/'+member.id+'/history')).status,404)
+  await viewer.request('/api/admin/lock',{});assert.equal((await viewer.request(history)).status,423)
+ })
  it('admin portraits expose attached images only to an unlocked elevated session',async()=>{
   const viewer=await account(),owner=await account(false)
   const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=','base64')

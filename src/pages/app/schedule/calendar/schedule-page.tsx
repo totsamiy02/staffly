@@ -259,14 +259,16 @@ export default function SchedulePage({ organization, historyMode = false }: { or
         const state = shiftState(shift), mine = shift.memberId === ownMemberId
         return <>
           {shift.activeOffer && <button type="button" className="offer-shift-badge" onClick={() => openOffer(shift.activeOffer!.id)}>{shift.activeOffer.status === 'AWAITING_APPROVAL' ? 'Ожидает согласования' : shift.activeOffer.kind === 'SWAP' ? 'Предложен обмен' : 'Предложена передача'}</button>}
+          {shift.status === 'SCHEDULED' && !shift.activeOffer && !shift.replacementCutoffAt && new Date(shift.scheduledStartAt) < new Date() && new Date(shift.scheduledEndAt) > new Date() && (mine && canAccess(organization, 'offers.transfer') || canAccess(organization, 'schedule.edit') && canAccess(organization, 'schedule.actual')) && <button type="button" className="app-secondary day-schedule-card__replace" disabled={!offersEnabled} onClick={() => { setSelectedDate(null); setOfferingShift(shift) }}>Заменить на остаток</button>}
           {mine && (canAccess(organization,'offers.transfer') || canAccess(organization,'offers.swap')) && state.key === 'future' && !shift.activeOffer && <button type="button" className="app-secondary" disabled={!offersEnabled || !!shift.actualStartAt || !!shift.actualEndAt || shift.actualBreakMinutes !== null} title={!offersEnabled ? 'Передача и обмен выключены владельцем' : undefined} onClick={() => { setSelectedDate(null); setOfferingShift(shift) }}>Передать или обменять</button>}
           {mine && canAccess(organization,'requests.create') && state.key === 'future' && <button type="button" className="app-secondary" onClick={() => { setSelectedDate(null); setDayOffShift(shift) }}>Взять отгул</button>}
           {mine && canAccess(organization,'requests.create') && !canManage && state.key === 'future' && <Link className="app-secondary" to={'/app/organizations/' + organization.id + '/requests?tab=mine&changeShift=' + shift.id}>Попросить изменить смену</Link>}
           {canManage && shift.status !== 'CANCELLED' && <>
             <TimeCorrectionAction shift={shift} locationId={organization.locationId} icon />
-            {canAccess(organization,'schedule.edit') && state.key !== 'completed' && <button type="button" className="app-secondary" onClick={() => setEditing(shift)}>Изменить расписание</button>}
-            {canAccess(organization,'schedule.cancel') && <button type="button" className="schedule-cancel-button" onClick={() => { setCancelling(shift); setCancelReason(''); setActionError('') }}>Отменить смену</button>}
+            {canAccess(organization,'schedule.edit') && state.key !== 'completed' && <button type="button" className="app-secondary day-schedule-card__edit" onClick={() => setEditing(shift)}>Изменить расписание</button>}
           </>}
+          {shift.replacementOfId && <Link className="day-schedule-card__source" to={'/app/organizations/' + organization.id + '/schedule?location=' + organization.locationId + '&shift=' + shift.replacementOfId}>Исходная смена</Link>}
+          {canManage && shift.status !== 'CANCELLED' && canAccess(organization,'schedule.cancel') && !shift.replacementCutoffAt && !(shift.replacementOfId && new Date(shift.scheduledStartAt) <= new Date()) && <button type="button" className="schedule-cancel-button" onClick={() => { setCancelling(shift); setCancelReason(''); setActionError('') }}>Отменить смену</button>}
         </>
       }}
     />}</AnimatedOverlay>}

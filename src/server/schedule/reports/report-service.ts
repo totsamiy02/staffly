@@ -48,7 +48,7 @@ export async function reportMembers(userId: string, organizationId: string, inpu
   if (!selected.length) throw fail('Нет доступных точек.')
   const members = await prisma.organizationMember.findMany({ where: { ...scopeWhere(organizationId, selected, input.from, input.to), ...(input.includeFormer ? {} : { leftAt: null, user: { deletedAt: null } }) }, include: { user: true }, orderBy: { id: 'asc' }, take: 1001 })
   if (members.length > 1000) throw new ApiError(400, 'REPORT_LIMIT', 'В области больше 1000 сотрудников. Выберите меньше точек или короче период.')
-  return { members: members.map(member => ({ id: member.id, displayName: nameOf(member.user), email: member.user.email, avatarUrl: mediaUrl(member.user.avatarFileId), former: !!member.leftAt || !!member.user.deletedAt })) }
+  return { members: members.map(member => ({ id: member.id, displayName: nameOf(member.user), email:access.actor.owner||selected.every(l=>hasPermission(access.actor,'members.contacts',l.id))?member.workEmail??'':'', avatarUrl: mediaUrl(member.user.avatarFileId), former: !!member.leftAt || !!member.user.deletedAt })) }
 }
 export async function saveReportTemplate(userId: string, organizationId: string, id: string | null, input: { name: string; config: ReportConfig }) {
   return prisma.$transaction(async db => {

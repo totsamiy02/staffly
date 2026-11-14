@@ -1,3 +1,4 @@
+import { partialData, offeredShift, validatePartial, completePartial } from './partial-shifts.ts'
 import { checkMonthlyWorkload } from './workload.ts'
 import { locationContext } from '../organizations/location-context.ts'
 import { hasPermission, requirePermission, permissionRecipients } from '../organizations/access/access.ts'
@@ -13,17 +14,18 @@ import { assertNoApprovedAbsence } from './service.ts'
 export const offerModesBody = z.object({ transferMode: z.enum(['DISABLED', 'AUTO', 'APPROVAL']), swapMode: z.enum(['DISABLED', 'AUTO', 'APPROVAL']) })
 export const offerBody = z.object({ sourceShiftId: z.string().uuid(), kind: z.enum(['TRANSFER', 'SWAP']), recipientMemberId: z.string().uuid().nullable().default(null), targetShiftId: z.string().uuid().nullable().default(null), comment: z.string().trim().max(500).nullable().default(null) }).refine(v => v.kind === 'SWAP' ? !!v.recipientMemberId && !!v.targetShiftId && v.targetShiftId !== v.sourceShiftId : !v.targetShiftId, 'Выберите коллегу и его смену для обмена.')
 export const offerListQuery = z.object({ tab: z.enum(['mine', 'available', 'sent', 'approval']).default('mine'), page: z.coerce.number().int().min(1).default(1), limit: z.coerce.number().int().min(1).max(50).default(20) })
-export const offerActionBody = z.object({ action: z.enum(['accept', 'reject', 'cancel', 'approve', 'decline']),acknowledgeWorkload:z.boolean().default(false) })
+export const offerActionBody = z.object({ action: z.enum(['accept', 'reject', 'cancel', 'approve', 'decline']),acknowledgeWorkload:z.boolean().default(false), openingHoursConfirmation: z.string().optional() })
 const active = ['PENDING', 'AWAITING_APPROVAL'] as const
 const isActive = (offer: ShiftOffer) => active.some(s => s === offer.status)
 const personInclude = { user: { select: { firstName: true, lastName: true, middleName: true, email: true, avatarFileId: true } } } as const
-const include = { initiator: { include: personInclude }, recipient: { include: personInclude }, acceptedBy: { include: personInclude }, reviewedBy: { include: personInclude }, location: true } as const
+export const offerInclude = { sourceShift: { select: { updatedAt: true } }, initiator: { include: personInclude }, recipient: { include: personInclude }, acceptedBy: { include: personInclude }, reviewedBy: { include: personInclude }, location: true } as const
+const include = offerInclude
 function fail(code: string, message: string): never { throw new ApiError(409, code, message) }
 const name = (user: { firstName: string | null; lastName: string | null; middleName: string | null; email: string }) => [user.lastName, user.firstName, user.middleName].filter(Boolean).join(' ') || user.email.split('@')[0]
 
 // Same lock as schedule/location writes; SERIALIZABLE also protects absence and
 // position writes that do not acquire that lock. Retry starts a fresh snapshot.
-async function transaction<T>(organizationId: string, work: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+export async function transaction<T>(organizationId: string, work: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
   for (let attempt = 0; ; attempt++) {
     try {
       return await prisma.$transaction(async tx => {
@@ -68,7 +70,7 @@ export async function eligible(tx: Prisma.TransactionClient, shift: WorkShift, m
   return member
 }
 function mode(organization: { shiftTransferMode: ShiftOffer['mode']; shiftSwapMode: ShiftOffer['mode'] }, kind: ShiftOffer['kind']) { return kind === 'TRANSFER' ? organization.shiftTransferMode : organization.shiftSwapMode }
-async function notice(tx: Prisma.TransactionClient, offer: ShiftOffer, type: 'SHIFT_OFFER_CREATED' | 'SHIFT_OFFER_APPROVAL' | 'SHIFT_OFFER_RESULT', memberIds: string[], title: string, message: string) {
+export async function notice(tx: Prisma.TransactionClient, offer: ShiftOffer, type: 'SHIFT_OFFER_CREATED' | 'SHIFT_OFFER_APPROVAL' | 'SHIFT_OFFER_RESULT', memberIds: string[], title: string, message: string) {
   const members = await tx.organizationMember.findMany({ where: { id: { in: [...new Set(memberIds)] }, organizationId: offer.organizationId, leftAt: null, user: { deletedAt: null } }, select: { id: true, userId: true } })
   if (members.length) await tx.accountNotification.createMany({ data: members.map(member => ({ organizationId: offer.organizationId, userId: member.userId, shiftOfferId: offer.id, type, title, message: message.slice(0, 500), shiftOfferDeliveryKey: `${offer.id}:${type}:${member.id}` })), skipDuplicates: true })
 }
@@ -82,11 +84,12 @@ export async function closeOffer(tx: Prisma.TransactionClient, offer: ShiftOffer
 }
 async function validateOffer(tx: Prisma.TransactionClient, offer: ShiftOffer) {
   const org = await tx.organization.findUniqueOrThrow({ where: { id: offer.organizationId } })
-  if (mode(org, offer.kind) === 'DISABLED' || mode(org, offer.kind) !== offer.mode) fail('OFFER_MODE_CHANGED', 'Режим передачи или обмена изменён. Создайте новое предложение.')
+  if (mode(org, offer.kind) === 'DISABLED' || (!partialData(offer) || partialData(offer)?.prepared) && mode(org, offer.kind) !== offer.mode) fail('OFFER_MODE_CHANGED', 'Режим передачи или обмена изменён. Создайте новое предложение.')
   const ids = [offer.sourceShiftId, offer.targetShiftId].filter((id): id is string => !!id).sort()
   for (const id of ids) await lockShift(tx, id)
   const source = await tx.workShift.findUniqueOrThrow({ where: { id: offer.sourceShiftId } })
   const target = offer.targetShiftId ? await tx.workShift.findUniqueOrThrow({ where: { id: offer.targetShiftId } }) : null
+  if (partialData(offer)) return { source: await validatePartial(tx, offer, source), target: null }
   for (const [shift, snapshot] of [[source, offer.sourceSnapshot], ...(target ? [[target, offer.targetSnapshot]] : [])] as Array<[WorkShift, Prisma.JsonValue | null]>) {
     shiftReady(shift)
     const point = await tx.organizationLocation.findUniqueOrThrow({ where: { id: shift.locationId } })
@@ -116,11 +119,11 @@ async function managers(tx: Prisma.TransactionClient, organizationId: string, lo
   return permissionRecipients(tx, organizationId, 'offers.approve', locationId)
 }
 function canManage(actor: Awaited<ReturnType<typeof getMembership>>, locationId: string) { return hasPermission(actor, 'offers.approve', locationId) }
-function publicOffer(offer: Prisma.ShiftOfferGetPayload<{ include: typeof include }>, actor: Awaited<ReturnType<typeof getMembership>>) {
+export function publicOffer(offer: Prisma.ShiftOfferGetPayload<{ include: typeof include }>, actor: Awaited<ReturnType<typeof getMembership>>) {
   const person = (member: typeof offer.initiator | null) => member ? { id: member.id, name: name(member.user), avatarUrl: mediaUrl(member.user.avatarFileId) } : null
   const current = isActive(offer)
   const mine = offer.initiatorMemberId === actor.id
-  return { id: offer.id, kind: offer.kind, mode: offer.mode, status: offer.status, comment: offer.comment, resolutionReason: offer.resolutionReason, createdAt: offer.createdAt, acceptedAt: offer.acceptedAt, reviewedAt: offer.reviewedAt, closedAt: offer.closedAt, location: { id: offer.location.id, name: offer.location.name }, source: normalizeSnapshot(offer.sourceSnapshot), target: normalizeSnapshot(offer.targetSnapshot), initiator: person(offer.initiator)!, recipient: person(offer.recipient), acceptedBy: person(offer.acceptedBy), reviewedBy: person(offer.reviewedBy), canCancel: current && mine, canAccept: hasPermission(actor, 'offers.accept', offer.locationId) && offer.status === 'PENDING' && !mine && (!offer.recipientMemberId || offer.recipientMemberId === actor.id), canReject: offer.status === 'PENDING' && offer.recipientMemberId === actor.id, canApprove: offer.status === 'AWAITING_APPROVAL' && canManage(actor, offer.locationId) && actor.id !== offer.initiatorMemberId && actor.id !== offer.acceptedByMemberId }
+  return { partial: offer.partial ? { ...partialData(offer)!, sourceVersion: offer.sourceShift.updatedAt.toISOString() } : null, id: offer.id, kind: offer.kind, mode: offer.mode, status: offer.status, comment: offer.comment, resolutionReason: offer.resolutionReason, createdAt: offer.createdAt, acceptedAt: offer.acceptedAt, reviewedAt: offer.reviewedAt, closedAt: offer.closedAt, location: { id: offer.location.id, name: offer.location.name }, source: normalizeSnapshot(offer.sourceSnapshot), target: normalizeSnapshot(offer.targetSnapshot), initiator: person(offer.initiator)!, recipient: person(offer.recipient), acceptedBy: person(offer.acceptedBy), reviewedBy: person(offer.reviewedBy), canCancel: current && mine, canAccept: hasPermission(actor, 'offers.accept', offer.locationId) && offer.status === 'PENDING' && !mine && (!partialData(offer) || normalizeSnapshot(offer.sourceSnapshot).memberId !== actor.id) && (!offer.recipientMemberId || offer.recipientMemberId === actor.id), canReject: offer.status === 'PENDING' && offer.recipientMemberId === actor.id, canApprove: offer.status === 'AWAITING_APPROVAL' && canManage(actor, offer.locationId) && actor.id !== offer.initiatorMemberId && actor.id !== offer.acceptedByMemberId }
 }
 async function visible(tx: Prisma.TransactionClient, actor: Awaited<ReturnType<typeof getMembership>>, offer: ShiftOffer) {
   if (actor.locationId !== offer.locationId) return false
@@ -132,7 +135,7 @@ async function visible(tx: Prisma.TransactionClient, actor: Awaited<ReturnType<t
     try { await memberAccess(tx, shift, actor.id) } catch (error) { if (error instanceof ApiError) return false; throw error }
     return !!await tx.accountNotification.findFirst({ where: { shiftOfferId: offer.id, userId: actor.userId } })
   }
-  try { await eligible(tx, await tx.workShift.findUniqueOrThrow({ where: { id: offer.sourceShiftId } }), actor.id); return true } catch (error) { if (error instanceof ApiError) return false; throw error }
+  try { await eligible(tx, offeredShift(offer, await tx.workShift.findUniqueOrThrow({ where: { id: offer.sourceShiftId } })), actor.id); return true } catch (error) { if (error instanceof ApiError) return false; throw error }
 }
 export async function getOfferModes(userId: string, organizationId: string) {
   const actor = await getMembership(userId, organizationId)
@@ -168,7 +171,7 @@ export async function offerCandidates(userId: string, organizationId: string, so
         try { shiftReady(shift); await eligible(tx, source, member.id, [source.id, shift.id]); await eligible(tx, shift, actor.id, [source.id, shift.id]) } catch (error) { if (!(error instanceof ApiError)) throw error; reason = error.message }
         shifts.push({ ...shiftSnapshot(shift, actor.location.timezone), reason })
       }
-      candidates.push({ id: member.id, name: name(member.user), email: member.user.email, avatarUrl: mediaUrl(member.user.avatarFileId), transferReason, shifts })
+      candidates.push({ id: member.id, name: name(member.user), email:hasPermission(actor,'members.contacts',source.locationId)?member.workEmail??'':'', avatarUrl: mediaUrl(member.user.avatarFileId), transferReason, shifts })
     }
     return { candidates, transferMode: actor.organization.shiftTransferMode, swapMode: actor.organization.shiftSwapMode }
   })
@@ -215,7 +218,8 @@ export async function listOffers(userId: string, organizationId: string, query: 
       if (offer.recipientMemberId === actor.id || offer.acceptedByMemberId === actor.id) buckets.mine.push(offer)
       if (offer.status === 'AWAITING_APPROVAL' && canManage(actor, offer.locationId) && actor.id !== offer.initiatorMemberId && actor.id !== offer.acceptedByMemberId) buckets.approval.push(offer)
       if (!offer.recipientMemberId && offer.initiatorMemberId !== actor.id && offer.status === 'PENDING') {
-        try { await eligible(tx, await tx.workShift.findUniqueOrThrow({ where: { id: offer.sourceShiftId } }), actor.id); buckets.available.push(offer) }
+        if (partialData(offer) && normalizeSnapshot(offer.sourceSnapshot).memberId === actor.id) continue
+        try { await eligible(tx, offeredShift(offer, await tx.workShift.findUniqueOrThrow({ where: { id: offer.sourceShiftId } })), actor.id); buckets.available.push(offer) }
         catch (error) { if (!(error instanceof ApiError)) throw error }
       }
     }
@@ -232,7 +236,7 @@ export async function getOffer(userId: string, organizationId: string, offerId: 
     const response = publicOffer(offer, actor)
     let acceptanceReason: string | null = null
     if (response.canAccept) {
-      try { await eligible(tx, await tx.workShift.findUniqueOrThrow({ where: { id: offer.sourceShiftId } }), actor.id, [offer.sourceShiftId, ...(offer.targetShiftId ? [offer.targetShiftId] : [])]) }
+      try { await eligible(tx, offeredShift(offer, await tx.workShift.findUniqueOrThrow({ where: { id: offer.sourceShiftId } })), actor.id, [offer.sourceShiftId, ...(offer.targetShiftId ? [offer.targetShiftId] : [])]) }
       catch (error) { if (!(error instanceof ApiError)) throw error; response.canAccept = false; acceptanceReason = error.message }
     }
     return { ...response, acceptanceReason }
@@ -242,8 +246,9 @@ async function offerWorkload(tx:Prisma.TransactionClient,offer:ShiftOffer,source
   const warnings=[]
   for(const [shift,memberId] of [[source,accepterId],...(target?[[target,offer.initiatorMemberId]]:[])] as Array<[WorkShift,string]>){const location=await tx.organizationLocation.findUniqueOrThrow({where:{id:shift.locationId}});warnings.push(...await locationContext.run({organizationId:offer.organizationId,locationId:shift.locationId},()=>checkMonthlyWorkload(tx,offer.organizationId,memberId,location.timezone,location.monthlyWorkMinutes,[{start:shift.scheduledStartAt,end:shift.scheduledEndAt}],[source.id,...(target?[target.id]:[])],acknowledged)))}return warnings
 }
-async function complete(tx: Prisma.TransactionClient, offer: ShiftOffer, source: WorkShift, target: WorkShift | null, accepterId: string, reviewerId: string | null, acknowledgeWorkload=false) {
+async function complete(tx: Prisma.TransactionClient, offer: ShiftOffer, source: WorkShift, target: WorkShift | null, accepterId: string, reviewerId: string | null, acknowledgeWorkload=false, openingHoursConfirmation?: string) {
   await offerWorkload(tx,offer,source,target,accepterId,!!reviewerId&&acknowledgeWorkload)
+  if (partialData(offer)) return completePartial(tx, offer, source, accepterId, reviewerId, openingHoursConfirmation)
   const participants = await tx.organizationMember.findMany({ where: { id: { in: [offer.initiatorMemberId, accepterId, ...(reviewerId ? [reviewerId] : [])] } }, include: personInclude })
   const participantName = (id: string) => name(participants.find(member => member.id === id)!.user)
   // Close before shift UPDATE so the invalidation trigger ignores our own operation.
@@ -261,7 +266,7 @@ async function complete(tx: Prisma.TransactionClient, offer: ShiftOffer, source:
   await tx.$executeRaw`SET CONSTRAINTS work_shifts_no_overlap IMMEDIATE`
   return updated
 }
-export async function actOnOffer(userId: string, organizationId: string, offerId: string, action: z.infer<typeof offerActionBody>['action'],acknowledgeWorkload=false) {
+export async function actOnOffer(userId: string, organizationId: string, offerId: string, action: z.infer<typeof offerActionBody>['action'],acknowledgeWorkload=false, openingHoursConfirmation?: string) {
   const result = await transaction(organizationId, async tx => {
     const actor = await getMembership(userId, organizationId, tx)
     const offer = await tx.shiftOffer.findFirst({ where: { id: offerId, organizationId } })
@@ -277,7 +282,8 @@ export async function actOnOffer(userId: string, organizationId: string, offerId
     if (['accept','approve'].includes(action)) {
       const initiator = await tx.organizationMember.findUniqueOrThrow({where:{id:offer.initiatorMemberId}})
       const currentInitiator = await getMembership(initiator.userId,organizationId,tx)
-      requirePermission(currentInitiator,offer.kind==='SWAP' ? 'offers.swap' : 'offers.transfer',offer.locationId)
+      if (partialData(offer)?.prepared) { requirePermission(currentInitiator, 'schedule.actual', offer.locationId); requirePermission(currentInitiator, 'schedule.edit', offer.locationId) }
+      else requirePermission(currentInitiator,offer.kind==='SWAP' ? 'offers.swap' : 'offers.transfer',offer.locationId)
       if (offer.acceptedByMemberId) {const accepter=await tx.organizationMember.findUniqueOrThrow({where:{id:offer.acceptedByMemberId}});requirePermission(await getMembership(accepter.userId,organizationId,tx),'offers.accept',offer.locationId)}
     }
     let source: WorkShift, target: WorkShift | null
@@ -291,6 +297,7 @@ export async function actOnOffer(userId: string, organizationId: string, offerId
     if (action === 'cancel' || action === 'reject' || action === 'decline') {
       await closeOffer(tx, offer, action === 'cancel' ? 'CANCELLED' : 'REJECTED', action === 'cancel' ? 'Инициатор отменил предложение.' : action === 'decline' ? 'Администратор отклонил предложение.' : 'Коллега отказался от предложения.', action === 'decline' ? { reviewedByMemberId: actor.id, reviewedAt: new Date() } : {})
     } else if (action === 'accept') {
+      if (partialData(offer) && source.memberId === actor.id) fail('INVALID_RECIPIENT', 'Остаток должен принять другой сотрудник.')
       if (offer.status === 'AWAITING_APPROVAL' && offer.acceptedByMemberId === actor.id) return { id: offer.id }
       if (offer.status !== 'PENDING') fail('OFFER_TAKEN', 'Предложение уже принял другой сотрудник.')
       if (!await tx.locationMember.findFirst({where:{memberId:actor.id,locationId:offer.locationId,leftAt:null}}) && !actor.owner) throw new ApiError(409,'MEMBER_NOT_IN_LOCATION','Сотрудник больше не состоит в точке.')
@@ -303,10 +310,10 @@ export async function actOnOffer(userId: string, organizationId: string, offerId
         const pending = await tx.shiftOffer.update({ where: { id: offer.id }, data: { status: 'AWAITING_APPROVAL', acceptedByMemberId: actor.id, acceptedAt: new Date(),...(workload.length?{resolutionReason:'Требуется подтверждение превышения месячной нормы.'}:{}) } })
         await tx.accountNotification.updateMany({ where: { shiftOfferId: offer.id, type: 'SHIFT_OFFER_CREATED', readAt: null }, data: { readAt: new Date() } })
         await notice(tx, pending, 'SHIFT_OFFER_APPROVAL', reviewers.map(m => m.id), 'Нужно согласовать смены', 'Коллега принял предложение. До согласования назначения остаются прежними.')
-      } else await complete(tx, offer, source, target, actor.id, null)
+      } else await complete(tx, offer, source, target, actor.id, null, false, openingHoursConfirmation)
     } else {
       if (offer.status !== 'AWAITING_APPROVAL' || !offer.acceptedByMemberId) fail('OFFER_NOT_ACCEPTED', 'Сначала дождитесь согласия коллеги.')
-      await complete(tx, offer, source, target, offer.acceptedByMemberId, actor.id,acknowledgeWorkload)
+      await complete(tx, offer, source, target, offer.acceptedByMemberId, actor.id,acknowledgeWorkload, openingHoursConfirmation)
     }
     return { id: offer.id }
   })

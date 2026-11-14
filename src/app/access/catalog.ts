@@ -1,5 +1,8 @@
 // Shared permission catalogue: API and UI use the same stable keys.
 export const permissionCatalog = [
+  {key:'members.personnel.view',label:'Кадровые сведения',group:'Сотрудники',scope:'location'},
+  {key:'members.personnel.edit',label:'Изменение кадровых сведений',group:'Сотрудники',scope:'location'},
+  {key:'members.personnel.history',label:'История кадровых изменений',group:'Сотрудники',scope:'location'},
   {
     "key": "members.view",
     "label": "Список сотрудников",
@@ -423,6 +426,7 @@ export function canAccess(access: AccessSnapshot, permission: Permission) { retu
 
 // Selecting an action also enables the minimum read permissions it needs.
 export const permissionDependencies: Partial<Record<Permission, Permission[]>> = {
+  'members.personnel.view':['members.view'], 'members.personnel.edit':['members.personnel.view'], 'members.personnel.history':['members.personnel.view'],
   'vacations.collect':['vacations.view','members.view'], 'vacations.resolve':['vacations.view','requests.view'], 'vacations.change':['vacations.view','absences.view'], 'requests.onBehalf':['requests.create','members.view'], 'requests.selfResolve':['requests.own'],
   'coverage.manage':['coverage.view'], 'drafts.view':['schedule.view'], 'drafts.edit':['drafts.view','members.view'], 'drafts.discuss':['drafts.view'], 'drafts.resolve':['drafts.view'], 'drafts.apply':['drafts.view'],
   'members.contacts':['members.view'], 'members.invite':['members.view'], 'members.invites.revoke':['members.invite'], 'members.assign':['members.view'], 'members.remove':['members.view'], 'members.positions':['members.view'],

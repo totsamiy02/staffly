@@ -59,7 +59,7 @@ export async function memberAccess(userId: string, org: string, memberId: string
   if (!target) throw new ApiError(404, 'MEMBER_NOT_FOUND', 'Сотрудник не найден.')
   const roles = await ensureAccessRoles(prisma, org), locations = await prisma.organizationLocation.findMany({ where: { organizationId: org, archivedAt: null }, select: { id: true, name: true } })
   const assignments = target.accessConfigured ? target.accessAssignments : target.locationMemberships.map(l => ({ locationId: l.locationId, roleId: roles.find(r => r.systemCode === l.role)!.id }))
-  return { organizationRoleId: target.accessRoleId, assignments, owner: target.role === 'OWNER', member: { firstName: target.user.firstName, lastName: target.user.lastName, middleName: target.user.middleName, email: target.user.email, avatarUrl: mediaUrl(target.user.avatarFileId) }, locations, access: resolveAccess(target, roles, locations.map(l => l.id)), roles }
+  return { organizationRoleId: target.accessRoleId, assignments, owner: target.role === 'OWNER', member: { firstName: target.user.firstName, lastName: target.user.lastName, middleName: target.user.middleName, email: target.workEmail??'', avatarUrl: mediaUrl(target.user.avatarFileId) }, locations, access: resolveAccess(target, roles, locations.map(l => l.id)), roles }
 }
 export async function saveMemberAccess(userId: string, org: string, memberId: string, data: z.infer<typeof accessAssignmentBody>) {
   await prisma.$transaction(async db => {
@@ -83,4 +83,4 @@ export async function saveMemberAccess(userId: string, org: string, memberId: st
   })
   return memberAccess(userId, org, memberId)
 }
-export async function accessAudit(userId: string, org: string) { await owner(prisma, userId, org); return prisma.accessAudit.findMany({ where: { organizationId: org }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 100 }) }
+export async function accessAudit(userId: string, org: string) { await owner(prisma, userId, org); return prisma.accessAudit.findMany({ where: { organizationId: org,action:{not:'PERSONNEL_UPDATED'} }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 100 }) }

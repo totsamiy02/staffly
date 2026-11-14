@@ -1,3 +1,4 @@
+import { assertPartialShiftBounds } from '../partial-shift-bounds.ts'
 import { z } from 'zod'
 import { prisma } from '../../db.ts'
 import { ApiError } from '../../api-error.ts'
@@ -36,6 +37,7 @@ export async function saveTimeCorrection(userId: string, organizationId: string,
     let result
     try { result = resolveTimeCorrection({ ...shift, scheduledStartAt: shift.scheduledStartAt.toISOString(), scheduledEndAt: shift.scheduledEndAt.toISOString(), actualStartAt: shift.actualStartAt?.toISOString() ?? null, actualEndAt: shift.actualEndAt?.toISOString() ?? null }, input) }
     catch (error) { throw new ApiError(400, 'INVALID_CORRECTION', error instanceof Error ? error.message : 'Проверьте время.') }
+    assertPartialShiftBounds(shift, result.actualStartAt ? new Date(result.actualStartAt) : null, result.actualEndAt ? new Date(result.actualEndAt) : null, result.attendance)
     const reason = correctionReason(input)
     const snapshot = (value: typeof shift | typeof result) => ({ attendance: value.attendance, actualStartAt: value.actualStartAt instanceof Date ? value.actualStartAt.toISOString() : value.actualStartAt, actualEndAt: value.actualEndAt instanceof Date ? value.actualEndAt.toISOString() : value.actualEndAt, actualBreakMinutes: value.actualBreakMinutes })
     await tx.workShiftAdjustment.create({ data: {

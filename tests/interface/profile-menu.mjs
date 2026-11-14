@@ -21,6 +21,7 @@ export async function profileMenuScenarios({page,origin,fixture,browser,preset,r
     await trigger.focus();await page.keyboard.press('Enter')
     const menu=page.getByRole('region',{name:'Профиль пользователя',exact:true})
     await expect(menu).toBeVisible()
+    await expect(menu.getByText('ID пользователя',{exact:true})).toHaveCount(0)
     await page.evaluate(()=>document.fonts.ready)
     const appearance=await page.locator('.profile-menu').evaluate(root=>{
       const parts={trigger:'.topbar-profile-trigger',avatar:'.topbar-profile-trigger .media-avatar',menu:'.topbar-popover--profile',preview:'.profile-preview__avatar',title:'.profile-preview strong',email:'.profile-preview>div>span',settings:'a[href="/app/settings"]',logout:'.profile-preview__logout'}

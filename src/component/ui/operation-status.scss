@@ -5,4 +5,14 @@
   &__reference { font-size: 12px; color: var(--theme-muted,#64616c); user-select: text; }
   code { overflow-wrap: anywhere; }
   &__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  &--failed {
+    align-items: flex-start;
+    padding: 18px;
+    font-size: 13px;
+    line-height: 1.65;
+
+    strong.form-inline-error { margin: 0; padding: 0; border: 0; background: none; }
+    .operation-status__reference { margin-top: 12px; }
+    .operation-status__actions > button { min-height: 44px; }
+  }
 }

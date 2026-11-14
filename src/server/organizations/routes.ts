@@ -1,3 +1,5 @@
+import {getMemberPersonnel,updateMemberPersonnel} from './member-personnel-service.ts'
+import {personnelBody} from '../../shared/member-personnel.ts'
 import { safeError } from '../security/safe-error.ts'
 import { auditSensitiveAccess } from '../security/journal.ts'
 import { securityHistory } from '../security/history-service.ts'
@@ -112,6 +114,16 @@ router.get('/organizations/:organizationId/members/:memberId/profile', async (re
   const options = parse(z.object({ month: z.string().regex(/^(20\d{2})-(0[1-9]|1[0-2])$/), page: z.coerce.number().int().min(1).max(100000).default(1), section: z.enum(['overview', 'time', 'documents', 'requests']).default('overview'), kind: z.enum(['personal', 'acknowledgements']).default('personal'), requestState: z.enum(['all', 'pending']).default('all') }), request.query)
   response.set('Cache-Control', 'private, no-store')
   response.json(await auditSensitiveAccess({ action: 'MEMBER_PROFILE', userId: auth(request).userId, organizationId, resourceType: 'MEMBER', resourceId: memberId }, () => memberProfile(auth(request).userId, organizationId, memberId, options)))
+})
+
+router.get('/organizations/:organizationId/members/:memberId/personnel', async (request,response)=>{
+ const {organizationId,memberId}=parse(memberParams,request.params)
+ const {historyPage}=parse(z.object({historyPage:z.coerce.number().int().min(1).max(100000).optional()}),request.query)
+ response.set('Cache-Control','private, no-store').json(await auditSensitiveAccess({action:'MEMBER_PROFILE',userId:auth(request).userId,organizationId,resourceType:'MEMBER',resourceId:memberId},()=>getMemberPersonnel(auth(request).userId,organizationId,memberId,historyPage)))
+})
+router.patch('/organizations/:organizationId/members/:memberId/personnel', async (request,response)=>{
+ const {organizationId,memberId}=parse(memberParams,request.params)
+ response.set('Cache-Control','private, no-store').json(await updateMemberPersonnel(auth(request).userId,organizationId,memberId,parse(personnelBody,request.body)))
 })
 
 router.patch('/organizations/:organizationId/members/:memberId/role', async (request, response) => {
@@ -271,8 +283,8 @@ router.get('/organizations/:organizationId/all-members', async (request, respons
   const viewer = await getMembership(auth(request).userId, organizationId)
   requirePermission(viewer, 'members.view')
   // The organization directory is public to its members, like point calendars.
-  const members = await prisma.organizationMember.findMany({ where: { organizationId, leftAt: null, user: { deletedAt: null }, ...(!viewer.owner ? {OR:[{locationMemberships:{some:{leftAt:null,locationId:{in:viewer.permissionLocations['members.view']}}}},{accessAssignments:{some:{locationId:{in:viewer.permissionLocations['members.view']}}}},{accessRoleId:{not:null}}]} : {}) }, select: { id: true, accessConfigured:true, accessRoleId:true, accessAssignments:{select:{locationId:true}}, user: { select: { email: true, firstName: true, lastName: true, middleName: true, avatarFileId: true } }, role: true, locationMemberships: { where: { leftAt: null, location: { archivedAt: null } }, select: { locationId: true, role: true } } } })
-  response.json({ members: members.map(m => ({ id: m.id, displayName: [m.user.lastName, m.user.firstName, m.user.middleName].filter(Boolean).join(' ') || (memberFieldVisible(viewer,m,'members.contacts') ? m.user.email : 'Участник организации'), email: memberFieldVisible(viewer, m, 'members.contacts') ? m.user.email : '', avatarUrl: mediaUrl(m.user.avatarFileId), role: m.role, locations: m.locationMemberships })) })
+  const members = await prisma.organizationMember.findMany({ where: { organizationId, leftAt: null, user: { deletedAt: null }, ...(!viewer.owner ? {OR:[{locationMemberships:{some:{leftAt:null,locationId:{in:viewer.permissionLocations['members.view']}}}},{accessAssignments:{some:{locationId:{in:viewer.permissionLocations['members.view']}}}},{accessRoleId:{not:null}}]} : {}) }, select: { id: true, workEmail:true,accessConfigured:true, accessRoleId:true, accessAssignments:{select:{locationId:true}}, user: { select: { email: true, firstName: true, lastName: true, middleName: true, avatarFileId: true } }, role: true, locationMemberships: { where: { leftAt: null, location: { archivedAt: null } }, select: { locationId: true, role: true } } } })
+  response.json({ members: members.map(m => ({ id: m.id, displayName: [m.user.lastName, m.user.firstName, m.user.middleName].filter(Boolean).join(' ') || (memberFieldVisible(viewer,m,'members.contacts') ? m.user.email.split('@')[0]||'Участник организации' : 'Участник организации'), email: memberFieldVisible(viewer, m, 'members.contacts') ? m.workEmail??'' : '', avatarUrl: mediaUrl(m.user.avatarFileId), role: m.role, locations: m.locationMemberships })) })
 })
 router.get('/organizations/:organizationId/teams', async (request, response) => response.json({ teams: await listTeams(auth(request).userId, parse(organizationIdParams, request.params).organizationId) }))
 router.post('/organizations/:organizationId/teams', async (request, response) => response.status(201).json({ team: await saveTeam(auth(request).userId, parse(organizationIdParams, request.params).organizationId, null, parse(teamBody, request.body)) }))

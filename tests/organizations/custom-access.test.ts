@@ -69,7 +69,7 @@ describe('custom organization access: scopes, revocation and confidential fields
     await prisma.user.update({where:{id:people.employee.id},data:{middleName:'Тестович'}})
     try {
       const result=await memberAccess(people.owner.id,org,people.employee.memberId)
-      assert.deepEqual(result.member,{firstName:'employee',lastName:'Проверка',middleName:'Тестович',email:people.employee.email,avatarUrl:null})
+      assert.deepEqual(result.member,{firstName:'employee',lastName:'Проверка',middleName:'Тестович',email:'',avatarUrl:null})
       assert.deepEqual((await memberAccess(people.employee.id,org,people.employee.memberId)).member,result.member)
       await assert.rejects(memberAccess(people.accountant.id,org,people.employee.memberId),code('OWNER_REQUIRED'))
       await assert.rejects(memberAccess(people.foreign.id,foreign,people.employee.memberId),code('MEMBER_NOT_FOUND'))

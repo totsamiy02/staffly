@@ -1,0 +1,129 @@
+.location-settings-list {
+  display: grid;
+  gap: 12px;
+  margin: 16px 0;
+}
+
+.location-settings-item {
+  min-width: 0;
+  border: 1px solid var(--theme-border, #e9e9eb);
+  border-radius: 12px;
+  background: var(--theme-surface, #fff);
+  overflow: hidden;
+
+  > .profile-disclosure {
+    border: 0;
+    border-top: 1px solid var(--theme-border, #e9e9eb);
+    border-radius: 0;
+  }
+
+  .profile-disclosure__toggle {
+    padding: 12px 18px;
+    font-size: 12px;
+    font-weight: 500;
+  }
+
+  .profile-disclosure__body[data-open=true] > div {
+    padding: 18px;
+  }
+}
+
+.location-settings-item__heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 18px;
+  min-width: 0;
+
+  > .location-mark {
+    margin-top: 2px;
+  }
+}
+
+.location-settings-item__body {
+  min-width: 0;
+  flex: 1;
+
+  > h3 {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+  }
+
+  > p {
+    margin: 5px 0;
+    font-size: 12px;
+    color: var(--theme-muted, #777);
+    overflow-wrap: anywhere;
+  }
+
+  > small {
+    font-size: 11px;
+    color: var(--theme-muted, #777);
+  }
+}
+
+.location-current,
+.location-closed {
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.location-current {
+  color: var(--point-color);
+  background: var(--point-bg);
+}
+
+.location-closed {
+  color: var(--theme-muted, #777);
+  background: var(--theme-surface-muted, #f5f5f7);
+}
+
+.location-settings-item .location-actions {
+  flex-shrink: 0;
+  justify-content: flex-end;
+  gap: 8px;
+
+  .app-secondary {
+    min-height: 36px;
+    padding: 7px 10px;
+    font-size: 11px;
+  }
+}
+
+@media (max-width: 900px) {
+  .location-settings-item__heading {
+    flex-wrap: wrap;
+  }
+
+  .location-settings-item .location-actions {
+    width: 100%;
+    padding-left: 48px;
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 420px) {
+  .location-settings-item__heading {
+    padding: 14px;
+  }
+
+  .location-settings-item .location-actions {
+    padding-left: 0;
+
+    > button {
+      flex: 1;
+    }
+  }
+
+  .location-settings-item .profile-disclosure__body[data-open=true] > div {
+    padding: 14px;
+  }
+}

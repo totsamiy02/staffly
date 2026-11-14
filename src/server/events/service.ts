@@ -19,7 +19,7 @@ const include = {
   createdBy: { include: { user: true } }, updatedBy: { include: { user: true } },
 } satisfies Prisma.OrganizationEventInclude
 type LoadedEvent = Prisma.OrganizationEventGetPayload<{ include: typeof include }>
-const name = (user: { firstName: string | null; lastName: string | null; middleName: string | null; email: string }) => [user.lastName, user.firstName, user.middleName].filter(Boolean).join(' ') || user.email
+const name = (user: { firstName: string | null; lastName: string | null; middleName: string | null; email: string }) => [user.lastName, user.firstName, user.middleName].filter(Boolean).join(' ') || user.email.split('@')[0] || 'Сотрудник'
 const manager = (actor: Actor, shared: boolean, ids: string[], permission: Permission = 'events.edit') => actor.owner || (shared ? hasPermission(actor, 'events.shared', null) && hasPermission(actor, permission, null) : ids.length > 0 && ids.every(id => hasPermission(actor, permission, id)))
 export function eventVisibility(actor: Actor): Prisma.OrganizationEventWhereInput {
   if (actor.owner) return {}

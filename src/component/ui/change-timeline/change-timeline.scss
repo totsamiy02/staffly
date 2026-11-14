@@ -1,0 +1,146 @@
+.change-timeline {
+  list-style:none!important;
+  padding:0!important;
+  margin:0!important;
+  display:grid;
+  gap:22px;
+  min-width:0;
+  >li {
+    position:relative;
+    display:flex;
+    align-items:flex-start;
+    gap:12px;
+    min-width:0;
+    margin:0!important;
+    padding:0!important;
+    &:not(:last-child)::before {
+      content:'';
+      position:absolute;
+      left:15px;
+      top:38px;
+      bottom:-15px;
+      width:1px;
+      background:var(--theme-border,#e5e5ec);
+    }
+    >article {
+      flex:1;
+      min-width:0;
+      border:0!important;
+      padding:0!important;
+      background:none;
+      >header {
+        display:flex;
+        flex-wrap:wrap;
+        align-items:center;
+        justify-content:space-between;
+        gap:4px 12px;
+        padding:0 0 10px!important;
+        margin:0!important;
+        border:0!important;
+        >strong {
+          font-size:12px;
+          font-weight:600;
+          line-height:1.5;
+          overflow-wrap:anywhere;
+        }
+        >time {
+          font-size:10px;
+          color:var(--theme-muted,#88818e);
+          line-height:1.5;
+        }
+      }
+    }
+  }
+  &__avatar {
+    display:grid;
+    place-items:center;
+    width:32px;
+    height:32px;
+    flex:0 0 32px;
+    border:1px solid var(--theme-border,#e4dfea);
+    border-radius:50%;
+    background:var(--theme-surface-muted,#f3f0f7);
+    color:var(--theme-accent,#8b6eaf);
+    font-size:12px;
+    font-weight:600;
+  }
+  dl {
+    display:grid;
+    gap:12px;
+    margin:0!important;
+    padding:12px;
+    border:1px solid var(--theme-border,#e5e5ec);
+    border-radius:9px;
+    background:var(--theme-surface-muted,#f7f6f9);
+    >div {
+      display:grid;
+      gap:5px;
+      margin:0!important;
+      min-width:0;
+    }
+  }
+  dt {
+    font-size:10px!important;
+    font-weight:500;
+    color:var(--theme-muted,#80798b);
+    line-height:1.5;
+  }
+  dd {
+    display:grid!important;
+    grid-template-columns:minmax(0,1fr) 16px minmax(0,1fr);
+    gap:8px;
+    margin:0!important;
+    align-items:start;
+    min-width:0;
+    font-size:12px!important;
+    line-height:1.6;
+    overflow-wrap:anywhere;
+    >svg {
+      width:14px;
+      height:14px;
+      margin-top:3px;
+      color:var(--theme-muted,#91899a);
+    }
+  }
+  &__before {
+    color:var(--theme-muted,#89818f);
+  }
+  &__after {
+    color:var(--theme-text-strong,#352e3e);
+    font-weight:500;
+  }
+}
+@media(max-width:420px) {
+  .change-timeline {
+    >li {
+      gap:8px;
+    }
+    &__avatar {
+      width:26px;
+      height:26px;
+      flex-basis:26px;
+    }
+    >li:not(:last-child)::before {
+      left:12px;
+      top:31px;
+    }
+    dl {
+      padding:10px;
+    }
+    dd {
+      grid-template-columns:minmax(0,1fr);
+      gap:3px;
+      >svg {
+        display:none;
+      }
+    }
+    &__before::before {
+      content:'Было: ';
+      font-size:10px;
+    }
+    &__after::before {
+      content:'Стало: ';
+      font-size:10px;
+    }
+  }
+}

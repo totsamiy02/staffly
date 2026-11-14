@@ -199,7 +199,10 @@ async function acceptInvitation(userId: string, userEmail: string, lookup: { id:
     if (!existing || existing.leftAt) await requireCapacity(tx, invite.organizationId, 'members')
     // Older departures may have retained roles or placements. A fresh invitation
     // must never reactivate these privileges, including across other points.
-    if (existing?.leftAt) await revokeMemberAccess(tx, invite.organizationId, existing.id, new Date())
+    if (existing?.leftAt) {
+      await revokeMemberAccess(tx, invite.organizationId, existing.id, new Date())
+      await tx.memberPosition.deleteMany({ where: { memberId: existing.id } })
+    }
     const member = existing ? existing.leftAt ? await tx.organizationMember.update({ where: { id: existing.id }, data: { leftAt: null, role: 'MEMBER', accessRoleId: null, accessConfigured: false } }) : existing : await tx.organizationMember.create({ data: { organizationId: invite.organizationId, userId, role: 'MEMBER' } })
     const locationId = invite.locationId ?? (await tx.organizationLocation.findFirstOrThrow({ where: { organizationId: invite.organizationId, archivedAt: null }, orderBy: { createdAt: 'asc' } })).id
     await requireLocationInPlan(tx, invite.organizationId, locationId)

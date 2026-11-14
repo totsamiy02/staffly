@@ -19,6 +19,7 @@ export async function memberProfile(userId: string, organizationId: string, memb
     user: { select: { email: true, firstName: true, lastName: true, middleName: true, phone: true, bio: true, avatarFileId: true, lastSeenAt: true, sessions: { where: onlineSessions(), select: { id: true }, take: 1 } } },
     locationTransfers: { where: { toLocationId: actor.locationId, temporary: true, revokedAt: null, endAt: { gt: new Date() } }, select: { id: true }, take: 1 },
     accessRole: { select: { name: true } }, accessAssignments: { include: { role: { select: { name: true } } } },
+    teamMemberships:{include:{team:{select:{id:true,name:true,locationId:true}}}},
     employmentPeriods: { orderBy: [{startedAt:'asc'},{id:'asc'}] },
     positions: { where: { position: { isActive: true } }, include: { position: { select: { id: true, name: true } } } },
     locationMemberships: { where: { leftAt: null, location: { archivedAt: null } }, include: { location: { select: { id: true, name: true, timezone: true } } } },
@@ -41,12 +42,13 @@ export async function memberProfile(userId: string, organizationId: string, memb
   }
   const permittedPoints = actor.owner ? target.locationMemberships : target.locationMemberships.filter(item => own || locationsFor(actor, 'members.view').includes(item.locationId))
   const member = {
-    id: target.id, userId: target.userId, firstName: target.user.firstName, lastName: target.user.lastName, middleName: target.user.middleName, displayName: [target.user.lastName, target.user.firstName, target.user.middleName].filter(Boolean).join(' ') || ((own || memberFieldVisible(actor, target, 'members.contacts')) ? target.user.email.split('@')[0] : 'Сотрудник'),
-    email: (own || memberFieldVisible(actor, target, 'members.contacts')) ? target.user.email : '', phone: (own || memberFieldVisible(actor, target, 'members.contacts')) ? target.user.phone : null,
+    id: target.id, userId: target.userId, firstName: target.user.firstName, lastName: target.user.lastName, middleName: target.user.middleName, displayName: [target.user.lastName, target.user.firstName, target.user.middleName].filter(Boolean).join(' ') || ((own || memberFieldVisible(actor, target, 'members.contacts')) ? target.user.email.split('@')[0]||'Сотрудник' : 'Сотрудник'),
+    email: (own || memberFieldVisible(actor, target, 'members.contacts')) ? target.workEmail??'' : '', phone: (own || memberFieldVisible(actor, target, 'members.contacts')) ? target.workPhone : null,
     bio: target.user.bio, avatarUrl: mediaUrl(target.user.avatarFileId), role: target.role,
     roleName: target.accessRole?.name ?? target.accessAssignments.find(item => item.locationId === actor.locationId)?.role.name ?? null,
-    employmentPeriods: hasPermission(actor,'members.remove') ? target.employmentPeriods.map(p=>({id:p.id,startedAt:p.startedAt,endedAt:p.endedAt,incomplete:p.source==='LEGACY'})) : [],
+    employmentPeriods: own||hasPermission(actor,'members.remove')||hasPermission(actor,'members.personnel.view') ? target.employmentPeriods.map(p=>({id:p.id,startedAt:p.startedAt,endedAt:p.endedAt,incomplete:p.source==='LEGACY'})) : [],
     joinedAt: target.joinedAt, leftAt: target.leftAt, online: target.user.sessions.length > 0, lastSeenAt: target.user.lastSeenAt,
+    teams:target.teamMemberships.filter(item=>permittedPoints.some(p=>p.locationId===item.team.locationId)).map(item=>item.team),
     positions: target.positions.map(item => item.position), locations: permittedPoints.map(item => item.location),
   }
   const [year, month] = options.month.split('-').map(Number)

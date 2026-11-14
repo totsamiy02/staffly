@@ -1,0 +1,8 @@
+.partial-shift-dialog {
+  .partial-shift-summary { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; padding: 14px; background: var(--theme-surface-muted, #f7f6f9); border-radius: 10px; font-size: 13px; }
+  fieldset { min-width: 0; border: 0; padding: 0; margin: 0; display: grid; gap: 12px; }
+  legend { padding: 0; margin-bottom: 12px; font-size: 13px; font-weight: 600; }
+  .partial-shift-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+  .partial-shift-check { display: flex; align-items: center; gap: 10px; input { width: 18px; height: 18px; min-height: 18px; margin: 0; } }
+}
+@media(max-width: 420px) { .partial-shift-dialog .partial-shift-grid { grid-template-columns: minmax(0, 1fr); } }

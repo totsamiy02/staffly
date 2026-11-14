@@ -24,6 +24,7 @@ before(async () => {
   base = `http://127.0.0.1:${(server.address() as { port: number }).port}/api`
   userId = (await prisma.user.create({ data: { email: `contract-${randomUUID()}@example.test`, emailVerifiedAt: new Date() } })).id
   organizationId = (await createOrganization(userId, { name: 'API contracts', description: null, timezone: 'Europe/Moscow' })).id
+  await prisma.organizationMember.updateMany({where:{organizationId,userId},data:{workEmail:'contract-work@example.test'}})
   typeId = (await prisma.requestType.findFirstOrThrow({ where: { organizationId, systemCode: 'OTHER' } })).id
   const session = await prisma.authSession.create({ data: { userId, refreshTokenHash: randomUUID(), idleExpiresAt: new Date(Date.now() + 3600000), absoluteExpiresAt: new Date(Date.now() + 3600000) } })
   token = await new SignJWT({ sid: session.id }).setProtectedHeader({ alg: 'HS256' }).setSubject(userId).setIssuedAt().setExpirationTime('1h').sign(new TextEncoder().encode(process.env.JWT_SECRET))
@@ -51,9 +52,9 @@ it('returns stable JSON mutation/detail contracts without persistence-only field
   assert.equal(detailResponse.status, 200)
   const detail = await detailResponse.json() as RequestDetail
   assert.equal(detail.request.id, body.request.id)
-  assert.equal(detail.request.creatorEmail.includes('@example.test'), true)
+  assert.equal(detail.request.creatorEmail,'contract-work@example.test')
   assert.equal(typeof detail.request.events[0].createdAt, 'string')
-  for (const key of ['creator', 'resolvedBy', 'relatedShift', 'requestType', '_count', 'submissionKey']) assert.equal(key in detail.request, false, key)
+  for (const key of ['creator', 'resolvedBy', 'relatedShift', 'requestType', '_count', 'submissionKey','personnelFirstName','personnelLastName','personnelNumber','personnelRevision']) assert.equal(key in detail.request, false, key)
 })
 
 it('keeps the bounded SQL projection equivalent to Prisma, preserving user JSON and UTC timestamps', async () => {

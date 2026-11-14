@@ -24,7 +24,7 @@ const chapters: Record<string, GuideChapter[]> = {
     { id: 'events', title: 'Собрать команду на событие', summary: 'Встречи, адресаты и обновление планов.', slugs: ['events-overview', 'create-event', 'event-recipients'] },
   ],
   management: [
-    { id: 'people', title: 'Собрать команду', summary: 'Приглашения, сотрудники и должности.', slugs: ['team-directory', 'invite-employees', 'positions', 'assign-location'] },
+    { id: 'people', title: 'Собрать команду', summary: 'Приглашения, сотрудники и должности.', slugs: ['team-directory', 'employee-card', 'invite-employees', 'positions', 'assign-location'] },
     { id: 'permissions', title: 'Разграничить доступ', summary: 'Роли и разрешения по организации и точкам.', slugs: ['roles', 'custom-roles', 'member-access', 'role-permissions'] },
     { id: 'locations', title: 'Настроить организацию', summary: 'Профиль, точки и правила работы команды.', slugs: ['create-organization', 'access-without-payment', 'locations', 'planning-settings', 'offer-settings', 'request-types'] },
     { id: 'ownership', title: 'Управлять владением', summary: 'Передача организации и критические действия.', slugs: ['ownership'] },

@@ -1,3 +1,4 @@
+import { assertPartialShiftBounds } from './partial-shift-bounds.ts'
 import {requireLocationInPlan} from '../subscriptions/access.ts'
 import {checkOpeningHours} from './opening-hours.ts'
 import { hasPermission, requirePermission } from '../organizations/access/access.ts'
@@ -77,6 +78,9 @@ export function publicShift(shift: WorkShift & { member: { user: { email: string
   const effectiveEndAt = shift.actualEndAt ?? shift.scheduledEndAt
   return {
     id: shift.id,
+    updatedAt: shift.updatedAt,
+    replacementOfId: shift.replacementOfId,
+    replacementCutoffAt: shift.replacementCutoffAt,
     activeOffer: shift.offerReservation?.offer ?? null,
     attendance:shift.attendance,attendanceReason:shift.attendanceReason,
     locationId: shift.locationId,
@@ -108,7 +112,7 @@ async function calendarShifts(organizationId: string, locationId: string | undef
   type Row = WorkShift & { userEmail: string; userFirstName: string | null; userLastName: string | null; userMiddleName: string | null; userAvatarId: string | null;
     adjustmentCount: number; offerId: string | null; offerKind: ShiftOfferKind | null; offerStatus: ShiftOfferStatus | null }
   const rows = await prisma.$queryRaw<Row[]>`
-    SELECT s.id, s.organization_id AS "organizationId", s.location_id AS "locationId", s.member_id AS "memberId",
+    SELECT s.replacement_of_id AS "replacementOfId", s.replacement_cutoff_at AS "replacementCutoffAt", s.replacement_floor_at AS "replacementFloorAt", s.id, s.organization_id AS "organizationId", s.location_id AS "locationId", s.member_id AS "memberId",
       s.created_by_member_id AS "createdByMemberId", s.attendance::text AS attendance, s.attendance_reason AS "attendanceReason",
       s.scheduled_start_at AS "scheduledStartAt", s.scheduled_end_at AS "scheduledEndAt", s.break_minutes AS "breakMinutes",
       s.actual_start_at AS "actualStartAt", s.actual_end_at AS "actualEndAt", s.actual_break_minutes AS "actualBreakMinutes",
@@ -311,6 +315,7 @@ export async function correctActualTime(userId: string, organizationId: string, 
     await lockShift(tx, shiftId)
     const fresh = await shiftInOrganization(tx, organizationId, shiftId)
     if (fresh.status === 'CANCELLED') throw new ApiError(409, 'SHIFT_CANCELLED', 'Отменённую смену нельзя корректировать.')
+    assertPartialShiftBounds(fresh, startAt, endAt)
     const previousStartAt = fresh.actualStartAt ?? fresh.scheduledStartAt
     const previousEndAt = fresh.actualEndAt ?? fresh.scheduledEndAt
     const previousBreakMinutes = fresh.actualBreakMinutes ?? fresh.breakMinutes
@@ -327,12 +332,14 @@ export async function mutatePlannedShift(tx: Prisma.TransactionClient, actor: Aw
   let previousAssignment = null
   if (!input) {
     if (!current) throw new ApiError(400, 'SHIFT_REQUIRED', 'Выберите исходную смену.')
+    if (current.replacementCutoffAt || current.replacementOfId && current.scheduledStartAt <= new Date()) throw new ApiError(409, 'PARTIAL_WORK_RECORDED', 'Работа части смены сохраняется. Уточните время или назначьте замену на остаток.')
     const changed = await tx.workShift.update({ where: { id: current.id }, data: { status: 'CANCELLED', cancelledAt: new Date(), cancelledByMemberId: actor.id, cancellationReason: change.reason ?? 'Отмена в предварительном графике' }, include: shiftInclude })
     await cancelShiftRequests(tx, actor.organizationId, [current.id], actor.id, 'Исходная смена отменена.')
     const notification = await recordShiftNotification(tx, changed, 'SHIFT_CANCELLED', actor.organization.timezone, undefined, actor.id)
     return { changed, notification, previousAssignment }
   }
   if (!startAt || !endAt) throw new ApiError(400, 'SHIFT_RANGE', 'Укажите время смены.')
+  if (current) assertPartialShiftBounds(current, startAt, endAt, undefined, input.memberId)
   validateDuration(startAt, endAt, input.breakMinutes)
   await activeTarget(tx, actor.organizationId, input.memberId, startAt, endAt)
   if (current && (current.actualStartAt || current.actualEndAt)) validateDuration(current.actualStartAt ?? startAt, current.actualEndAt ?? endAt, current.actualBreakMinutes ?? 0)
@@ -366,6 +373,7 @@ export async function setShiftAttendance(userId:string,organizationId:string,shi
     if(shift.status==='CANCELLED'||shift.scheduledStartAt>new Date())throw new ApiError(409,'ATTENDANCE_UNAVAILABLE','Результат можно указать после начала действующей смены.')
     const start=input.attendance==='NO_SHOW'?shift.scheduledStartAt:new Date(input.startAt??shift.scheduledStartAt.toISOString()),end=input.attendance==='NO_SHOW'?shift.scheduledEndAt:new Date(input.endAt??shift.scheduledEndAt.toISOString())
     if(Number.isNaN(start.getTime())||Number.isNaN(end.getTime())||input.attendance!=='NO_SHOW'&&(end<=start||end>new Date())||input.attendance==='PARTIAL'&&(!input.startAt||!input.endAt))throw new ApiError(400,'INVALID_ACTUAL','Укажите прошедший период фактической работы.')
+    assertPartialShiftBounds(shift, start, end, input.attendance)
     await tx.workShiftAdjustment.create({data:{shiftId,changedByMemberId:actor.id,previousStartAt:shift.actualStartAt??shift.scheduledStartAt,previousEndAt:shift.actualEndAt??shift.scheduledEndAt,previousBreakMinutes:shift.actualBreakMinutes??shift.breakMinutes,newBreakMinutes:0,newStartAt:start,newEndAt:end,reason:input.reason,kind:"ATTENDANCE",assignmentChange:{before:shift.attendance,after:input.attendance}}})
     return tx.workShift.update({where:{id:shiftId},data:{attendance:input.attendance,attendanceReason:input.reason,actualStartAt:input.attendance==='NO_SHOW'?null:start,actualEndAt:input.attendance==='NO_SHOW'?null:end,actualBreakMinutes:input.attendance==='NO_SHOW'?null:0}})
   },{isolationLevel:'Serializable'})

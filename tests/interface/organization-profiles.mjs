@@ -25,7 +25,7 @@ export async function runOrganizationProfiles({prisma,env,root,temporary,output,
   await context.addInitScript(theme=>{localStorage.setItem('staffly.theme',theme);localStorage.setItem('staffly-cookie-consent','necessary')},theme)
   const token=randomUUID()+randomUUID(),browserToken=randomBytes(48).toString('base64url');await prisma.authSession.create({data:{userId:owner.id,browserTokenHash:createHash('sha256').update(browserToken).digest('hex'),refreshTokenHash:createHash('sha256').update(token).digest('hex'),idleExpiresAt:new Date(Date.now()+3600000),absoluteExpiresAt:new Date(Date.now()+3600000)}})
   await context.addCookies(['staffly_refresh','staffly_browser'].map(name=>({name,value:name==='staffly_refresh'?token:browserToken,domain:'127.0.0.1',path:'/api/auth',httpOnly:true,sameSite:'Lax'})))
-  const page=await context.newPage();let authorization;page.on('request',request=>{if(request.headers().authorization)authorization=request.headers().authorization});let intentional=false;page.on('pageerror',e=>{if(!intentional)report.errors.push(e.message)})
+  const page=await context.newPage();let authorization;page.on('request',request=>{if(request.headers().authorization)authorization=request.headers().authorization});let intentional=false;page.on('pageerror',e=>{if(!intentional||!e.message.includes('Synthetic error layout acceptance'))report.errors.push(e.message)})
   const check=async(name,run)=>{try{await run();report.checks.push({viewport,name,passed:true});await save();console.log(viewport+': '+name)}catch(e){await page.screenshot({path:path.join(output,viewport+'-failure.png'),fullPage:true});await writeFile(path.join(output,viewport+'-failure.txt'),await page.locator('body').innerText());throw e}}
   const shot=async name=>{await page.evaluate(()=>window.scrollTo(0,0));await page.screenshot({path:path.join(output,viewport+'-'+theme+'-'+name+'.png'),fullPage:true})}
   const fit=async()=>{await page.evaluate(()=>document.fonts.ready);const size=await page.evaluate(()=>({w:document.documentElement.clientWidth,s:document.documentElement.scrollWidth}));assert(size.s<=size.w+1,JSON.stringify(size))}
@@ -57,7 +57,23 @@ export async function runOrganizationProfiles({prisma,env,root,temporary,output,
    await page.goto(origin+'/app');await expect(page.locator('.organization-card').filter({hasText:name})).toContainText('Обновлённая сфера')
   })
   await check('point details, remote state and hours are visible and edits preserve server revision',async()=>{
-   await page.goto(origin+'/app/organizations/'+org.id+'/settings?section=locations');const point=page.locator('.location-settings-item').first();await point.getByRole('button',{name:'Подробнее о точке',exact:false}).click();await expect(point).toContainText('Синтетическая инструкция для сотрудников');await expect(point).toContainText('09:00 — 18:00');await expect(point).toContainText('Без физического адреса');await fit();await shot('point')
+   await page.goto(origin+'/app/organizations/'+org.id+'/settings?section=locations');const point=page.locator('.location-settings-item').first();const before=await point.locator('.location-settings-item__heading').boundingBox();await point.getByRole('button',{name:'Подробнее о точке',exact:false}).click();await expect(point).toContainText('Синтетическая инструкция для сотрудников');await expect(point).toContainText('09:00 — 18:00');await expect(point).toContainText('Без физического адреса');await fit();await shot('point')
+   const after=await point.locator('.location-settings-item__heading').boundingBox()
+   assert(before&&after&&Math.abs(before.height-after.height)<1,'Expanding point details must not stretch its heading or actions')
+   for(const width of viewport==='desktop'?[1920,1024,768]:[320,390]){
+    await page.setViewportSize({width,height:900});await fit()
+    const heading=await point.locator('.location-settings-item__heading').boundingBox()
+    const actions=await point.locator('.location-actions').boundingBox()
+    assert(heading&&actions&&actions.y+actions.height<=heading.y+heading.height+1,'Point actions stay inside its heading')
+    const details=await point.locator('.location-profile-details').evaluate(root=>({width:root.clientWidth,scroll:root.scrollWidth}))
+    assert(details.scroll<=details.width+1,'Point details fit their container')
+    await shot('point-'+width)
+   }
+   await page.setViewportSize(viewport==='desktop'?{width:1440,height:1000}:{width:390,height:844})
+   await page.getByRole('button',{name:'Открыть профиль',exact:true}).click()
+   const menu=page.getByRole('region',{name:'Профиль пользователя',exact:true})
+   await expect(menu).toBeVisible();await expect(menu.getByText('ID пользователя',{exact:true})).toHaveCount(0)
+   await shot('profile-menu');await page.keyboard.press('Escape')
    await point.getByRole('button',{name:'Изменить',exact:true}).click();const form=page.getByRole('dialog',{name:'Данные точки',exact:true});await form.getByRole('textbox',{name:'Название точки *',exact:true}).fill('Новая точка');await form.getByRole('button',{name:'Сохранить',exact:true}).click();await expect(form).toBeHidden();assert.equal((await prisma.organizationLocation.findFirstOrThrow({where:{organizationId:org.id}})).name,'Новая точка')
    const accessibility=await new AxeBuilder({page}).include('.settings-page').withTags(['wcag2a','wcag2aa']).analyze();assert.deepEqual(accessibility.violations.map(v=>({id:v.id,nodes:v.nodes.map(n=>n.target)})),[])
    if(viewport==='mobile'){await page.setViewportSize({width:320,height:740});await fit();await page.setViewportSize({width:390,height:844})}
@@ -80,9 +96,9 @@ export async function runOrganizationProfiles({prisma,env,root,temporary,output,
    const point=await prisma.organizationLocation.findFirstOrThrow({where:{organizationId:org.id}});assert.equal(point.openingHours.find(d=>d.day===0).end,'16:00');const after=await prisma.workShift.findUniqueOrThrow({where:{id:before.id}});assert.equal(after.scheduledStartAt.toISOString(),before.scheduledStartAt.toISOString());assert.equal(after.scheduledEndAt.toISOString(),before.scheduledEndAt.toISOString())
   })
   }
-  await check('500 boundary support reference remains readable and fits the screen',async()=>{
-   intentional=true;await page.route('**/api/support/client-errors',route=>route.fulfill({status:202,contentType:'application/json',body:'{}'}));await page.goto(origin+'/__profile-error?theme='+theme);await expect(page.getByRole('heading',{name:'Не удалось открыть страницу',exact:true})).toBeVisible();await expect(page.locator('.copy-reference')).toBeVisible();await fit();const font=await page.locator('.request-error-reference').evaluate(e=>parseFloat(getComputedStyle(e).fontSize));assert(font<=14);assert((await page.getByRole('button',{name:'Обновить',exact:true}).boundingBox()).height>=40);assert((await page.locator('main').evaluate(e=>getComputedStyle(e).fontFamily)).includes('Arial'));await shot('error')
-  })
+  intentional = true
+  const { checkErrorLayouts } = await import('./error-layout.mjs')
+  await checkErrorLayouts({ page, origin, viewport, theme, output, check, expect })
   await context.close()
  }}finally{await browser.close();await vite.close()}
  assert.deepEqual(report.errors,[]);report.status='passed';await save();return report

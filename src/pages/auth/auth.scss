@@ -222,6 +222,9 @@
   margin: 6px 2px 0;
   color: var(--theme-danger,#ffb2b2);
   font-size: 13px;
+  line-height: 1.65;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .auth__options {

@@ -49,3 +49,62 @@
   }
 }
 .admin-point-profiles{display:grid;gap:10px;margin-top:14px;min-width:0;}.admin-profile-prose{white-space:pre-wrap;overflow-wrap:anywhere;}
+
+.admin-personnel-card {
+  min-width: 0;
+  margin-top: 14px;
+  padding: 18px;
+  border: 1px solid var(--admin-line, var(--theme-border));
+  border-radius: 12px;
+  background: var(--admin-surface, var(--theme-surface));
+  overflow-wrap: anywhere;
+
+  > header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  > .admin-key-values {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 20px 24px;
+    margin: 20px 0;
+
+    > div {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      align-items: start;
+      gap: 5px;
+      margin: 0;
+    }
+
+    dt { font-size: 11px; }
+    dd { font-size: 13px; text-align: left; }
+  }
+
+  > .admin-note {
+    margin-top: 10px;
+    font-size: 11px;
+    line-height: 1.7;
+  }
+
+  > .employment-periods { margin-bottom: 12px; }
+}
+
+.admin-personnel-history {
+  display: grid;
+  gap: 14px;
+  margin-top: 16px;
+  padding-top: 14px;
+}
+
+@media (max-width: 500px) {
+  .admin-personnel-card {
+    padding: 14px;
+
+    > .admin-key-values { grid-template-columns: minmax(0, 1fr); }
+  }
+}

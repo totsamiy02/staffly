@@ -1,3 +1,4 @@
+import EmploymentPeriods from '../../../../component/ui/employment-periods/employment-periods.tsx'
 import type { MemberProfileData } from '../../../../app/member-profile/types.ts'
 import { formatDuration, formatTime, formatMonth, zonedDateAndTime } from '../../../../app/schedule/date-utils.ts'
 import { profileDate } from '../../../../app/member-profile/presentation.ts'
@@ -22,9 +23,10 @@ export function ProfileAbout({ data, showLocations }: { data: MemberProfileData;
       <div className="member-profile-fact"><dt><ModuleIcon section="employees" />В команде с</dt><dd>{profileDate(member.joinedAt, data.location.timezone)}</dd></div>
       {member.leftAt && <div className="member-profile-fact"><dt><AccessIcon name="history" />Дата выхода</dt><dd>{profileDate(member.leftAt, data.location.timezone)}</dd></div>}
       {showLocations && <div className="member-profile-fact"><dt><ModuleIcon section="location" />Работает в точках</dt><dd><div className="member-profile-chips">{member.role === 'OWNER' ? <span>Все точки</span> : member.locations.length ? member.locations.map(point => <span key={point.id}>{point.name}</span>) : <span>Пока не назначены</span>}</div></dd></div>}
+      {!!member.teams?.length&&<div className="member-profile-fact"><dt>Команды</dt><dd>{member.teams.map(team=>team.name).join(', ')}</dd></div>}
     </dl>
-    {!!member.employmentPeriods?.length && <details><summary>Периоды работы</summary><ul>{member.employmentPeriods.map(period=><li key={period.id}>{period.startedAt?profileDate(period.startedAt,data.location.timezone):'Начало не зафиксировано'} — {period.endedAt?profileDate(period.endedAt,data.location.timezone):'Продолжается'}{period.incomplete&&<p>История до начала учёта неполная; промежуточные периоды неизвестны.</p>}</li>)}</ul></details>}
-    {(member.email || member.phone) && <section className="member-profile-contacts" aria-label="Контакты сотрудника"><h4>Контакты</h4>
+    <EmploymentPeriods periods={member.employmentPeriods??[]} timezone={data.location.timezone}/>
+    {(member.email || member.phone) && <section className="member-profile-contacts" aria-label="Контакты сотрудника"><h4>Рабочие контакты</h4>
       {member.email && <div><span>Почта</span><a href={`mailto:${member.email}`}>{member.email}</a><button type="button" aria-label="Скопировать почту" onClick={() => void copy(member.email)}><AccessIcon name="copy" /></button></div>}
       {member.phone && <div><span>Телефон</span><a href={`tel:${member.phone}`}>{formatRussianPhone(member.phone)}</a><button type="button" aria-label="Скопировать телефон" onClick={() => void copy(member.phone!)}><AccessIcon name="copy" /></button></div>}
     </section>}

@@ -1,3 +1,6 @@
+import { openingHoursConfirmationFrom } from '../../../../shared/organization-profile.ts'
+import OpeningHoursWarning from '../../organizations/opening-hours-warning.tsx'
+import PartialShiftForm from './partial-shift-form.tsx'
 import { useFormSafety } from '../../../../app/forms/use-form-safety.ts'
 import ActionSurface from '../../../../component/ui/action-surface.tsx'
 import AsyncPanel from '../../../../component/ui/async-panel.tsx'
@@ -29,7 +32,11 @@ function ShiftComparison({ offer, ownMemberId }: { offer: ShiftOffer; ownMemberI
   return <div className="offer-comparison"><OfferShiftCard shift={initiator ? offer.source : offer.target} locationName={offer.location.name} label={participant ? "Вы отдаёте" : offer.recipient?.name} tone="out" /><span className="offer-comparison__arrow" aria-hidden="true">⇄</span><OfferShiftCard shift={initiator ? offer.target : offer.source} locationName={offer.location.name} label={participant ? "Вы получаете" : offer.initiator.name} tone="in" /></div>
 }
 
-export function ShiftOfferForm({ organization, shift, onClose, onCreated }: { organization: OrganizationSummary; shift: WorkShift; onClose: () => void; onCreated: (id: string) => void }) {
+export function ShiftOfferForm(props: { organization: OrganizationSummary; shift: WorkShift; onClose: () => void; onCreated: (id: string) => void }) {
+  return new Date(props.shift.scheduledStartAt) <= new Date() ? <PartialShiftForm {...props} /> : <WholeShiftOfferForm {...props} />
+}
+
+function WholeShiftOfferForm({ organization, shift, onClose, onCreated }: { organization: OrganizationSummary; shift: WorkShift; onClose: () => void; onCreated: (id: string) => void }) {
   const query = useOfferCandidates(organization.id, shift.id)
   const { apiRequest } = useAuth()
   const cache = useQueryClient(), toast = useToast()
@@ -82,10 +89,11 @@ function OfferCard({ offer, ownMemberId, detail = false, compact = false, busy, 
   const recipient = offer.acceptedBy ?? offer.recipient
   if (compact && !detail) return <ActionSurface className="request-offer-row" type="button" onClick={onOpen} aria-label={`${offer.initiator.name}, ${offer.kind === 'SWAP' ? 'обмен сменами' : 'передача смены'}, ${offerStatus[offer.status]}`}><span className="request-offer-row__person"><MemberAvatar memberId={offer.initiator.id} url={offer.initiator.avatarUrl} name={offer.initiator.name} className="app-avatar" /><span><strong>{offer.initiator.name}</strong><small>{mine ? 'Ваше предложение' : recipient ? `Для ${recipient.name}` : 'Для сотрудников точки'}</small></span></span><span className="request-offer-row__type"><span>{offer.kind === 'SWAP' ? 'Обмен сменами' : 'Передача смены'}</span><small>{offer.location.name}</small></span><span className="request-offer-row__period"><strong>{displayDate(zonedDateAndTime(offer.source.startAt, offer.source.timezone).date)}</strong><small>{shiftTimeRange(offer.source.startAt, offer.source.endAt, offer.source.timezone)}</small></span><span className={`offer-status offer-status--${offer.status.toLowerCase()}`}>{offerStatus[offer.status]}</span><time dateTime={offer.createdAt}>{new Date(offer.createdAt).toLocaleDateString('ru-RU')}</time></ActionSurface>
   return <article className={`shift-offer-card${detail ? ' shift-offer-card--detail' : ''}`}>
-    <header className="shift-offer-card__heading"><span>{offer.kind === 'SWAP' ? 'Взаимный обмен' : offer.recipient ? 'Передача коллеге' : 'Доступная смена'}</span><span className={`offer-status offer-status--${offer.status.toLowerCase()}`}>{offerStatus[offer.status]}</span></header>
+    <header className="shift-offer-card__heading"><span>{offer.partial ? 'Замена на остаток смены' : offer.kind === 'SWAP' ? 'Взаимный обмен' : offer.recipient ? 'Передача коллеге' : 'Доступная смена'}</span><span className={`offer-status offer-status--${offer.status.toLowerCase()}`}>{offerStatus[offer.status]}</span></header>
     {detail ? <ShiftComparison offer={offer} ownMemberId={ownMemberId} /> : <OfferShiftCard shift={offer.source} locationName={offer.location.name} />}
     {detail ? <>
       <div className="offer-participants"><OfferPersonRow person={offer.initiator} label={mine ? 'Вы предложили смену' : 'Инициатор предложения'} />{recipient && <OfferPersonRow person={recipient} label={offer.acceptedBy ? 'Согласие получено' : 'Получатель предложения'} />}</div>
+      {offer.partial && <p className="offer-note">{offer.partial.prepared ? 'Уход первого сотрудника зафиксирован.' : 'Время ухода требует проверки руководителем.'}</p>}
       {offer.comment && <p className="offer-comment">{offer.comment}</p>}
       {offer.resolutionReason && <p className={`offer-note${offer.status === 'COMPLETED' ? ' offer-check' : ''}`}>{offer.resolutionReason}</p>}
       {offer.acceptanceReason && <p className="offer-note">{offer.acceptanceReason}</p>}
@@ -104,6 +112,8 @@ function OfferCard({ offer, ownMemberId, detail = false, compact = false, busy, 
 
 export function ShiftOffersPanel({ organization, offerId, onClose, onOffer, embedded = false }: { organization: OrganizationSummary; offerId: string | null; onClose: () => void; onOffer: (id: string | null) => void; embedded?: boolean }) {
   const { apiRequest, locationId } = useAuth(), cache = useQueryClient()
+  const [openingToken, setOpeningToken] = useState<string>()
+  const [acceptOpening, setAcceptOpening] = useState(false)
   const [workloadWarning,setWorkloadWarning]=useState(false),[acknowledgeWorkload,setAcknowledgeWorkload]=useState(false)
   const [tab, setTab] = useState<OfferTab>('mine'), [page, setPage] = useState(1), [busy, setBusy] = useState(false), [error, setError] = useState('')
   const list = useOffers(organization.id, tab, page), query = useOffer(organization.id, offerId)
@@ -114,15 +124,28 @@ export function ShiftOffersPanel({ organization, offerId, onClose, onOffer, embe
     if (!offer || busy) return
     setBusy(true); setError('')
     try {
-      const updated = await apiRequest<{ offer: ShiftOffer }>(`/organizations/${organization.id}/schedule/offers/${offer.id}/action`, { method: 'POST', body: { action: value,acknowledgeWorkload:value==='approve'&&acknowledgeWorkload } })
+      if (value === 'repeat' && offer.partial) {
+        const part = offer.partial
+        const result = await apiRequest<{ offer: ShiftOffer }>('/organizations/' + organization.id + '/schedule/partial-offers', { method: 'POST', body: {
+          sourceShiftId: offer.source.id, creationKey: crypto.randomUUID(), expectedUpdatedAt: part.sourceVersion,
+          firstEndAt: part.firstEndAt, replacementStartAt: new Date(Math.max(Date.now(), +new Date(part.replacementStartAt))).toISOString(),
+          firstBreakMinutes: part.firstBreakMinutes, replacementBreakMinutes: part.replacementBreakMinutes,
+          reason: part.reason, recipientMemberId: null, direct: false,
+        } })
+        onOffer(result.offer.id)
+        await invalidateOrganizationWork(cache, organization.id)
+        return
+      }
+      const updated = await apiRequest<{ offer: ShiftOffer }>(`/organizations/${organization.id}/schedule/offers/${offer.id}/action`, { method: 'POST', body: { action: value, openingHoursConfirmation: acceptOpening ? openingToken : undefined, acknowledgeWorkload:value==='approve'&&acknowledgeWorkload } })
       cache.setQueryData(['shift-offer', organization.id, locationId, offer.id], updated); await invalidateOrganizationWork(cache, organization.id)
 
-    } catch (failure) { if((failure as {code?:string}).code==='WORKLOAD_WARNING')setWorkloadWarning(true);setError(failure instanceof Error ? failure.message : 'Действие не выполнено.'); await invalidateOrganizationWork(cache, organization.id) }
+    } catch (failure) { setOpeningToken(openingHoursConfirmationFrom(failure));setAcceptOpening(false);if((failure as {code?:string}).code==='WORKLOAD_WARNING')setWorkloadWarning(true);setError(failure instanceof Error ? failure.message : 'Действие не выполнено.'); await invalidateOrganizationWork(cache, organization.id) }
     finally { setBusy(false) }
   }
-  function selectOffer(id: string | null) { setWorkloadWarning(false);setAcknowledgeWorkload(false);setError(''); onOffer(id) }
+  function selectOffer(id: string | null) { setOpeningToken(undefined);setAcceptOpening(false); setWorkloadWarning(false);setAcknowledgeWorkload(false);setError(''); onOffer(id) }
   const content = (close: () => void) => <>
-    {offerId ? <><button type="button" className="app-back" disabled={busy} onClick={() => selectOffer(null)}>Все предложения</button>{query.isLoading ? <div className="app-state"><span className="app-spinner" />Загружаем предложение…</div> : offer ? <><OfferCard offer={offer} ownMemberId={ownMemberId} detail busy={busy} onAction={v => void action(v)} />{offer.status === 'COMPLETED' && <Link className="app-secondary offer-open-shift" onClick={close} to={`/app/organizations/${organization.id}/schedule?location=${offer.location.id}&month=${zonedDateAndTime(offer.source.startAt, offer.source.timezone).date.slice(0, 7)}&shift=${offer.target && offer.initiator.id === ownMemberId ? offer.target.id : offer.source.id}`}>Открыть смену</Link>}</> : <div className="app-state" role="alert">{query.error?.message ?? 'Предложение недоступно.'}<button className="app-secondary" onClick={() => void query.refetch()}>Повторить</button></div>}</> : <>
+    {openingToken && <OpeningHoursWarning checked={acceptOpening} onChange={setAcceptOpening} />}
+    {offerId ? <><button type="button" className="app-back" disabled={busy} onClick={() => selectOffer(null)}>Все предложения</button>{query.isLoading ? <div className="app-state"><span className="app-spinner" />Загружаем предложение…</div> : offer ? <><OfferCard offer={offer} ownMemberId={ownMemberId} detail busy={busy} onAction={v => void action(v)} />{offer.partial?.prepared && canAccess(organization, 'schedule.actual') && canAccess(organization, 'schedule.edit') && ['CANCELLED', 'REJECTED', 'INVALID'].includes(offer.status) && <button className="app-secondary" disabled={busy} onClick={() => void action('repeat')}>Повторить поиск замены</button>}{offer.status === 'COMPLETED' && <Link className="app-secondary offer-open-shift" onClick={close} to={`/app/organizations/${organization.id}/schedule?location=${offer.location.id}&month=${zonedDateAndTime(offer.source.startAt, offer.source.timezone).date.slice(0, 7)}&shift=${offer.partial?.replacementShiftId ?? (offer.target && offer.initiator.id === ownMemberId ? offer.target.id : offer.source.id)}`}>Открыть смену</Link>}</> : <div className="app-state" role="alert">{query.error?.message ?? 'Предложение недоступно.'}<button className="app-secondary" onClick={() => void query.refetch()}>Повторить</button></div>}</> : <>
       <SegmentedNav variant="underline" label="Разделы предложений">{([['mine', 'Мне'], ['available', 'Доступные'], ['sent', 'Отправленные'], ...(canManage ? [['approval', 'Согласование']] : [])] as Array<[OfferTab, string]>).map(([value, label]) => <button type="button" key={value} aria-pressed={tab === value} onClick={() => { setTab(value); setPage(1) }}>{label}{value !== 'sent' && !!list.data?.counts[value as keyof typeof list.data.counts] && <span className="offer-count">{list.data.counts[value as keyof typeof list.data.counts]}</span>}</button>)}</SegmentedNav>
       <AsyncPanel pending={list.isLoading} identity={`${tab}:${page}`} minHeight={300}>{list.isLoading ? <div className="app-state"><span className="app-spinner" />Загружаем предложения…</div> : list.isError ? <div className="app-state" role="alert">Не удалось загрузить предложения.<button className="app-secondary" onClick={() => void list.refetch()}>Повторить</button></div> : <><div className={`shift-offer-list${embedded ? ' shift-offer-list--rows' : ''}`}>{list.data?.offers.map(item => <OfferCard compact={embedded} key={item.id} offer={item} ownMemberId={ownMemberId} onOpen={() => selectOffer(item.id)} />)}</div>{!list.data?.offers.length && <div className="offer-empty"><span className="offer-empty__icon"><OfferIcon kind="calendar" /></span><strong>{tab === 'mine' ? 'Входящих предложений пока нет' : tab === 'available' ? 'Доступных смен пока нет' : tab === 'sent' ? 'Вы ещё не предлагали смены' : 'Нет предложений для согласования'}</strong><p>{tab === 'sent' ? 'Откройте свою будущую смену и выберите «Передать или обменять».' : 'Новые предложения появятся здесь.'}</p></div>}{list.data && list.data.pagination.pages > 1 && <nav className="shift-history__pagination" aria-label="Страницы предложений"><button disabled={page === 1 || list.isFetching} onClick={() => setPage(p => p - 1)}>Назад</button><span>{page} из {list.data.pagination.pages}</span><button disabled={page === list.data.pagination.pages || list.isFetching} onClick={() => setPage(p => p + 1)}>Далее</button></nav>}</>}</AsyncPanel>
     </>}

@@ -1,3 +1,4 @@
+import { createPartialOffer, partialOfferBody } from './partial-shifts.ts'
 import { setShiftAttendance } from './service.ts'
 import { getTimeCorrection, saveTimeCorrection, timeCorrectionBody } from './time/time-correction-service.ts'
 import { offerBody, offerModesBody, offerListQuery, offerActionBody, getOfferModes, saveOfferModes, offerCandidates, createOffer, listOffers, getOffer, actOnOffer } from './offer-service.ts'
@@ -43,6 +44,10 @@ router.get('/organizations/:organizationId/schedule/offers', async (request, res
   const { organizationId } = parse(organizationParams, request.params)
   response.json(await listOffers(auth(request).userId, organizationId, parse(offerListQuery, request.query)))
 })
+router.post('/organizations/:organizationId/schedule/partial-offers', mutationLimiter, async (request, response) => {
+  const { organizationId } = parse(organizationParams, request.params)
+  response.status(201).json({ offer: await createPartialOffer(auth(request).userId, organizationId, parse(partialOfferBody, request.body)) })
+})
 router.post('/organizations/:organizationId/schedule/offers', mutationLimiter, async (request, response) => {
   const { organizationId } = parse(organizationParams, request.params)
   response.status(201).json({ offer: await createOffer(auth(request).userId, organizationId, parse(offerBody, request.body)) })
@@ -54,7 +59,7 @@ router.get('/organizations/:organizationId/schedule/offers/:offerId', async (req
 router.post('/organizations/:organizationId/schedule/offers/:offerId/action', mutationLimiter, async (request, response) => {
   const { organizationId, offerId } = parse(organizationParams.extend({ offerId: z.string().uuid() }), request.params)
   const body=parse(offerActionBody,request.body)
-  response.json({ offer: await actOnOffer(auth(request).userId, organizationId, offerId, body.action,body.acknowledgeWorkload) })
+  response.json({ offer: await actOnOffer(auth(request).userId, organizationId, offerId, body.action,body.acknowledgeWorkload,body.openingHoursConfirmation) })
 })
 
 router.get('/organizations/:organizationId/schedule/history', async (request, response) => {

@@ -1,3 +1,4 @@
+import type {PersonnelRecord} from '../../shared/member-personnel.ts'
 import type { OrganizationLocation } from '../../app/organizations/types.ts'
 import type { HistoryPoint, HistoryRange } from '../../shared/monitoring-history.ts'
 import type { SubscriptionSnapshot } from '../../app/subscriptions/plans.ts'
@@ -10,6 +11,8 @@ export type OverviewMonitor={totals:{organizations:number;new_organizations:numb
 export type OrganizationDetails=OrganizationMonitor&{description:string|null;contactEmail:string|null;phone:string|null;website:string|null;address:string|null;pointProfiles:OrganizationLocation[];pointProfilesTotal:number;ownerName:string|null;ownerId:string|null;ownerPublicId:number|null;daily:HistoryPoint[];dailyRange:HistoryRange;features:Array<{feature:string;days:number}>;events:Array<{action:string;outcome:string;createdAt:string}>;startedAt:string}
 export type UserMonitor={id:string;publicId:number;avatarUrl:string|null;displayName:string;email:string;createdAt:string;emailVerified:boolean;lastSeenAt:string|null;organizations:number;sessions:number;online:boolean}
 export type UsersMonitor=PageResult<UserMonitor>&{totals:{users:number;verified:number;deleted:number};online:OnlineSummary}
-export type UserDetails=UserMonitor&{platformAdmin:'active'|'revoked'|'none';memberships:Array<{id:string;name:string;logoUrl:string|null;role:string}>;membershipsTotal:number;page:number;pageSize:number}
+export type UserDetails=UserMonitor&{platformAdmin:'active'|'revoked'|'none';memberships:Array<{id:string;name:string;logoUrl:string|null;role:string;personnel:AdminPersonnel}>;membershipsTotal:number;page:number;pageSize:number}
 export type OnlineMonitor={online:OnlineSummary;organizations:PageResult<OrganizationMonitor>;history:OnlineSample[];historyRange:HistoryRange;peak:number;plans:Array<{plan:string;count:number}>;startedAt:string}
 export type AnalyticsMonitor={totals:{day:number;week:number;month:number};daily:HistoryPoint[];dailyRange:HistoryRange;features:Array<{feature:string;organizations:number}>;funnel:{created:number;invited:number;team:number;schedule:number};cohorts:Array<{cohort:string;week:number;organizations:number|null;observed:number;total:number;state:string;ongoing:boolean}>;startedAt:string;days:number;timezone:string;lifetime:Record<string,number>;lifetimeStartedAt:string|null;registrationRange:HistoryRange;registrations:Array<{day:string;users:number;organizations:number}>}
+
+export type AdminPersonnel={id:string;organizationId:string;userId:string;accountName:string;organizationName:string;leftAt:string|null;role:string;record:PersonnelRecord;positions:string[];teams:string[];locations:string[];periods:Array<{startedAt:string|null;endedAt:string|null;incomplete:boolean}>}

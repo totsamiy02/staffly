@@ -18,6 +18,7 @@ const icons: Record<string, ReactNode> = {
   building: <><rect x="4" y="3" width="12" height="18" rx="2" /><path d="M16 9h4v12H9v-5h3v5M8 7h4m-4 4h4" /></>,
   lock: <><rect x="5" y="10" width="14" height="11" rx="3" /><path d="M8 10V7a4 4 0 0 1 8 0v3m-4 5v2" /></>,
   search: <><circle cx="10" cy="10" r="6" /><path d="m15 15 5 5" /></>,
+  edit: <><path d="m15 5 4 4M4 20l5-1L20 8a2.8 2.8 0 0 0-4-4L5 15l-1 5Z"/></>,
   plus: <path d="M12 5v14M5 12h14" />,
   back: <path d="m10 5-7 7 7 7M3 12h18" />,
   chevron: <path d="m9 5 7 7-7 7" />,

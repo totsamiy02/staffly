@@ -25,6 +25,8 @@ async function fixture() {
   await prisma.accessAssignment.create({ data: { organizationId: org.id, memberId: member.id, locationId: org.locationId, roleId: role.id } })
   const team = await prisma.locationTeam.create({ data: { organizationId: org.id, locationId: org.locationId, name: 'Old team' } })
   await prisma.locationTeamMember.create({ data: { organizationId: org.id, memberId: member.id, teamId: team.id } })
+  const position = await prisma.organizationPosition.create({ data: { organizationId: org.id, name: 'Old position' } })
+  await prisma.memberPosition.create({ data: { memberId: member.id, positionId: position.id } })
   const transfer = await prisma.locationTransfer.create({ data: { organizationId: org.id, memberId: member.id, createdByMemberId: ownerMember.id, fromLocationId: org.locationId, toLocationId: second.id, temporary: true, startAt: new Date(Date.now() + 86400000), endAt: new Date(Date.now() + 3 * 86400000) } })
   const at = <T>(locationId: string, work: () => T) => locationContext.run({ organizationId: org.id, locationId }, work)
   const invite = async (kind: 'email' | 'code', locationId = org.locationId) => at(locationId, async () => {
@@ -57,6 +59,7 @@ describe('employee access across departure, return and point invitations', () =>
       assert.equal(actor.id, f.member.id)
       assert.equal(+actor.joinedAt, +f.member.joinedAt)
       assert.equal(actor.accessRoleId, null)
+      assert.equal(await prisma.memberPosition.count({ where: { memberId: f.member.id } }), 0)
       assert.equal(hasPermission(actor, 'schedule.edit'), false)
       assert.equal(hasPermission(actor, 'schedule.own'), true)
       assert.equal((await prisma.workShift.findUniqueOrThrow({ where: { id: past.id } })).memberId, f.member.id)
@@ -78,10 +81,47 @@ describe('employee access across departure, return and point invitations', () =>
       assert.equal(hasPermission(actor, 'schedule.own', f.org.locationId), false)
       assert.equal(await prisma.accessAssignment.count({ where: { memberId: f.member.id } }), 0)
       assert.equal(await prisma.locationTeamMember.count({ where: { memberId: f.member.id } }), 0)
+      assert.equal(await prisma.memberPosition.count({ where: { memberId: f.member.id } }), 0)
       assert.ok((await prisma.locationMember.findUniqueOrThrow({ where: { locationId_memberId: { locationId: f.org.locationId, memberId: f.member.id } } })).leftAt)
       assert.ok((await prisma.locationTransfer.findUniqueOrThrow({ where: { id: f.transfer.id } })).revokedAt)
     })
   }
+
+  it('removes the last point without ending employment and returns through a basic point invitation', async () => {
+    const f = await fixture()
+    await prisma.organizationMember.update({ where: { id: f.member.id }, data: { accessRoleId: null } })
+    const before = await prisma.memberEmploymentPeriod.findMany({ where: { memberId: f.member.id } })
+    await f.at(f.org.locationId, async () => {
+      const preview = await previewDeparture(f.owner.id, f.org.id, f.member.id, 'location')
+      assert.deepEqual(preview.remainingLocations, [])
+      await confirmDeparture(f.owner.id, f.org.id, f.member.id, {
+        scope: 'location', token: preview.token, reason: '', choices: [],
+        keepCurrent: false, acknowledgeDrafts: false, acknowledgeWorkload: false,
+      })
+    })
+    assert.equal((await prisma.organizationMember.findUniqueOrThrow({ where: { id: f.member.id } })).leftAt, null)
+    assert.deepEqual(await prisma.memberEmploymentPeriod.findMany({ where: { memberId: f.member.id } }), before)
+    assert.equal(await prisma.memberPosition.count({ where: { memberId: f.member.id } }), 1)
+    await (await f.invite('code'))()
+    const actor = await f.at(f.org.locationId, () => getMembership(f.employee.id, f.org.id))
+    assert.equal(hasPermission(actor, 'schedule.edit'), false)
+    assert.equal(hasPermission(actor, 'schedule.own'), true)
+    assert.deepEqual(await prisma.memberEmploymentPeriod.findMany({ where: { memberId: f.member.id } }), before)
+  })
+
+  it('serializes concurrent return invitations and records repeated employment cycles once', async () => {
+    const f = await fixture()
+    for (let cycle = 1; cycle <= 2; cycle++) {
+      await removeMember(f.owner.id, f.org.id, f.member.id)
+      const accept = await f.invite('code')
+      const results = await Promise.allSettled([accept(), accept()])
+      assert.equal(results.filter(result => result.status === 'fulfilled').length, 1)
+      const periods = await prisma.memberEmploymentPeriod.findMany({ where: { memberId: f.member.id } })
+      assert.equal(periods.length, cycle + 1)
+      assert.equal(periods.filter(period => period.endedAt === null).length, 1)
+      assert.equal(await prisma.memberPosition.count({ where: { memberId: f.member.id } }), 0)
+    }
+  })
 
   it('revokes global, local and temporary access through the legacy departure service too', async () => {
     const f = await fixture()

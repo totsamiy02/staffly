@@ -1,3 +1,4 @@
+import {adminOrganizationPersonnel,adminPersonnelHistory} from './personnel.ts'
 import { createServiceRouter } from './service/routes.ts'
 import { Router } from 'express'
 import { z } from 'zod'
@@ -60,6 +61,8 @@ export function createAdminRouter({sendCode=defaultMailer,sendNotice=defaultNoti
   router.get('/monitoring/events',read('EVENTS',request=>monitoringEvents(request.query)))
   router.get('/monitoring/overview',read('OVERVIEW',request=>monitoringOverview(request.query)))
   router.get('/monitoring/organizations',read('ORGANIZATIONS',request=>monitoringOrganizations(request.query)))
+  router.get('/monitoring/organizations/:id/personnel',read('ORGANIZATION',request=>adminOrganizationPersonnel(z.uuid().parse(request.params.id),request.query)))
+  router.get('/monitoring/organizations/:id/personnel/:memberId/history',read('ORGANIZATION',request=>adminPersonnelHistory(z.uuid().parse(request.params.id),z.uuid().parse(request.params.memberId),request.query)))
   router.get('/monitoring/organizations/:id',read('ORGANIZATION',request=>monitoringOrganization(z.uuid().parse(request.params.id),request.query)))
   router.get('/monitoring/users',read('USERS',request=>monitoringUsers(request.query)))
   router.get('/monitoring/users/:id',read('USER',request=>monitoringUser(z.uuid().parse(request.params.id),request.query)))

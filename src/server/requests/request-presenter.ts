@@ -49,7 +49,7 @@ export function publicRequest(item: RequestViewRow, viewerMemberId: string, acto
     responseCount: item._count.staffingResponses, absenceReason: details ? absenceReason(item.absence?.reason) : null,
     creatorName: memberName(item.creator.user), creatorRole: item.creator.role,
     creatorRoleName: item.creator.accessAssignments.find(a => a.locationId === item.locationId)?.role.name ?? item.creator.accessRole?.name,
-    creatorEmail: contacts ? item.creator.user.email : '', creatorAvatarUrl: mediaUrl(item.creator.user.avatarFileId),
+    creatorEmail: contacts ? item.creator.workEmail??'' : '', creatorAvatarUrl: mediaUrl(item.creator.user.avatarFileId),
     resolvedByName: item.resolvedBy ? memberName(item.resolvedBy.user) : null,
     firstReadAt: instant(item.reads[0]?.readAt ?? null), readByViewer: item.reads.some(read => read.memberId === viewerMemberId),
     attachments: !own && !hasPermission(actor, 'requests.attachments', item.locationId) ? [] : item.attachments.map(a => ({ id: a.id, fileName: a.fileName, mimeType: a.storedFile.mimeType, size: a.storedFile.size, downloadUrl: `/api/organizations/${item.organizationId}/requests/${item.id}/attachments/${a.id}` })),

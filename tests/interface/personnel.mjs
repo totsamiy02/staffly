@@ -55,6 +55,7 @@ export async function runPersonnel({ prisma, env, root, output, options, tempora
       let member,shift,document
       try{
         await check('owner invites and employee accepts a one-use code',async()=>{await invite();member=await prisma.organizationMember.findUniqueOrThrow({where:{organizationId_userId:{organizationId:org.id,userId:employee.id}}});assert.equal(member.role,'MEMBER')})
+        const {checkPersonnelCard}=await import('./personnel-card.mjs');await checkPersonnelCard({op,ep,mp,origin,base,location,org,member,employee,prisma,check,expect,tokens,output,viewport,theme})
         await check('owner selects and renews tariffs without payment; lost response does not duplicate renewal',async()=>{
           await op.goto(origin+base+'/settings?section=subscription');await expect(op.getByRole('heading',{name:'Тариф и использование',exact:true})).toBeVisible();await expect(op.locator('main:not(.app-loading):not(.route-loading)').first()).toContainText('Владелец каждой организации может выбрать и подключить тариф здесь, без оплаты');assert.equal(await op.locator('input[name=number],input[name=cvc],input[name=holder]').count(),0)
           await op.getByRole('button',{name:'Подключить Команду',exact:true}).click()
@@ -99,13 +100,34 @@ export async function runPersonnel({ prisma, env, root, output, options, tempora
           const foreignDenied=await ep.request.get(origin+'/api/organizations/'+foreign.id+'/members?state=former',{headers:{Authorization:tokens.get(ep)}});assert.equal(foreignDenied.status(),404)
           await ep.goto(origin+'/app/organizations/'+foreign.id+'/employees');await expect(ep.locator('main:not(.app-loading):not(.route-loading)').first()).toContainText(/Организация не найдена|Нет доступа|Недостаточно прав/)
         })
+        await check('owner removes the last point and invites back without opening another employment period', async () => {
+          await op.goto(origin + base + '/employees' + location)
+          const row = op.locator('.member-row').filter({ hasText: employee.firstName })
+          await row.getByRole('button', { name: 'Действия с сотрудником Сотрудник', exact: true }).click()
+          await row.getByRole('button', { name: 'Убрать из точки', exact: true }).click()
+          const dialog = op.locator('.member-departure')
+          await expect(dialog.locator('.departure-lifecycle')).toContainText('Это последняя назначенная точка')
+          const original = op.viewportSize()
+          if (viewport === 'mobile') await op.setViewportSize({ width: 320, height: 740 })
+          assert(await dialog.evaluate(node => node.scrollWidth <= node.clientWidth + 1))
+          await dialog.evaluate(node => { node.scrollTop = 0 })
+          await dialog.screenshot({ path: path.join(output, viewport + '-' + theme + '-last-point.png') })
+          await op.setViewportSize(original)
+          await dialog.getByRole('button', { name: 'Убрать из точки', exact: true }).click()
+          await expect(dialog.getByRole('heading', { name: 'Сотрудник убран из точки', exact: true })).toBeVisible()
+          assert.equal((await prisma.organizationMember.findUniqueOrThrow({ where: { id: member.id } })).leftAt, null)
+          await dialog.getByRole('button', { name: 'Готово', exact: true }).click()
+          await invite()
+          await expect.poll(async () => (await prisma.locationMember.findUniqueOrThrow({ where: { locationId_memberId: { locationId: org.locationId, memberId: member.id } } })).leftAt).toBe(null)
+          assert.equal(await prisma.memberEmploymentPeriod.count({ where: { memberId: member.id } }), 1)
+        })
         await check('owner excludes employee despite a lost response; archive and history remain',async()=>{
           // Synthetic pre-existing elevated role proves that rehire does not restore it.
           await prisma.locationMember.update({where:{locationId_memberId:{locationId:org.locationId,memberId:member.id}},data:{role:'ADMIN'}})
-          await op.goto(origin+base+'/employees'+location);const row=op.locator('.member-row').filter({hasText:employee.email});await row.getByRole('button',{name:'Действия с сотрудником Сотрудник',exact:true}).click();await row.getByRole('button',{name:'Удалить из организации',exact:true}).click()
+          await op.goto(origin+base+'/employees'+location);const row=op.locator('.member-row').filter({hasText:employee.firstName});await row.getByRole('button',{name:'Действия с сотрудником Сотрудник',exact:true}).click();await row.getByRole('button',{name:'Исключить из организации',exact:true}).click()
           const dialog=op.locator('.member-departure');const lost=async route=>{if(route.request().method()==='POST'){const response=await route.fetch();assert(response.ok());await route.abort('failed')}else await route.continue()}
-          await op.route('**/api/organizations/*/members/*/departure?*',lost);await dialog.getByRole('button',{name:'Исключить сотрудника',exact:true}).click();await expect(dialog.locator('[role=alert]')).toBeVisible();await op.unroute('**/api/organizations/*/members/*/departure?*',lost)
-          await op.goto(origin+base+'/employees'+location+'&tab=archive');await expect(op.getByRole('heading',{name:'Архив сотрудников',exact:true})).toBeVisible();const card=op.locator('.member-archive-card').filter({hasText:employee.email});await expect(card).toBeVisible();await card.getByText('Периоды работы',{exact:true}).click();assert.deepEqual((await new AxeBuilder({page:op}).include('.members-page').analyze()).violations,[]);const archiveShot=viewport+'-'+theme+'-archive.png';await op.evaluate(()=>window.scrollTo({top:0,behavior:'instant'}));await op.screenshot({path:path.join(output,archiveShot),fullPage:true});result.screenshots.push(archiveShot);await card.getByRole('button',{name:'Рабочая история',exact:true}).click();await expect(op.locator('.member-profile-dialog')).toBeVisible();await op.keyboard.press('Escape')
+          await expect(dialog.locator('.departure-lifecycle')).toContainText('Период работы завершится');await dialog.evaluate(node=>{node.scrollTop=0});await dialog.screenshot({path:path.join(output,viewport+'-'+theme+'-exclude.png')});await op.route('**/api/organizations/*/members/*/departure?*',lost);await dialog.getByRole('button',{name:'Исключить сотрудника',exact:true}).click();await expect(dialog.locator('[role=alert]')).toBeVisible();await op.unroute('**/api/organizations/*/members/*/departure?*',lost)
+          await op.goto(origin+base+'/employees'+location+'&tab=archive');await expect(op.getByRole('heading',{name:'Архив сотрудников',exact:true})).toBeVisible();const heading=await op.locator('.workspace-page-heading').boundingBox(),tabs=await op.locator('.members-navigation').boundingBox();assert(heading&&tabs&&tabs.y>=heading.y+heading.height,'Archive tabs belong below the page heading');const card=op.locator('.member-archive-card').filter({hasText:employee.firstName});await expect(card).toBeVisible();await card.getByText('Периоды работы',{exact:true}).click();assert.deepEqual((await new AxeBuilder({page:op}).include('.members-page').analyze()).violations,[]);const archiveShot=viewport+'-'+theme+'-archive.png';await op.evaluate(()=>window.scrollTo({top:0,behavior:'instant'}));await op.screenshot({path:path.join(output,archiveShot),fullPage:true});result.screenshots.push(archiveShot);await card.getByRole('button',{name:'Рабочая история',exact:true}).click();await expect(op.locator('.member-profile-dialog')).toBeVisible();const periods=op.locator('.member-profile-about .employment-periods');await periods.getByRole('button',{name:/Периоды работы/}).click();await expect(periods.locator('li')).toHaveCount(1);await op.screenshot({path:path.join(output,viewport+'-'+theme+'-profile-periods.png')});await op.keyboard.press('Escape')
           assert((await prisma.organizationMember.findUniqueOrThrow({where:{id:member.id}})).leftAt);assert.equal((await prisma.workShift.findUniqueOrThrow({where:{id:shift.id}})).memberId,member.id)
           await ep.goto(origin+base+'/documents'+location);await expect(ep.locator('main:not(.app-loading):not(.route-loading)').first()).toContainText(/Организация не найдена|Нет доступа/)
         })
@@ -113,7 +135,65 @@ export async function runPersonnel({ prisma, env, root, output, options, tempora
           await invite();const returned=await prisma.organizationMember.findUniqueOrThrow({where:{organizationId_userId:{organizationId:org.id,userId:employee.id}}});assert.equal(returned.id,member.id);assert.equal(returned.leftAt,null);assert.equal(await prisma.memberEmploymentPeriod.count({where:{memberId:member.id}}),2);assert((await prisma.documentAcknowledgement.findFirstOrThrow({where:{documentId:document.id,memberId:member.id}})).acknowledgedAt)
           await ep.goto(origin+base+'/schedule'+location);await expect(ep.locator('main:not(.app-loading):not(.route-loading)').first()).toContainText('Расписание');await expect(ep.getByRole('button',{name:/Добавить смену/})).toHaveCount(0)
           const placement=await prisma.locationMember.findUniqueOrThrow({where:{locationId_memberId:{locationId:org.locationId,memberId:member.id}}});assert.equal(placement.role,'MEMBER');assert.equal(await prisma.accessAssignment.count({where:{memberId:member.id}}),0)
-          await op.goto(origin+base+'/employees'+location+'&tab=archive');await expect(op.locator('.member-archive-card').filter({hasText:employee.email})).toHaveCount(0)
+          await op.goto(origin+base+'/employees'+location+'&tab=archive');await expect(op.locator('.member-archive-card').filter({hasText:employee.firstName})).toHaveCount(0)
+          await op.getByRole('button', { name: 'Действующие', exact: true }).click()
+          await op.locator('.member-row').filter({ hasText: employee.firstName }).locator('.member-profile-trigger').click()
+          const periods = op.locator('.member-profile-about .employment-periods')
+          await periods.getByRole('button', { name: /Периоды работы/ }).click()
+          await expect(periods.locator('li')).toHaveCount(2)
+          await expect(periods.locator('li').first()).toContainText('Текущий период')
+          await periods.scrollIntoViewIfNeeded()
+          await op.screenshot({ path: path.join(output, viewport + '-' + theme + '-rehired-periods.png') })
+          await op.keyboard.press('Escape')
+        })
+        await check('owner assigns a partial replacement from the calendar and preserves the worked interval', async () => {
+          await prisma.organization.update({ where: { id: org.id }, data: { shiftTransferMode: 'AUTO' } })
+          const now = new Date()
+          const source = await prisma.workShift.create({ data: {
+            organizationId: org.id, locationId: org.locationId, memberId: member.id,
+            createdByMemberId: managerMember.id,
+            scheduledStartAt: new Date(+now - 3 * 3600000), scheduledEndAt: new Date(+now + 3 * 3600000),
+          } })
+          const date = now.toLocaleDateString('en-CA', { timeZone: 'Europe/Moscow' })
+          await op.goto(origin + base + '/schedule' + location + '&shift=' + source.id + '&date=' + date)
+          await op.getByRole('button', { name: 'Заменить на остаток', exact: true }).click()
+          const form = op.getByRole('dialog', { name: 'Замена на остаток смены', exact: true })
+          await expect(form).toBeVisible()
+          await form.getByRole('textbox', { name: 'Причина', exact: true }).fill('Сотрудник ушёл, коллега доработает')
+          assert(await form.evaluate(node => node.scrollWidth <= node.clientWidth + 1))
+          await form.evaluate(node => { node.scrollTop = 0 })
+          await form.screenshot({ path: path.join(output, viewport + '-' + theme + '-partial-replacement.png') })
+          await form.getByRole('button', { name: 'Выбрать коллегу', exact: true }).click()
+          await select(op, 'Замена', /Руководитель/, form)
+          await form.getByRole('checkbox', { name: 'Замена согласована — назначить сразу', exact: true }).check()
+          await form.getByRole('button', { name: 'Назначить замену', exact: true }).click()
+          await expect(form).toBeHidden()
+          const first = await prisma.workShift.findUniqueOrThrow({ where: { id: source.id } })
+          assert(first.actualEndAt)
+          const child = await prisma.workShift.findFirstOrThrow({ where: { replacementOfId: source.id } })
+          assert.equal(child.memberId, managerMember.id)
+          assert(child.scheduledStartAt >= first.actualEndAt)
+          await expect(op.locator('.shift-offer-card--detail')).toContainText('Замена на остаток смены')
+          await op.screenshot({ path: path.join(output, viewport + '-' + theme + '-partial-result.png') })
+          await op.getByRole('link', { name: 'Открыть смену', exact: true }).click()
+          await expect(op.getByRole('link', { name: 'Исходная смена', exact: true })).toBeVisible()
+          const card = op.locator('#day-shift-' + child.id)
+          const originalSize = op.viewportSize()
+          for (const width of viewport === 'mobile' ? [320, 390] : [768, 1440]) {
+            await op.setViewportSize({ width, height: 900 })
+            await expect(card).toBeVisible()
+            assert(await card.evaluate(node => node.scrollWidth <= node.clientWidth + 1))
+            if (width <= 600) {
+              const replacement = await card.getByRole('button', { name: 'Заменить на остаток', exact: true }).boundingBox()
+              const correction = await card.getByRole('button', { name: 'Исправить время', exact: true }).boundingBox()
+              const edit = await card.getByRole('button', { name: 'Изменить расписание', exact: true }).boundingBox()
+              assert(replacement && correction && edit && replacement.width > correction.width)
+              assert(Math.abs(correction.y - edit.y) < 1 && Math.abs(correction.width - edit.width) < 1)
+            }
+            await card.screenshot({ path: path.join(output, viewport + '-' + theme + '-day-card-' + width + '.png') })
+          }
+          await op.setViewportSize(originalSize)
+          await op.screenshot({ path: path.join(output, viewport + '-' + theme + '-partial-calendar.png') })
         })
         await check('all three role interfaces fit the mobile and desktop viewport in the selected theme',async()=>{
           for(const page of pages){assert.equal(await page.locator('html').getAttribute('data-theme'),theme);assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2))}
@@ -121,7 +201,7 @@ export async function runPersonnel({ prisma, env, root, output, options, tempora
         })
       }finally{for(const context of contexts)await context.close()}
     }
-    assert.equal(result.checks.length,20,'Every mandatory personnel scenario must execute in both viewports')
+    assert.equal(result.checks.length,32,'Every mandatory personnel scenario must execute in both viewports')
     assert.equal(result.errors.length,0,JSON.stringify(result.errors));result.status='passed';await save();return result
   }catch(error){result.status='failed';result.errors.push({message:error.message});await save();throw error}
   finally{await browser.close();await server.close()}

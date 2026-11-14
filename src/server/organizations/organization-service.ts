@@ -1,3 +1,4 @@
+import {memberSearchWhere} from './member-search.ts'
 import { createHash } from 'node:crypto'
 import { stableJson } from '../../shared/stable-json.ts'
 import type { LocationProfile } from '../../shared/organization-profile.ts'
@@ -145,8 +146,8 @@ export async function listMembers(userId: string, organizationId: string) {
     orderBy: [{ role: 'asc' }, { joinedAt: 'asc' }],
   })
   return members.map((member) => {
-    const displayName = [member.user.lastName, member.user.firstName, member.user.middleName].filter(Boolean).join(' ') || (memberFieldVisible(viewer,member,'members.contacts') ? member.user.email.split('@')[0] : 'Участник организации')
-    return { positions: member.positions.map(item => item.position), id: member.id, accessRoleName: member.accessRole?.name ?? null, accessAssignments: (member.accessConfigured ? member.accessAssignments : []).map(a => ({ locationId: a.locationId, roleId: a.roleId, roleName: a.role.name })), userId: member.userId, email: memberFieldVisible(viewer, member, 'members.contacts') ? member.user.email : '', displayName, firstName: member.user.firstName, lastName: member.user.lastName, middleName: member.user.middleName, phone: memberFieldVisible(viewer, member, 'members.contacts') ? member.user.phone : null, bio: member.user.bio, avatarUrl: mediaUrl(member.user.avatarFileId), lastSeenAt: member.user.lastSeenAt, online: member.user.sessions.length > 0, role: member.role === 'OWNER' ? 'OWNER' : scopedLocationId(organizationId) ? member.locationMemberships.find(m => m.locationId === scopedLocationId(organizationId))?.role ?? 'MEMBER' : member.role, locations: member.locationMemberships, teams: member.teamMemberships.map(m => m.team), joinedAt: member.joinedAt }
+    const displayName = [member.user.lastName, member.user.firstName, member.user.middleName].filter(Boolean).join(' ') || (memberFieldVisible(viewer,member,'members.contacts') ? member.user.email.split('@')[0]||'Участник организации' : 'Участник организации')
+    return { positions: member.positions.map(item => item.position), id: member.id, accessRoleName: member.accessRole?.name ?? null, accessAssignments: (member.accessConfigured ? member.accessAssignments : []).map(a => ({ locationId: a.locationId, roleId: a.roleId, roleName: a.role.name })), userId: member.userId, email: memberFieldVisible(viewer, member, 'members.contacts') ? member.workEmail??'' : '', displayName, firstName: member.user.firstName, lastName: member.user.lastName, middleName: member.user.middleName, phone: memberFieldVisible(viewer, member, 'members.contacts') ? member.workPhone : null, bio: member.user.bio, avatarUrl: mediaUrl(member.user.avatarFileId), lastSeenAt: member.user.lastSeenAt, online: member.user.sessions.length > 0, role: member.role === 'OWNER' ? 'OWNER' : scopedLocationId(organizationId) ? member.locationMemberships.find(m => m.locationId === scopedLocationId(organizationId))?.role ?? 'MEMBER' : member.role, locations: member.locationMemberships, teams: member.teamMemberships.map(m => m.team), joinedAt: member.joinedAt }
   })
 }
 
@@ -168,12 +169,7 @@ export async function listMembersPage(userId: string, organizationId: string, op
     user: { deletedAt: null },
     ...(options.role ? { role: options.role } : {}),
     ...(options.positionId ? { positions: options.positionId === 'unassigned' ? { none: { position: { isActive: true } } } : { some: { positionId: options.positionId, position: { organizationId, isActive: true } } } } : {}),
-    ...(terms.length ? { NOT: { OR: terms.map((term) => ({ NOT: { user: { OR: [
-      { email: { contains: term, mode: 'insensitive' } },
-      { firstName: { contains: term, mode: 'insensitive' } },
-      { lastName: { contains: term, mode: 'insensitive' } },
-      { middleName: { contains: term, mode: 'insensitive' } },
-    ] } } })) } } : {}),
+    ...(terms.length ? { NOT: { OR: terms.map(term=>({NOT:memberSearchWhere(viewer,term)})) } } : {}),
   }
   const [total, members] = await prisma.$transaction([
     prisma.organizationMember.count({ where }),
@@ -187,8 +183,8 @@ export async function listMembersPage(userId: string, organizationId: string, op
   ])
   return {
     members: members.map((member) => {
-      const displayName = [member.user.lastName, member.user.firstName, member.user.middleName].filter(Boolean).join(' ') || (memberFieldVisible(viewer,member,'members.contacts') ? member.user.email.split('@')[0] : 'Участник организации')
-      return { positions: member.positions.map(item => item.position), id: member.id, accessRoleName: member.accessRole?.name ?? null, accessAssignments: (member.accessConfigured ? member.accessAssignments : []).map(a => ({ locationId: a.locationId, roleId: a.roleId, roleName: a.role.name })), userId: member.userId, email: memberFieldVisible(viewer, member, 'members.contacts') ? member.user.email : '', displayName, firstName: member.user.firstName, lastName: member.user.lastName, middleName: member.user.middleName, phone: memberFieldVisible(viewer, member, 'members.contacts') ? member.user.phone : null, bio: member.user.bio, avatarUrl: mediaUrl(member.user.avatarFileId), lastSeenAt: member.user.lastSeenAt, online: member.user.sessions.length > 0, role: member.role, locations: member.locationMemberships, teams: member.teamMemberships.map(m => m.team), joinedAt: member.joinedAt }
+      const displayName = [member.user.lastName, member.user.firstName, member.user.middleName].filter(Boolean).join(' ') || (memberFieldVisible(viewer,member,'members.contacts') ? member.user.email.split('@')[0]||'Участник организации' : 'Участник организации')
+      return { positions: member.positions.map(item => item.position), id: member.id, accessRoleName: member.accessRole?.name ?? null, accessAssignments: (member.accessConfigured ? member.accessAssignments : []).map(a => ({ locationId: a.locationId, roleId: a.roleId, roleName: a.role.name })), userId: member.userId, email: memberFieldVisible(viewer, member, 'members.contacts') ? member.workEmail??'' : '', displayName, firstName: member.user.firstName, lastName: member.user.lastName, middleName: member.user.middleName, phone: memberFieldVisible(viewer, member, 'members.contacts') ? member.workPhone : null, bio: member.user.bio, avatarUrl: mediaUrl(member.user.avatarFileId), lastSeenAt: member.user.lastSeenAt, online: member.user.sessions.length > 0, role: member.role, locations: member.locationMemberships, teams: member.teamMemberships.map(m => m.team), joinedAt: member.joinedAt }
     }),
     pagination: { page, pageSize, total, pages: Math.max(1, Math.ceil(total / pageSize)) },
   }

@@ -1,3 +1,4 @@
+import {memberSearchWhere} from './member-search.ts'
 import { startOfZonedDate, addCalendarDays } from '../schedule/timezone.ts'
 import { prisma } from '../db.ts'
 import type { Prisma } from '../../generated/prisma/client.ts'
@@ -19,11 +20,10 @@ export async function listFormerMembers(userId: string, organizationId: string, 
     const departedFrom=typeof options.departedFrom==='string'?startOfZonedDate(options.departedFrom,actor.organization.timezone):options.departedFrom
     const departedTo=typeof options.departedTo==='string'?startOfZonedDate(addCalendarDays(options.departedTo,1),actor.organization.timezone):options.departedTo
     const terms = options.search?.split(/\s+/).filter(Boolean) ?? []
-    const contactPoints=actor.owner?[]:(scope??[]).filter(id=>hasPermission(actor,'members.contacts',id))
     const where: Prisma.OrganizationMemberWhereInput = {
       organizationId, leftAt: { not: null, ...(departedFrom ? { gte: departedFrom } : {}), ...(departedTo ? { lt: departedTo } : {}) }, user: { deletedAt: null },
       ...(scope ? { locationMemberships: { some: { locationId: { in: scope } } } } : {}),
-      AND: terms.map(term => ({ OR: [{user:{OR:['firstName','lastName','middleName'].map(field=>({[field]:{contains:term,mode:'insensitive'}}))}},...(actor.owner||contactPoints.length?[{user:{email:{contains:term,mode:'insensitive' as const}},...(!actor.owner?{locationMemberships:{some:{locationId:{in:contactPoints}}}}:{})}]:[])] })),
+      AND: terms.map(term=>memberSearchWhere(actor,term,{historical:true,points:scope})),
     }
     const [total, rows] = await Promise.all([db.organizationMember.count({ where }), db.organizationMember.findMany({ where, orderBy: [{ leftAt: 'desc' }, { id: 'asc' }], skip: (options.page-1)*options.pageSize, take: options.pageSize, include: {
       user: { select: { firstName:true,lastName:true,middleName:true,email:true } },
@@ -34,6 +34,6 @@ export async function listFormerMembers(userId: string, organizationId: string, 
     const current=await getMembership(userId,organizationId,db)
     const signature=(value:typeof actor)=>JSON.stringify([value.owner,...(['members.view','members.remove','members.contacts'] as const).map(key=>[hasPermission(value,key),[...locationsFor(value,key)].sort()])])
     if(signature(current)!==signature(actor))throw new ApiError(403,'INSUFFICIENT_PERMISSIONS','Права изменились. Обновите архив сотрудников.')
-    return { members: rows.map(member => ({ id: member.id, displayName: [member.user.lastName,member.user.firstName,member.user.middleName].filter(Boolean).join(' ') || (memberFieldVisible(actor,member,'members.contacts') ? member.user.email.split('@')[0] : 'Бывший сотрудник'), email: memberFieldVisible(actor,member,'members.contacts') ? member.user.email : '', joinedAt: member.joinedAt, leftAt: member.leftAt!, periods: member.employmentPeriods.map(p => ({ id:p.id,startedAt:p.startedAt,endedAt:p.endedAt,incomplete:p.source==='LEGACY' })), locations: member.locationMemberships.map(l => ({ id:l.locationId,name:l.location.name })) })), pagination: { page:options.page,pageSize:options.pageSize,total,pages:Math.max(1,Math.ceil(total/options.pageSize)) } }
+    return { members: rows.map(member => ({ id: member.id, displayName: [member.user.lastName,member.user.firstName,member.user.middleName].filter(Boolean).join(' ') || (memberFieldVisible(actor,member,'members.contacts') ? member.user.email.split('@')[0]||'Бывший сотрудник' : 'Бывший сотрудник'), email: memberFieldVisible(actor,member,'members.contacts') ? member.workEmail??'' : '', joinedAt: member.joinedAt, leftAt: member.leftAt!, periods: member.employmentPeriods.map(p => ({ id:p.id,startedAt:p.startedAt,endedAt:p.endedAt,incomplete:p.source==='LEGACY' })), locations: member.locationMemberships.map(l => ({ id:l.locationId,name:l.location.name })) })), pagination: { page:options.page,pageSize:options.pageSize,total,pages:Math.max(1,Math.ceil(total/options.pageSize)) } }
   })
 }

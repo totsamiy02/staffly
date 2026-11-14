@@ -28,3 +28,25 @@
 @media (max-width: 600px) {
   .member-departure.document-dialog { border-radius: 15px; > header { padding: 20px; } .departure-content { padding: 20px; } .departure-scope { display: none; } .departure-metrics > div { padding: 14px 10px; } .departure-metrics strong { font-size: 20px; } .departure-shift { grid-template-columns: 1fr; padding: 14px; } .departure-tabs { gap: 10px; .staffly-segmented button { font-size: 12px; } } footer { flex-wrap: wrap; > .app-primary { flex: 1; } } }
 }
+
+.member-departure .departure-lifecycle {
+  margin-bottom: 20px;
+  padding: 16px;
+  border: 1px solid var(--theme-border, #e5e0ec);
+  border-radius: 10px;
+  background: var(--theme-surface-muted, #f7f5fa);
+  overflow-wrap: anywhere;
+
+  > strong { font-size: 13px; }
+  > p { margin: 7px 0 0; font-size: 12px; color: var(--theme-muted, #777); }
+  > .departure-lifecycle__warning { color: var(--theme-warning, #875c20); }
+}
+
+@media (max-width: 600px) {
+  .member-departure.document-dialog .departure-tabs {
+    flex-wrap: wrap;
+
+    > .staffly-segmented { flex: 1 0 100%; }
+    > .departure-link { margin-left: auto; }
+  }
+}

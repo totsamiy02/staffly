@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import { displayDate, formatDuration, shiftState, shiftTimeRange } from '../../../../app/schedule/date-utils.ts'
+import { displayDate, formatDuration, shiftState, formatTime, zonedDateAndTime } from '../../../../app/schedule/date-utils.ts'
 import { accountedTimeLabel } from '../../../../app/schedule/time/time-correction.ts'
 import { absenceNames } from '../../../../app/schedule/absence-format.ts'
 import type { EmployeeAbsence, WorkShift } from '../../../../app/schedule/types.ts'
@@ -62,13 +62,27 @@ export default function DaySchedulePanel({ date, timezone, locationName, locatio
         {!visibleShifts.length && !visibleAbsences.length && <div className="day-schedule-panel__empty"><strong>{query ? 'Никого не нашли' : 'Свободный день'}</strong><p>{query ? 'Попробуйте другое имя или должность.' : 'На эту дату смен и отсутствий нет.'}</p>{query && <button type="button" className="app-secondary" onClick={() => setSearch('')}>Сбросить поиск</button>}</div>}
         {visibleShifts.map(shift => {
           const state = shiftState(shift)
+          const start = zonedDateAndTime(shift.scheduledStartAt, timezone)
+          const end = zonedDateAndTime(shift.scheduledEndAt, timezone)
+          const overnight = start.date !== end.date
+          const dayLabel = (value: string) => new Intl.DateTimeFormat('ru-RU', { timeZone: timezone, day: 'numeric', month: 'short', ...(start.date.slice(0, 4) !== end.date.slice(0, 4) ? { year: 'numeric' } : {}) }).format(new Date(value))
           const corrected = !!shift.actualStartAt || !!shift.actualEndAt || shift.actualBreakMinutes !== null || shift.attendance === 'NO_SHOW'
           const status = shift.attendance === 'NO_SHOW' ? 'Неявка' : shift.attendance === 'PARTIAL' ? 'Частично отработана' : state.label
           return <article id={`day-shift-${shift.id}`} className={`day-schedule-card${shift.id === focusedShiftId ? ' day-schedule-card--focused' : ''}`} key={shift.id}>
             <div className="day-schedule-card__person"><MemberAvatar memberId={shift.memberId} locationId={locationId} name={shift.memberName} url={shift.memberAvatarUrl} className="app-avatar day-schedule-card__avatar" /><div><MemberProfileLink memberId={shift.memberId} locationId={locationId}><strong>{shift.memberName}</strong></MemberProfileLink><div className="day-schedule-card__badges">{shift.memberId === ownMemberId && <span className="day-schedule-card__mine">Ваша смена</span>}<span className={`day-schedule-card__status day-schedule-card__status--${state.key}`}>{status}</span>{shift.adjusted && <span>Есть изменения</span>}</div></div></div>
             {shift.positionName && <p className="day-schedule-card__position"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><rect x="3" y="7" width="18" height="14" rx="2" /><path d="M8 7V4h8v3M3 12l9 3 9-3M12 13v4" /></svg>{shift.positionName}</p>}
-            <dl className="day-schedule-card__time"><div><dt>По плану</dt><dd>{shiftTimeRange(shift.scheduledStartAt, shift.scheduledEndAt, timezone)}</dd></div><div><dt>{shift.status === 'CANCELLED' ? 'Отменена' : 'К учёту'}</dt><dd>{shift.status === 'CANCELLED' ? '—' : formatDuration(shift.effectiveMinutes)}</dd></div></dl>
+            <dl className={'day-schedule-card__time' + (overnight ? ' day-schedule-card__time--overnight' : '')}>
+              <div><dt>По плану</dt><dd>
+                {overnight ? <span className="day-schedule-card__range">
+                  <span><time dateTime={shift.scheduledStartAt}>{formatTime(shift.scheduledStartAt, timezone)}</time><small>{dayLabel(shift.scheduledStartAt)}</small></span>
+                  <span className="day-schedule-card__range-arrow" aria-hidden="true">→</span>
+                  <span><time dateTime={shift.scheduledEndAt}>{formatTime(shift.scheduledEndAt, timezone)}</time><small>{dayLabel(shift.scheduledEndAt)}</small></span>
+                </span> : <span className="day-schedule-card__same-day">{formatTime(shift.scheduledStartAt, timezone)}–{formatTime(shift.scheduledEndAt, timezone)}</span>}
+              </dd></div>
+              <div><dt>{shift.status === 'CANCELLED' ? 'Отменена' : 'К учёту'}</dt><dd>{shift.status === 'CANCELLED' ? '—' : formatDuration(shift.effectiveMinutes)}</dd></div>
+            </dl>
             {shift.status !== 'CANCELLED' && <p className="day-schedule-card__accounting">{corrected ? `Учтено: ${accountedTimeLabel(shift, timezone)}` : 'По расписанию, без корректировок'}</p>}
+            {shift.replacementCutoffAt && <p className="day-schedule-card__accounting">Участие завершено для замены</p>}
             {shift.description && <p className="day-schedule-card__note">{shift.description}</p>}
             {shift.cancellationReason && <p className="day-schedule-card__note">Причина отмены: {shift.cancellationReason}</p>}
             <div className="day-schedule-card__actions">{renderShiftActions(shift)}</div>

@@ -230,7 +230,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     profileRevision.current += 1
     currentUser.current = nextUser
     setUser(nextUser)
-    void queryClient.invalidateQueries({ predicate: query => ['private-media', 'organization-members', 'member-profile', 'location-directory'].includes(String(query.queryKey[0])) })
+    void queryClient.invalidateQueries({ predicate: query => ['private-media', 'organization-members', 'member-profile', 'member-personnel', 'location-directory'].includes(String(query.queryKey[0])) })
   }, [queryClient])
 
   return <AuthContext.Provider value={{ user, loading, startupError, retryStartup, login, verifyEmail, completeYandex, logout, updateUser, apiRequest, uploadImage, uploadFile, downloadFile, previewFile }}>{children}</AuthContext.Provider>

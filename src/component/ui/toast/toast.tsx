@@ -48,7 +48,30 @@ export default function ToastProvider({ children }: { children: ReactNode }) {
   }, [phase])
   const toast = useCallback((message: string, kind: Kind = 'info') => {
     const id = `toast:${++sequence.current}`
-    enqueue({ id, duration: kind === 'error' ? 12000 : 4000, className: `staffly-toast staffly-toast--${kind}`, content: <><span aria-hidden="true">{kind === 'success' ? '✓' : kind === 'error' ? '!' : 'i'}</span><p>{kind === 'error' ? <RequestErrorMessage error={message} /> : message}</p><button aria-label="Закрыть сообщение" onClick={() => dismiss(id)}>×</button></> })
+    enqueue({
+      id,
+      duration: kind === 'error' ? 12000 : 4000,
+      className: `staffly-toast staffly-toast--${kind}`,
+      content: <>
+        <span className="staffly-toast__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="9" />
+            {kind === 'success' ? <path d="m8 12 2.5 2.5L16 9" /> : <>
+              <path d={kind === 'error' ? 'M12 7.5v5' : 'M12 11v5'} />
+              <circle cx="12" cy={kind === 'error' ? '16.5' : '7.5'} r=".6" fill="currentColor" stroke="none" />
+            </>}
+          </svg>
+        </span>
+        <div className="staffly-toast__body">
+          {kind === 'error' ? <RequestErrorMessage error={message} /> : message}
+        </div>
+        <button type="button" className="staffly-toast__close" aria-label="Закрыть сообщение" onClick={() => dismiss(id)}>
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">
+            <path d="m6 6 8 8M14 6l-8 8" />
+          </svg>
+        </button>
+      </>
+    })
   }, [enqueue, dismiss])
   useEffect(()=>{
     const timers=new Set<ReturnType<typeof setTimeout>>(),recent=new Map<string,number>()

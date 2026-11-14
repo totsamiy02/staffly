@@ -1,3 +1,4 @@
+import {adminPersonnelInclude,adminPersonnelDto} from './personnel.ts'
 import { z } from 'zod'
 import { databasePool, prisma } from '../db.ts'
 import { mediaUrl } from '../storage/image-service.ts'
@@ -86,7 +87,7 @@ const userSelect=`SELECT u.id,u.public_id,u.avatar_file_id,u.email,u.first_name,
  (SELECT count(*)::int FROM organization_members m JOIN organizations o ON o.id=m.organization_id WHERE m.user_id=u.id AND m.left_at IS NULL AND o.deleted_at IS NULL) AS organizations,
  (SELECT count(*)::int FROM auth_sessions s WHERE s.user_id=u.id AND ${activeSession}) AS sessions,
  EXISTS(SELECT 1 FROM auth_sessions s WHERE s.user_id=u.id AND ${onlineSession}) AS online FROM users u`
-function userDto(row:Row){return {id:String(row.id),publicId:Number(row.public_id),avatarUrl:row.avatar_file_id?`/api/admin/media/avatars/${row.avatar_file_id}`:null,displayName:[row.last_name,row.first_name].filter(Boolean).join(' ')||'Пользователь',email:maskEmail(String(row.email)),createdAt:iso(row.created_at as Date),emailVerified:Boolean(row.email_verified_at),lastSeenAt:iso(row.last_seen_at as Date|null),organizations:number(row.organizations),sessions:number(row.sessions),online:Boolean(row.online)}}
+function userDto(row:Row){return {id:String(row.id),publicId:Number(row.public_id),avatarUrl:row.avatar_file_id?`/api/admin/media/avatars/${row.avatar_file_id}`:null,displayName:[row.last_name,row.first_name].filter(Boolean).join(' ')||String(row.email).split('@')[0]||'Пользователь',email:maskEmail(String(row.email)),createdAt:iso(row.created_at as Date),emailVerified:Boolean(row.email_verified_at),lastSeenAt:iso(row.last_seen_at as Date|null),organizations:number(row.organizations),sessions:number(row.sessions),online:Boolean(row.online)}}
 export async function monitoringUsers(raw:unknown){
  const q=querySchema.parse(raw),search=escapeSearch(q.search)
  const condition=`u.deleted_at IS NULL AND (u.email ILIKE $1 OR concat_ws(' ',u.last_name,u.first_name) ILIKE $1 OR u.id::text ILIKE $1 OR u.public_id::text ILIKE $1)${q.status==='verified'?' AND u.email_verified_at IS NOT NULL':q.status==='pending'?' AND u.email_verified_at IS NULL':q.status==='online'?` AND EXISTS(SELECT 1 FROM auth_sessions s WHERE s.user_id=u.id AND ${onlineSession})`:''}`
@@ -101,10 +102,10 @@ export async function monitoringUser(id:string,raw:unknown={}){
  const {page,search}=querySchema.parse(raw)
  const {rows:[row]}=await databasePool.query(`${userSelect} WHERE u.id=$1 AND u.deleted_at IS NULL`,[id])
  if(!row)throw new ApiError(404,'ADMIN_USER_NOT_FOUND','Пользователь не найден.')
- const memberships=await prisma.organizationMember.findMany({where:{userId:id,leftAt:null,organization:{deletedAt:null,name:{contains:search,mode:'insensitive'}}},take:20,skip:(page-1)*20,orderBy:{joinedAt:'desc'},select:{role:true,organization:{select:{id:true,name:true,logoFileId:true}}}})
- const membershipsTotal=await prisma.organizationMember.count({where:{userId:id,leftAt:null,organization:{deletedAt:null,name:{contains:search,mode:'insensitive'}}}})
+ const memberships=await prisma.organizationMember.findMany({where:{userId:id,organization:{deletedAt:null,name:{contains:search,mode:'insensitive'}}},take:20,skip:(page-1)*20,orderBy:{joinedAt:'desc'},include:adminPersonnelInclude})
+ const membershipsTotal=await prisma.organizationMember.count({where:{userId:id,organization:{deletedAt:null,name:{contains:search,mode:'insensitive'}}}})
  const grant=(await adminPool().query('SELECT enabled FROM staffly_admin.accounts WHERE user_id=$1',[id])).rows[0]
- return {...userDto(row),platformAdmin:grant?.enabled?'active':grant?'revoked':'none',memberships:memberships.map(m=>({id:m.organization.id,name:m.organization.name,logoUrl:mediaUrl(m.organization.logoFileId),role:m.role})),membershipsTotal,page,pageSize:20}
+ return {...userDto(row),platformAdmin:grant?.enabled?'active':grant?'revoked':'none',memberships:memberships.map(m=>({id:m.organization.id,name:m.organization.name,logoUrl:mediaUrl(m.organization.logoFileId),role:m.role,personnel:adminPersonnelDto(m)})),membershipsTotal,page,pageSize:20}
 }
 export async function monitoringOnline(raw:unknown){
  const q=querySchema.parse(raw),startedAt=(await monitoringStarted())!
