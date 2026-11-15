@@ -17,7 +17,6 @@ import '../../src/pages/auth/auth.scss'
 import '../../src/features/admin/admin.scss'
 
 const params = new URLSearchParams(location.search)
-document.documentElement.dataset.theme = params.get('theme') === 'dark' ? 'dark' : 'light'
 const errorId = '21822b7b-6686-435b-bb84-771defc187aa'
 const message = 'Сервис временно недоступен. Попробуйте немного позже.'
 const error = Object.assign(new Error(message), { errorId })

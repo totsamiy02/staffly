@@ -1,4 +1,4 @@
-.operation-status { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 14px; border: 1px solid var(--theme-border,#ddd); border-radius: 12px; margin: 12px 0; background: var(--theme-surface,#fff);
+.operation-status { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 14px; border: 1px solid var(--theme-border,#ddd); border-radius: 12px; margin: 12px 0; background: var(--theme-surface,#fff); color: var(--theme-text-strong,#202124);
   > div:first-child { flex: 1 1 240px; min-width: 0; }
   strong { display: flex; align-items: center; gap: 8px; font-weight: 600; }
   p { margin: 5px 0 0; overflow-wrap: anywhere; }

@@ -14,7 +14,29 @@ export async function runOrganizationProfiles({prisma,env,root,temporary,output,
  const socket=socketServer();await new Promise(r=>socket.listen(0,'127.0.0.1',r));const port=socket.address().port;await new Promise(r=>socket.close(r))
  const origin='http://127.0.0.1:'+port;env.APP_ORIGIN=origin;env.RUN_BACKGROUND_WORKERS='false'
  const api=await startApi(),{devApiProxy}=await import('../../scripts/dev-api-proxy.ts')
- const harness={name:'profile-error-harness',configureServer(server){server.middlewares.use('/__profile-error',async(_q,s,next)=>{try{s.setHeader('Content-Type','text/html');s.end(await server.transformIndexHtml('/__profile-error','<html lang="ru"><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>Проверка ошибки</title></head><body style="margin:0"><div id="root"></div><script type="module" src="/tests/interface/profile-error-harness.tsx"></script></body></html>'))}catch(e){next(e)}})}}
+ const harness = {
+   name: 'profile-error-harness',
+   configureServer(server) {
+     server.middlewares.use('/__profile-error', async (_request, response, next) => {
+       try {
+         response.setHeader('Content-Type', 'text/html')
+         response.end(await server.transformIndexHtml('/__profile-error', `<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <script src="/theme-init.js"></script>
+    <title>Проверка ошибки</title>
+  </head>
+  <body style="margin:0">
+    <div id="root"></div>
+    <script type="module" src="/tests/interface/profile-error-harness.tsx"></script>
+  </body>
+</html>`))
+       } catch (error) { next(error) }
+     })
+   },
+ }
  const vite=await createServer({configFile:false,root,cacheDir:path.join(temporary,'vite-cache'),plugins:[react(),devApiProxy(Number(new URL(api).port)),harness],server:{host:'127.0.0.1',port,strictPort:true,watch:{ignored:['**/artifacts/**','**/docs/**','**/src/server/**','**/src/generated/**']}},logLevel:'error'});await vite.listen()
  const theme=options.theme??'light',report={theme,checks:[],errors:[]},save=()=>writeFile(path.join(output,'organization-profiles.json'),JSON.stringify(report,null,2))
  const passwordHash=await hash('Staffly-profile-acceptance-2026!')
@@ -79,7 +101,15 @@ export async function runOrganizationProfiles({prisma,env,root,temporary,output,
    if(viewport==='mobile'){await page.setViewportSize({width:320,height:740});await fit();await page.setViewportSize({width:390,height:844})}
   })
   await check('Free shows a tariff explanation instead of the second-point form and HTTP refuses creation',async()=>{
-   await page.goto(origin+'/app/organizations/'+org.id+'/settings?section=locations');await page.getByRole('button',{name:'Добавить точку',exact:true}).click();const gate=page.getByRole('dialog',{name:'Больше точек для бизнеса',exact:true});await expect(gate).toContainText('Лимит достигнут');await expect(page.getByRole('dialog',{name:'Новая точка',exact:true})).toHaveCount(0);await gate.getByRole('button',{name:'Закрыть',exact:true}).click()
+   await page.goto(origin+'/app/organizations/'+org.id+'/settings?section=locations')
+   await page.getByRole('button',{name:'Добавить точку',exact:true}).click()
+   const gate=page.getByRole('dialog',{name:'Больше точек для бизнеса',exact:true})
+   await expect(gate).toContainText('Лимит достигнут')
+   await expect(page.getByRole('dialog',{name:'Новая точка',exact:true})).toHaveCount(0)
+   await expect(gate.getByRole('button',{name:'Закрыть',exact:true})).toHaveCount(1)
+   await expect(gate.getByRole('button',{name:'Не сейчас',exact:true})).toBeVisible()
+   await shot('tariff-limit')
+   await gate.getByRole('button',{name:'Закрыть',exact:true}).click()
    const denied=await page.request.post(origin+'/api/organizations/'+org.id+'/locations',{headers:{Origin:origin,Authorization:authorization},data:{name:'Вторая точка',kind:'REMOTE',timezone:'Europe/Moscow'}});assert.equal(denied.status(),409);assert.equal(await prisma.organizationLocation.count({where:{organizationId:org.id}}),1)
   })
   await check('a shift outside opening hours requires a fresh explicit confirmation',async()=>{

@@ -15,7 +15,7 @@ export async function runAdminInterface({prisma,env,root,temporary,output,option
  const suite=resolveAdminSuite(options)
  const socket=netServer();await new Promise(resolve=>socket.listen(0,'127.0.0.1',resolve));const port=socket.address().port;await new Promise(resolve=>socket.close(resolve))
  const origin=`http://127.0.0.1:${port}`;env.APP_ORIGIN=origin;process.env.APP_ORIGIN=origin
- const [{default:express},{default:cookieParser},{default:authRouter},{createAdminRouter},{default:profileRouter},{ApiError},{ZodError},{passwordHash},{databasePool},{createBusinessOrganization},{collectMonitoringSample,recordOrganizationPresence},{closeAdminDatabase}]=await Promise.all([
+ const [{default:express},{default:cookieParser},{default:authRouter,requireAuth},{createAdminRouter},{default:profileRouter},{ApiError},{ZodError},{passwordHash},{databasePool},{createBusinessOrganization},{collectMonitoringSample,recordOrganizationPresence},{closeAdminDatabase}]=await Promise.all([
   import('express'),import('cookie-parser'),import('../../src/server/auth.ts'),import('../../src/server/admin/routes.ts'),import('../../src/server/profile/routes.ts'),import('../../src/server/api-error.ts'),import('zod'),import('../../src/server/auth/passwords.ts'),import('../../src/server/db.ts'),import('../support/business-organization.ts'),import('../../src/server/admin/collection.ts'),import('../../src/server/admin/database.ts'),
  ])
  const codes=new Map(),password='StafflyAdminUi-93!',pin='628491',hash=await passwordHash(password)
@@ -26,7 +26,34 @@ export async function runAdminInterface({prisma,env,root,temporary,output,option
  const {securityContext}=await import('../../src/server/security/journal.ts')
  const {createSupportRouter}=await import('../../src/server/support/routes.ts')
  const {publicContentRouter}=await import('../../src/server/public-content.ts')
- const app=express();app.use(securityContext);app.use(supportResponses);app.use(express.json());app.use('/api/public',publicContentRouter);app.use('/api/support',createSupportRouter());app.use('/api/organizations/:organizationId',(request,response,next)=>{response.locals.operationsOrganizationId=request.params.organizationId;next()});app.use(cookieParser());app.use('/api/auth',authRouter);app.use('/api/admin',createAdminRouter({sendCode:async(email,code)=>{codes.set(email,code)},sendNotice:async()=>{},sendManagementCode:async(email,code)=>{codes.set(email,code)}}));app.use('/api',profileRouter);app.use('/api',organizationRouter);app.use('/api',storageRouter)
+ const organizationReadFailures = new Set()
+ const app = express()
+ app.use(securityContext)
+ app.use(supportResponses)
+ app.use(express.json())
+ app.use('/api/public', publicContentRouter)
+ app.use('/api/support', createSupportRouter())
+ app.use('/api/organizations/:organizationId', (request, response, next) => {
+   response.locals.operationsOrganizationId = request.params.organizationId
+   next()
+ })
+ app.use(cookieParser())
+ app.use('/api/auth', authRouter)
+ app.use('/api/admin', createAdminRouter({
+   sendCode: async (email, code) => { codes.set(email, code) },
+   sendNotice: async () => {},
+   sendManagementCode: async (email, code) => { codes.set(email, code) },
+ }))
+ app.use('/api', profileRouter)
+ // Fault injection exists only in this isolated Express harness. The real
+ // authentication, error handler, public response and diagnostic store run.
+ app.get('/api/organizations/:organizationId', requireAuth, (request, _response, next) => {
+   if (organizationReadFailures.has(request.params.organizationId)) {
+     next(new Error('Synthetic organization read failure: private-operations-ui-marker'))
+   } else next()
+ })
+ app.use('/api', organizationRouter)
+ app.use('/api', storageRouter)
  app.use((error,_q,response,_next)=>{response.locals.supportError=error;response.status(error instanceof ApiError?error.status:error instanceof ZodError?400:500).json({code:error instanceof ApiError?error.code:'INTERNAL_ERROR',message:error instanceof ApiError?error.message:'Не удалось выполнить действие.'})})
  const api=app.listen(0,'127.0.0.1');await new Promise(resolve=>api.once('listening',resolve));const apiPort=api.address().port
  const {devApiProxy}=await import('../../scripts/dev-api-proxy.ts')
@@ -103,7 +130,7 @@ export async function runAdminInterface({prisma,env,root,temporary,output,option
       if(suite==='review-fixes'){const {checkReviewFixes}=await import('./admin-review-fixes.mjs');await checkReviewFixes({page,nav,check,expect,prisma,databasePool,password,hash,codes,email,user,org,shot,noOverflow});continue}
       if(suite==='management'){const {checkManagement}=await import('./admin-management.mjs');await checkManagement({page,nav,expect,check,shot,noOverflow,prisma,databasePool,password,hash,codes,email,userId:user.id,publicId:user.publicId,parentPage,origin,org});continue}
       if(suite==='operations'){
-       const {checkOperations}=await import('./admin-operations.mjs');await checkOperations({page,nav,check,expect,org,user,pin:activePin,context,databasePool,prisma,output,result,tag,operationsJob,operationsErrorId,noOverflow,parentPage,loginData,publishOperationsSnapshot,operationsNodeId})
+       const {checkOperations}=await import('./admin-operations.mjs');await checkOperations({page,nav,check,expect,org,user,pin:activePin,context,databasePool,prisma,output,result,tag,operationsJob,operationsErrorId,noOverflow,parentPage,loginData,publishOperationsSnapshot,operationsNodeId,organizationReadFailures})
        continue
       }
       await check('organizations search, filters, detail and resource tabs',async()=>{

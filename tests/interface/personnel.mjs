@@ -184,9 +184,13 @@ export async function runPersonnel({ prisma, env, root, output, options, tempora
             await expect(card).toBeVisible()
             assert(await card.evaluate(node => node.scrollWidth <= node.clientWidth + 1))
             if (width <= 600) {
-              const replacement = await card.getByRole('button', { name: 'Заменить на остаток', exact: true }).boundingBox()
-              const correction = await card.getByRole('button', { name: 'Исправить время', exact: true }).boundingBox()
-              const edit = await card.getByRole('button', { name: 'Изменить расписание', exact: true }).boundingBox()
+              // Read one layout snapshot: separate protocol calls can straddle
+              // the resize frame and compare the 320px and 390px layouts.
+              const { replacement, correction, edit } = await card.evaluate(node => ({
+                replacement: node.querySelector('.day-schedule-card__replace')?.getBoundingClientRect().toJSON(),
+                correction: node.querySelector('.time-correction-action')?.getBoundingClientRect().toJSON(),
+                edit: node.querySelector('.day-schedule-card__edit')?.getBoundingClientRect().toJSON(),
+              }))
               assert(replacement && correction && edit && replacement.width > correction.width)
               assert(Math.abs(correction.y - edit.y) < 1 && Math.abs(correction.width - edit.width) < 1, JSON.stringify({ width, correction, edit }))
             }

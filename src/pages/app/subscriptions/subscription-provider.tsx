@@ -95,7 +95,7 @@ export default function SubscriptionProvider({ organization, children }: {
                 }}>Управлять файлами</button>
               )}
               <footer>
-                <button className="app-secondary" onClick={close}>Закрыть</button>
+                <button className="app-secondary" onClick={close}>Не сейчас</button>
                 <button className="app-primary" onClick={() => choose()}>Перейти к тарифам</button>
               </footer>
             </DocumentDialog>

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import AxeBuilder from '@axe-core/playwright'
 
@@ -33,6 +34,9 @@ export async function checkErrorLayouts({ page, origin, viewport, theme, output,
   async function capture(surface, width) {
     await readableReferences()
     const audit = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa']).analyze()
+    if (audit.violations.length) {
+      await writeFile(path.join(output, `errors-${theme}-${width}-${surface}-audit.json`), JSON.stringify(audit.violations, null, 2))
+    }
     assert.deepEqual(audit.violations.map(v => ({ id: v.id, nodes: v.nodes.map(n => n.target) })), [])
     await page.screenshot({ path: path.join(output, `errors-${theme}-${width}-${surface}.png`), fullPage: true })
   }
