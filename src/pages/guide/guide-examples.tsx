@@ -1,3 +1,4 @@
+import { calculateWorkTime } from '../../shared/work-time.ts'
 import ScheduleAgenda from '../app/schedule/calendar/schedule-agenda.tsx'
 import WorkTimePanel from '../app/schedule/time/work-time-panel.tsx'
 import { OfferShiftCard } from '../app/schedule/offers/offer-shift-card.tsx'
@@ -28,9 +29,9 @@ const shift: WorkShift = {
 const offerShift: OfferShift = { id: shift.id, memberId: shift.memberId, locationId: 'example-point', startAt: shift.scheduledStartAt, endAt: shift.scheduledEndAt, timezone: 'Europe/Moscow', positionId: null, positionName: shift.positionName ?? null, breakMinutes: 30, description: null }
 const workTime: MemberWorkTime = {
   member: { id: 'example-member', name: 'Анна Смирнова', avatarUrl: null, role: 'MEMBER', active: true },
-  period: { memberId: 'example-member', userId: 'example-user', name: 'Анна Смирнова', avatarUrl: null, role: 'MEMBER', active: true, joinedAt: '2026-09-01', leftAt: null, workedMinutes: 4320, workedShifts: 8, averageMinutes: 540, plannedMinutes: 2160, plannedShifts: 4 },
+  period: { memberId: 'example-member', userId: 'example-user', name: 'Анна Смирнова', avatarUrl: null, role: 'MEMBER', active: true, joinedAt: '2026-09-01', leftAt: null, workedMinutes: 0, workedShifts: 0, averageMinutes: 0, plannedMinutes: 540, plannedShifts: 0, estimatedMinutes: 540, confirmedShifts: 0, pendingShifts: 1, futureMinutes: 0, firstPendingShiftId: shift.id },
   allTime: null,
-  history: [{ ...shift, scheduledStartAt: '2026-10-05T06:00:00Z', scheduledEndAt: '2026-10-05T15:00:00Z', minutes: 540, plannedMinutes: 540, actualMinutes: null }],
+  history: [{ ...shift, accounting: calculateWorkTime(shift, new Date('2026-11-01')), timezone: 'Europe/Moscow', locationId: 'example-point', scheduledStartAt: '2026-10-05T06:00:00Z', scheduledEndAt: '2026-10-05T15:00:00Z', minutes: 540, plannedMinutes: 540, actualMinutes: null }],
   pagination: { page: 1, limit: 10, total: 1, pages: 1 }, timezone: 'Europe/Moscow',
 }
 workTime.allTime = workTime.period

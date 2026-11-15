@@ -24,7 +24,7 @@ export async function guardRequest<T>(work: () => Promise<T>, { mutation = false
     if (signal?.aborted||diagnosticsDocumentDeparting()) throw error
     const failure=connectionError(error, mutation)
     if(!failure.errorId&&['NETWORK_ERROR','REQUEST_TIMEOUT','INVALID_RESPONSE'].includes(failure.code??'')){const id=reportClientFailure(failure.code as 'NETWORK_ERROR'|'REQUEST_TIMEOUT'|'INVALID_RESPONSE');if(id){failure.errorId=id;failure.message+=' Код для поддержки: '+id}}
-    if(typeof window!=='undefined'&&failure.errorId&&!['ADMIN_LOCKED','ADMIN_AUTH_REQUIRED','ADMIN_FORBIDDEN'].includes(failure.code??''))window.dispatchEvent(new CustomEvent('staffly:request-failed',{detail:failure}))
+    if(typeof window!=='undefined'&&failure.errorId&&!(failure.status && failure.status < 500)&&!['ADMIN_LOCKED','ADMIN_AUTH_REQUIRED','ADMIN_FORBIDDEN'].includes(failure.code??''))window.dispatchEvent(new CustomEvent('staffly:request-failed',{detail:failure}))
     throw failure
   }
 }
@@ -39,6 +39,7 @@ export function requestErrorDetails(error: unknown): { message: string; errorId?
   const message = typeof error === 'string' ? error : error instanceof Error ? error.message : 'Не удалось выполнить запрос.'
   const suffix = /\s+Код для поддержки: ([0-9a-f-]+)$/i.exec(message)
   const reference = error && typeof error === 'object' && 'errorId' in error ? error.errorId : suffix?.[1]
-  const errorId = typeof reference === 'string' && supportIdPattern.test(reference) ? reference : undefined
-  return { message: errorId && suffix ? message.slice(0, suffix.index) : message, errorId }
+  const expectedFailure = error && typeof error === 'object' && 'status' in error && Number(error.status) >= 400 && Number(error.status) < 500
+  const errorId = !expectedFailure && typeof reference === 'string' && supportIdPattern.test(reference) ? reference : undefined
+  return { message: (errorId || expectedFailure) && suffix ? message.slice(0, suffix.index) : message, errorId }
 }

@@ -233,6 +233,7 @@ enum WorkShiftStatus {
 }
 
 enum AccountNotificationType {
+  TIMESHEET_REVIEW
   SUBSCRIPTION_STATUS
   REQUEST_VACATION_COLLECTION
   REQUEST_VACATION_REMINDER
@@ -304,6 +305,7 @@ enum RequestEventType {
 }
 
 model Organization {
+  timesheetPeriods TimesheetPeriod[]
   industry String? @db.VarChar(120)
   profileRevision Int @default(1) @map("profile_revision")
   creationKey String? @map("creation_key") @db.Uuid
@@ -412,6 +414,9 @@ model StoredFile {
 }
 
 model AccountNotification {
+  timesheetPeriodId String? @map("timesheet_period_id") @db.Uuid
+  timesheetPeriod TimesheetPeriod? @relation(fields: [organizationId, timesheetPeriodId], references: [organizationId, id], onDelete: Cascade)
+  @@index([timesheetPeriodId], map: "account_notifications_timesheet_period_idx")
   subscriptionDeliveryKey String? @unique @map("subscription_delivery_key") @db.VarChar(200)
   vacationCampaignId String? @map("vacation_campaign_id") @db.Uuid
   vacationCampaign VacationCampaign? @relation(fields: [organizationId,vacationCampaignId], references: [organizationId,id], onDelete: Cascade)
@@ -460,6 +465,8 @@ model AccountNotification {
 }
 
 model OrganizationMember {
+  timesheetClosures TimesheetVersion[] @relation("TimesheetCloser")
+  timesheetEvents TimesheetEvent[] @relation("TimesheetActor")
   employmentPeriods MemberEmploymentPeriod[]
   authoredDrafts ScheduleDraft[] @relation("DraftAuthor")
   draftRecipients DraftRecipient[]
@@ -1113,6 +1120,7 @@ enum LocationRole {
 }
 
 model OrganizationLocation {
+  timesheetPeriods TimesheetPeriod[]
   kind String @default("PHYSICAL") @db.VarChar(16)
   phone String? @db.VarChar(12)
   description String? @db.VarChar(1000)
@@ -1716,4 +1724,53 @@ model PlatformRequestError {
   @@index([userId, createdAt])
   @@index([jobId, createdAt])
   @@map("platform_request_errors")
+}
+
+
+model TimesheetPeriod {
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  location OrganizationLocation @relation(fields: [organizationId, locationId], references: [organizationId, id], onDelete: Restrict)
+  versions TimesheetVersion[]
+  events TimesheetEvent[]
+  notifications AccountNotification[]
+  @@unique([organizationId, id])
+  id String @id @default(uuid()) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  locationId String @map("location_id") @db.Uuid
+  month String @db.VarChar(7)
+  timezone String @db.VarChar(80)
+  status String @default("OPEN") @db.VarChar(16)
+  revision Int @default(0)
+  version Int @default(0)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  @@unique([organizationId, locationId, month])
+  @@map("timesheet_periods")
+}
+
+model TimesheetVersion {
+  period TimesheetPeriod @relation(fields: [periodId], references: [id], onDelete: Cascade)
+  closedBy OrganizationMember @relation("TimesheetCloser", fields: [closedByMemberId], references: [id], onDelete: Restrict)
+  id String @id @default(uuid()) @db.Uuid
+  periodId String @map("period_id") @db.Uuid
+  version Int
+  snapshot Json
+  closedByMemberId String @map("closed_by_member_id") @db.Uuid
+  closedAt DateTime @default(now()) @map("closed_at") @db.Timestamptz(3)
+  @@unique([periodId, version])
+  @@map("timesheet_versions")
+}
+
+model TimesheetEvent {
+  period TimesheetPeriod @relation(fields: [periodId], references: [id], onDelete: Cascade)
+  actor OrganizationMember? @relation("TimesheetActor", fields: [actorMemberId], references: [id], onDelete: Restrict)
+  id String @id @default(uuid()) @db.Uuid
+  periodId String @map("period_id") @db.Uuid
+  actorMemberId String? @map("actor_member_id") @db.Uuid
+  actorName String @map("actor_name") @db.VarChar(400)
+  kind String @db.VarChar(32)
+  reason String @db.VarChar(1000)
+  changes Json?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  @@index([periodId, createdAt])
+  @@map("timesheet_events")
 }

@@ -33,3 +33,26 @@
 @keyframes schedule-modal-in {from {opacity:0;transform:translateY(10px) scale(.985);}}
 @keyframes schedule-modal-out {to {opacity:0;transform:translateY(8px) scale(.985);}}
 @media(prefers-reduced-motion:reduce) {.schedule-modal,.schedule-modal>* {animation:none;}}
+
+// Checkbox geometry belongs to the shared control, independently of form fields.
+.request-modal.document-dialog input[type=checkbox] {
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  min-height: 18px;
+  flex: 0 0 18px;
+  padding: 0;
+  margin: 2px 0;
+  border-radius: 4px;
+  box-shadow: none;
+}
+.request-modal.document-dialog label:has(> input[type=checkbox]) {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 10px;
+  line-height: 1.6;
+  cursor: pointer;
+  > span { min-width: 0; }
+}

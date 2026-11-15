@@ -291,6 +291,9 @@ try {
   if (options.profile === 'admin') {
     const { runAdminInterface } = await import('../interface/admin-monitoring.mjs')
     results.admin = await runAdminInterface({ prisma, env, root, temporary, output, options })
+  } else if (options.profile === 'timesheet') {
+    const { runTimesheet } = await import('../interface/timesheet.mjs')
+    results.timesheet = await runTimesheet({ prisma, env, root, temporary, output, options, startApi })
   } else if (options.profile === 'organization-profile') {
     results.methodology='Real Chromium desktop/mobile organization creation, staged logo upload, validation rejection and lost-response retry, profile and point editing, and deliberate error-boundary rendering. Disposable PostgreSQL, temporary storage and isolated Vite cache only.'
     const {runOrganizationProfiles}=await import('../interface/organization-profiles.mjs')

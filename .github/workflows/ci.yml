@@ -193,6 +193,16 @@ jobs:
         env:
           PERSONNEL_THEME: ${{ matrix.theme }}
           PLAYWRIGHT_BROWSERS_PATH: artifacts/browser-binaries
+      - name: Verify shared modal controls and request settings
+        run: node --import tsx tests/performance/load-test.mjs --profile=workspace --checks="modal layouts,modal close protection,network error retains event,constructor protects" --browsers=chrome --viewports=desktop,mobile --theme="$PERSONNEL_THEME" --pg-bin=/usr/lib/postgresql/18/bin --output=artifacts/tests/personnel/forms
+        env:
+          PERSONNEL_THEME: ${{ matrix.theme }}
+          PLAYWRIGHT_BROWSERS_PATH: artifacts/browser-binaries
+      - name: Verify timesheet closure, corrections and accounting Excel
+        run: npm run test:timesheet -- --theme="$PERSONNEL_THEME" --pg-bin=/usr/lib/postgresql/18/bin --output=artifacts/tests/personnel/timesheet
+        env:
+          PERSONNEL_THEME: ${{ matrix.theme }}
+          PLAYWRIGHT_BROWSERS_PATH: artifacts/browser-binaries
       - name: Save personnel diagnostics
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9

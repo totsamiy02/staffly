@@ -1,3 +1,4 @@
+import { calculateWorkTime, workTimeStateNames } from '../../../../shared/work-time.ts'
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { displayDate, formatDuration, shiftState, formatTime, zonedDateAndTime } from '../../../../app/schedule/date-utils.ts'
 import { accountedTimeLabel } from '../../../../app/schedule/time/time-correction.ts'
@@ -66,8 +67,9 @@ export default function DaySchedulePanel({ date, timezone, locationName, locatio
           const end = zonedDateAndTime(shift.scheduledEndAt, timezone)
           const overnight = start.date !== end.date
           const dayLabel = (value: string) => new Intl.DateTimeFormat('ru-RU', { timeZone: timezone, day: 'numeric', month: 'short', ...(start.date.slice(0, 4) !== end.date.slice(0, 4) ? { year: 'numeric' } : {}) }).format(new Date(value))
+          const accounting = shift.accounting ?? calculateWorkTime(shift)
           const corrected = !!shift.actualStartAt || !!shift.actualEndAt || shift.actualBreakMinutes !== null || shift.attendance === 'NO_SHOW'
-          const status = shift.attendance === 'NO_SHOW' ? 'Неявка' : shift.attendance === 'PARTIAL' ? 'Частично отработана' : state.label
+          const status = workTimeStateNames[accounting.state]
           return <article id={`day-shift-${shift.id}`} className={`day-schedule-card${shift.id === focusedShiftId ? ' day-schedule-card--focused' : ''}`} key={shift.id}>
             <div className="day-schedule-card__person"><MemberAvatar memberId={shift.memberId} locationId={locationId} name={shift.memberName} url={shift.memberAvatarUrl} className="app-avatar day-schedule-card__avatar" /><div><MemberProfileLink memberId={shift.memberId} locationId={locationId}><strong>{shift.memberName}</strong></MemberProfileLink><div className="day-schedule-card__badges">{shift.memberId === ownMemberId && <span className="day-schedule-card__mine">Ваша смена</span>}<span className={`day-schedule-card__status day-schedule-card__status--${state.key}`}>{status}</span>{shift.adjusted && <span>Есть изменения</span>}</div></div></div>
             {shift.positionName && <p className="day-schedule-card__position"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><rect x="3" y="7" width="18" height="14" rx="2" /><path d="M8 7V4h8v3M3 12l9 3 9-3M12 13v4" /></svg>{shift.positionName}</p>}
@@ -79,9 +81,10 @@ export default function DaySchedulePanel({ date, timezone, locationName, locatio
                   <span><time dateTime={shift.scheduledEndAt}>{formatTime(shift.scheduledEndAt, timezone)}</time><small>{dayLabel(shift.scheduledEndAt)}</small></span>
                 </span> : <span className="day-schedule-card__same-day">{formatTime(shift.scheduledStartAt, timezone)}–{formatTime(shift.scheduledEndAt, timezone)}</span>}
               </dd></div>
-              <div><dt>{shift.status === 'CANCELLED' ? 'Отменена' : 'К учёту'}</dt><dd>{shift.status === 'CANCELLED' ? '—' : formatDuration(shift.effectiveMinutes)}</dd></div>
+              <div><dt>Предварительно</dt><dd>{shift.status === 'CANCELLED' ? '—' : formatDuration(accounting.estimatedMinutes)}</dd></div>
+              <div><dt>Подтверждено</dt><dd>{accounting.confirmedMinutes === null ? '—' : formatDuration(accounting.confirmedMinutes)}</dd></div>
             </dl>
-            {shift.status !== 'CANCELLED' && <p className="day-schedule-card__accounting">{corrected ? `Учтено: ${accountedTimeLabel(shift, timezone)}` : 'По расписанию, без корректировок'}</p>}
+            {shift.status !== 'CANCELLED' && <p className="day-schedule-card__accounting">{corrected ? `Учтено: ${accountedTimeLabel(shift, timezone)}` : 'Источник предварительного расчёта: расписание. Факт не подтверждён.'}</p>}
             {shift.replacementCutoffAt && <p className="day-schedule-card__accounting">Участие завершено для замены</p>}
             {shift.description && <p className="day-schedule-card__note">{shift.description}</p>}
             {shift.cancellationReason && <p className="day-schedule-card__note">Причина отмены: {shift.cancellationReason}</p>}

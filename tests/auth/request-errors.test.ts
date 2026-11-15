@@ -90,3 +90,37 @@ it('logs a timestamp and declared route without request values, credentials, SQL
   assert.doesNotMatch(JSON.stringify(log), /private-|SELECT|stack|originalUrl|headers|body/)
   assert.equal(safeApiError(error, { method: 'POST' }, errorId).route, 'unmatched')
 })
+
+
+it('never presents expected 4xx restrictions as support failures, even with a legacy reference', async () => {
+  for (const [status, code] of [[400, 'VALIDATION_ERROR'], [403, 'SUBSCRIPTION_FEATURE_REQUIRED'], [403, 'INSUFFICIENT_PERMISSIONS'], [409, 'TIMESHEET_LOCKED'], [429, 'RATE_LIMITED']] as const) {
+    await assert.rejects(readJson(Response.json({ code, message: 'Понятное ограничение.', errorId }, { status, headers: { 'x-support-code': errorId } })), (error: RequestFailure) => {
+      assert.equal(error.errorId, undefined)
+      assert.equal(error.message, 'Понятное ограничение.')
+      assert.deepEqual(requestErrorDetails(error), { message: 'Понятное ограничение.', errorId: undefined })
+      return true
+    })
+  }
+  assert.deepEqual(requestErrorDetails(Object.assign(new Error('Понятное ограничение. Код для поддержки: ' + errorId), { status: 403, errorId })), { message: 'Понятное ограничение.', errorId: undefined })
+})
+
+
+it('distinguishes silent background subscription checks from interactive mutations', async () => {
+  const previous = globalThis.window
+  const target = new EventTarget()
+  const events: Array<{ interactive: boolean; message: string }> = []
+  target.addEventListener('staffly:subscription-required', event => events.push((event as CustomEvent).detail))
+  globalThis.window = target as unknown as Window & typeof globalThis
+  try {
+    for (const interactive of [false, true]) {
+      const response = Response.json({ code: 'SUBSCRIPTION_FEATURE_REQUIRED', message: 'Доступно на Бизнесе.', errorId }, { status: 403 })
+      Object.defineProperty(response, 'url', { value: 'https://example.test/api/organizations/feae8fd0-a215-487c-a5f4-37a9780c1a7a/schedule/timesheets/2026-10' })
+      await assert.rejects(readJson(response, { notifySubscription: interactive }))
+    }
+    assert.deepEqual(events.map(event => event.interactive), [false, true])
+    assert(events.every(event => !event.message.includes(errorId)))
+  } finally {
+    if (previous) globalThis.window = previous
+    else Reflect.deleteProperty(globalThis, 'window')
+  }
+})

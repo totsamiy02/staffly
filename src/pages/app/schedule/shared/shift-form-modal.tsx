@@ -112,12 +112,12 @@ export default function ShiftFormModal({ organization, members, date, shift, act
       }
       else if (actual && shift) await apiRequest(`/organizations/${organization.id}/schedule/shifts/${shift.id}/attendance${organization.locationId ? `?locationId=${organization.locationId}` : ''}`,{method:'POST',body:{attendance,reason,startAt:localDateTimeIso(startDate,startTime,organization.timezone),endAt:localDateTimeIso(endDate,endTime,organization.timezone)}})
       else if (batch && !shift) {
-        await apiRequest('/organizations/' + organization.id + '/shifts/batch', { method: 'POST', body: { openingHoursConfirmation, acknowledgeAbsence, acknowledgeWorkload, shifts: dates.map(day => {
+        await apiRequest('/organizations/' + organization.id + '/shifts/batch', { method: 'POST', body: { timesheetReason: reason, openingHoursConfirmation, acknowledgeAbsence, acknowledgeWorkload, shifts: dates.map(day => {
           const times = overrides[day] ?? { startTime, endTime, overnight: endDate > startDate }
           return { memberId, positionId: positionId || null, startDate: day, endDate: addDays(day, times.overnight ? 1 : 0), startTime: times.startTime, endTime: times.endTime, breakMinutes: 0, description }
         }) } })
       }
-      else await apiRequest(`/organizations/${organization.id}/shifts${shift ? `/${shift.id}` : ''}`, { method: shift ? 'PATCH' : 'POST', body: { openingHoursConfirmation, acknowledgeAbsence, acknowledgeWorkload, positionId: positionId || null, memberId, startDate, startTime, endDate, endTime, breakMinutes: 0, description } })
+      else await apiRequest(`/organizations/${organization.id}/shifts${shift ? `/${shift.id}` : ''}`, { method: shift ? 'PATCH' : 'POST', body: { timesheetReason: reason, openingHoursConfirmation, acknowledgeAbsence, acknowledgeWorkload, positionId: positionId || null, memberId, startDate, startTime, endDate, endTime, breakMinutes: 0, description } })
       await invalidateOrganizationWork(queryClient, organization.id)
       toast(draft ? 'Предварительный график сохранён' : actual ? 'Рабочее время обновлено' : shift ? 'Смена изменена' : 'Смены добавлены', 'success')
       safety.markSaved(); close()
@@ -147,6 +147,7 @@ export default function ShiftFormModal({ organization, members, date, shift, act
     {workloadWarning && <label className="planning-checkbox"><input type="checkbox" name="ackWorkload" checked={acknowledgeWorkload} onChange={event => setAcknowledgeWorkload(event.target.checked)} /><span>Подтверждаю сохранение с превышением месячной нормы</span></label>}
     {openingWarning&&<OpeningHoursWarning checked={outsideAccepted} onChange={setOutsideAccepted}/>}
     {error && <p className="form-inline-error" role="alert">{error}</p>}
+    {!actual && !draft && <ProfileDisclosure title="Причина исправления закрытого табеля"><label><span>Причина изменения</span><textarea value={reason} onChange={event=>setReason(event.target.value)} maxLength={500} rows={2}/><small>Обязательно для изменений в ранее закрытом и повторно открытом периоде.</small></label></ProfileDisclosure>}
     <footer><button className="app-secondary" type="button" disabled={busy} onClick={close}>Отмена</button><button className="app-primary" disabled={busy || (!!openingWarning&&!outsideAccepted) || (!!draft?.published && !confirmWindow) || (!actual && !memberId) || (batch && !dates.length) || (workloadWarning && !acknowledgeWorkload) || (absenceWarning && !acknowledgeAbsence)}>{busy ? 'Сохраняем…' : actual ? 'Сохранить отработанное время' : shift ? 'Сохранить изменения' : batch ? 'Создать смены' : 'Создать смену'}</button></footer>
   </form></DocumentDialog>}</AnimatedOverlay>
 }

@@ -19,6 +19,7 @@ export async function notificationPolicy(userId: string, organizationId?: string
     const permission = (key: Parameters<typeof hasPermission>[1], field: string) => permissionSql(actor,key,Prisma.raw(field))
     const viewIds = locationsFor(actor,'events.view'), managerIds = [...new Set([...locationsFor(actor,'events.edit'), ...locationsFor(actor,'events.cancel')])]
     policies.push(Prisma.sql`(n.organization_id = ${actor.organizationId}::uuid AND CASE
+      WHEN n.timesheet_period_id IS NOT NULL THEN tp.id IS NOT NULL AND ${permission('timesheets.view','tp.location_id')}
       WHEN n.type = 'SUBSCRIPTION_STATUS' THEN ${actor.owner}
       WHEN n.vacation_campaign_id IS NOT NULL THEN vc.id IS NOT NULL AND ((${actor.id}::uuid = ANY(vc.member_ids) AND ${hasPermission(actor,'requests.own')}) OR ${permission('vacations.collect','vc.location_id')})
       WHEN n.schedule_draft_id IS NOT NULL THEN sd.id IS NOT NULL AND (${permission('drafts.view','sd.location_id')} OR sd.published_at IS NOT NULL AND EXISTS (SELECT 1 FROM draft_recipients dr WHERE dr.draft_id = sd.id AND dr.member_id = ${actor.id}::uuid))
@@ -43,6 +44,7 @@ export async function readableNotificationIds(userId: string, organizationId?: s
   const { sql } = await notificationPolicy(userId, organizationId)
   return Prisma.sql`SELECT n.id FROM account_notifications n
     JOIN organizations o ON o.id = n.organization_id AND o.deleted_at IS NULL
+    LEFT JOIN timesheet_periods tp ON tp.id = n.timesheet_period_id AND tp.organization_id = o.id
     LEFT JOIN vacation_campaigns vc ON vc.id = n.vacation_campaign_id AND vc.organization_id = o.id
     LEFT JOIN schedule_drafts sd ON sd.id = n.schedule_draft_id AND sd.organization_id = o.id
     LEFT JOIN documents d ON d.id = n.document_id AND d.organization_id = o.id

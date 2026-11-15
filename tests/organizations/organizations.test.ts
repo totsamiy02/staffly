@@ -597,11 +597,13 @@ describe('work schedule and time statistics', { concurrency: false }, () => {
     assert.equal(concurrent.filter((item) => item.status === 'fulfilled').length, 1)
   })
 
-  it('counts finished shifts automatically, separates future plans, and records actual-time audit', async () => {
+  it('keeps finished schedules provisional, separates confirmed facts and future plans, and records audit', async () => {
     const future = await createShift(owner.id, scheduleOrganizationId, { memberId: scheduleEmployeeMemberId, startDate: '2027-03-01', startTime: '10:00', endDate: '2027-03-01', endTime: '18:00', breakMinutes: 60, description: null })
     const before = await memberStatistics(owner.id, scheduleOrganizationId, scheduleEmployeeMemberId, { from: '2025-01-01', to: '2028-01-01', memberState: 'all', sort: 'name', direction: 'asc', page: 1, limit: 50 })
-    assert.ok((before.period?.workedMinutes ?? 0) >= 720)
-    assert.equal(before.period?.plannedMinutes, 480)
+    assert.equal(before.period?.workedMinutes, 0)
+    assert.ok((before.period?.estimatedMinutes ?? 0) >= 1200)
+    assert.ok((before.period?.pendingShifts ?? 0) > 0)
+    assert.equal(before.period?.futureMinutes, 480)
     assert.equal(before.period?.plannedShifts, 1)
     const upcoming = await listMyUpcomingShifts(member.id, scheduleOrganizationId)
     assert.deepEqual(upcoming.shifts.map((shift) => shift.id), [future.id])
@@ -613,10 +615,14 @@ describe('work schedule and time statistics', { concurrency: false }, () => {
     await correctActualTime(admin.id, scheduleOrganizationId, past.id, { startDate: '2025-01-10', startTime: '11:00', endDate: '2025-01-10', endTime: '18:00', breakMinutes: 30, reason: 'Опоздание и ранний уход' })
     assert.equal(await prisma.workShiftAdjustment.count({ where: { shiftId: past.id } }), 1)
     const after = await myStatistics(member.id, scheduleOrganizationId, { from: '2025-01-01', to: '2028-01-01', memberState: 'all', sort: 'name', direction: 'asc', page: 1, limit: 50 })
-    assert.equal(after.period?.workedMinutes, (before.period?.workedMinutes ?? 0) - 300)
+    assert.equal(after.period?.workedMinutes, 420)
+    assert.equal(after.period?.estimatedMinutes, (before.period?.estimatedMinutes ?? 0) - 300)
+    assert.equal(after.period?.plannedMinutes, before.period?.plannedMinutes)
     await cancelShift(owner.id, scheduleOrganizationId, future.id, 'График изменён')
     const cancelled = await myStatistics(member.id, scheduleOrganizationId, { from: '2025-01-01', to: '2028-01-01', memberState: 'all', sort: 'name', direction: 'asc', page: 1, limit: 50 })
-    assert.equal(cancelled.period?.plannedMinutes, 0)
+    assert.equal(cancelled.period?.plannedMinutes, (before.period?.plannedMinutes ?? 0) - 480)
+    assert.equal(cancelled.period?.futureMinutes, 0)
+    assert.equal(cancelled.period?.workedMinutes, 420)
     assert.equal(cancelled.period?.plannedShifts, 0)
   })
 

@@ -1,3 +1,4 @@
+import { estimatedWorkInterval } from '../../../shared/work-time.ts'
 import type { DemandDay, DemandInterval, DemandWeek, CoverageDay, CoverageSegment } from '../../../app/schedule/planning/team-planning-types.ts'
 import { addCalendarDays, startOfZonedDate, zonedDateTimeToUtc } from '../timezone.ts'
 import { ApiError } from '../../api-error.ts'
@@ -38,7 +39,7 @@ export function calculateCoverage(from: string, to: string, timezone: string, ve
     const start = +startOfZonedDate(date, timezone), end = +startOfZonedDate(addCalendarDays(date, 1), timezone)
     const current = demandForDate(date, versions, exceptions), previousDate = addCalendarDays(date, -1), previous = demandForDate(previousDate, versions, exceptions)
     const needs = [ [date, current.intervals], [previousDate, previous.intervals] ] .flatMap(([day, intervals]) => (intervals as DemandDay ?? []).map(row => ({ positionId: row.positionId, needed: row.needed, start: +zonedDateTimeToUtc(day as string, row.startTime, timezone), end: +zonedDateTimeToUtc(addCalendarDays(day as string, row.endDayOffset), row.endTime, timezone) }))).filter(n => n.start < end && n.end > start)
-    const active = shifts.filter(s => s.status === 'SCHEDULED' && s.attendance!=='NO_SHOW' && s.positionId).map(s => ({ memberId: s.memberId, positionId: s.positionId!, start: +new Date(s.actualStartAt??s.scheduledStartAt), end: +new Date(s.actualEndAt??s.scheduledEndAt) })).filter(s => s.start < end && s.end > start)
+    const active = shifts.filter(s => s.status === 'SCHEDULED' && s.attendance!=='NO_SHOW' && s.positionId).map(s => { const interval = estimatedWorkInterval(s); return { memberId: s.memberId, positionId: s.positionId!, start: +new Date(interval.start), end: +new Date(interval.end) } }).filter(s => s.start < end && s.end > start)
     const segments: CoverageSegment[] = []
     for (const positionId of new Set([...needs.map(n => n.positionId), ...active.map(s => s.positionId)])) {
       const roleNeeds = needs.filter(n => n.positionId === positionId), roleShifts = active.filter(s => s.positionId === positionId)

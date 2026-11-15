@@ -40,17 +40,18 @@ export default function AbsencePanel({ organization, focusId, onClose }: { organ
   }, [list.data, selectedAbsenceId, today])
   const mutation = useMutation({ mutationFn: async () => {
     if (cancelling) return apiRequest(`/organizations/${organization.id}/absences/${cancelling.id}/cancel`, { method: 'POST', body: { updatedAt: cancelling.updatedAt, reason } })
-    if (editing) return apiRequest(`/organizations/${organization.id}/absences/${editing.id}`, { method: 'PATCH', body: { startDate: start, endDate: end, updatedAt: editing.updatedAt } })
+    if (editing) return apiRequest(`/organizations/${organization.id}/absences/${editing.id}`, { method: 'PATCH', body: { startDate: start, endDate: end, updatedAt: editing.updatedAt, changeReason: reason.trim() || undefined } })
     throw new Error('Выберите отсутствие для изменения.')
   }, onSuccess: async () => { setMessage(cancelling ? 'Отсутствие отменено. Смены не изменены.' : editing ? 'Период изменён. Проверьте смены в нём.' : ''); setEditing(null); setCancelling(null); await invalidateOrganizationWork(client, organization.id) } })
   useToastFeedback(message, mutation.error instanceof Error ? mutation.error.message : undefined)
-  function edit(item: Absence) { mutation.reset(); setMessage(''); setEditing(item); setStart(item.startDate); setEnd(item.endDate) }
+  function edit(item: Absence) { mutation.reset(); setMessage(''); setEditing(item); setReason(''); setStart(item.startDate); setEnd(item.endDate) }
   const form = editing || cancelling
   const content = (close: () => void) => <DocumentDialog className="absence-panel" scrollBody title={cancelling ? 'Отменить отсутствие' : editing ? 'Изменить период' : manager ? 'Отсутствия команды' : 'Мои отсутствия'} eyebrow="Доступность сотрудников" description={form && !cancelling ? 'Даты включительно, в часовом поясе организации.' : 'Отпуск, отгул и сообщения об отсутствии.'} busy={mutation.isPending} onClose={close}>
 
     {form ? <form onSubmit={event => { event.preventDefault(); mutation.mutate() }} className="absence-form">
       {(editing || cancelling) && <strong>{(editing ?? cancelling)?.memberName}</strong>}
       {cancelling ? <><p>История сохранится. Назначенные смены не изменятся.</p><label><span>Причина отмены</span><textarea required minLength={3} maxLength={500} value={reason} onChange={event => setReason(event.target.value)} rows={3} /></label></> : <><><div className="planning-time"><label><span>Первый день</span><DatePicker value={start} required onChange={event => { setStart(event.target.value); if (end < event.target.value) setEnd(event.target.value) }} /></label><label><span>Последний день</span><DatePicker value={end} min={start} required onChange={event => setEnd(event.target.value)} /></label></div><p>Календарных дней: <strong>{absenceDays(start, end)}</strong></p>{editing?.type === 'SICK' && start <= today && end > today && <button type="button" className="app-secondary" onClick={() => setEnd(today)}>Последний день болезни — сегодня</button>}</></>}
+      {editing && <label><span>Причина изменения</span><textarea minLength={3} maxLength={500} value={reason} onChange={event => setReason(event.target.value)} rows={3} /><small>Обязательно, если отсутствие относится к ранее закрытому табелю.</small></label>}
       {mutation.error && <p className="form-inline-error" role="alert">{mutation.error.message}</p>}
       <footer><button type="button" className="app-secondary" disabled={mutation.isPending} onClick={() => { setEditing(null); setCancelling(null); mutation.reset() }}>Назад</button><button className={cancelling ? 'app-danger' : 'app-primary'} disabled={mutation.isPending || (!cancelling && (end < start || absenceDays(start, end) > 367))}>{mutation.isPending ? 'Сохраняем…' : cancelling ? 'Подтвердить отмену' : editing ? 'Сохранить период' : ''}</button></footer>
     </form> : <>

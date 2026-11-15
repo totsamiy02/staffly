@@ -47,6 +47,7 @@
     "db:backup:retention": "node --import tsx scripts/backup-retention.ts",
     "admin:observer": "node --import tsx scripts/service-observer.ts",
     "admin:release:record": "node --import tsx scripts/record-release-check.ts",
+    "test:timesheet": "node --import tsx tests/performance/load-test.mjs --profile=timesheet",
     "test:personnel": "node --import tsx tests/performance/load-test.mjs --profile=personnel"
   },
   "dependencies": {

@@ -73,6 +73,8 @@ export async function changeAbsence(userId: string, organizationId: string, abse
     const cancel = 'reason' in input
     const startDate = cancel ? item.startDate : new Date(input.startDate + 'T00:00:00Z'), endDate = cancel ? item.endDate : new Date(input.endDate + 'T00:00:00Z')
     if (!cancel) await assertAbsencePeriod(tx, organizationId, item.memberId, startDate, endDate, item.id)
+    const correctionReason = 'reason' in input ? input.reason : input.changeReason
+    if (correctionReason) await tx.$queryRaw`SELECT set_config('staffly.actor_user_id',${userId},true),set_config('staffly.correction_reason',${correctionReason},true)`
     const updated = await tx.employeeAbsence.update({ where: { id: item.id }, data: cancel ? { cancelledAt: new Date(), cancelledByMemberId: actor.id, cancellationReason: input.reason, updatedByMemberId: actor.id } : { startDate, endDate, updatedByMemberId: actor.id } })
     if(source&&source.systemCodeSnapshot!=='SICK')await tx.requestEvent.create({data:{requestId:source.id,actorMemberId:actor.id,type:'CHANGED',comment:'reason' in input?input.reason:input.changeReason??null,changes:{before:{startDate:dateText(item.startDate),endDate:dateText(item.endDate)},after:{startDate:dateText(startDate),endDate:dateText(endDate),cancelled:cancel},employeeConsent:!!input.employeeConsent,recallAllowed:!!input.recallAllowed}}})
     if (source?.systemCodeSnapshot === 'SICK') {

@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import { mkdtemp,rm } from 'node:fs/promises'
 import os from 'node:os'
-export async function checkManagement({page,nav,expect,check,shot,noOverflow,prisma,databasePool,password,hash,codes,email,userId,parentPage,origin,org,publicId}){
+export async function checkManagement({page,nav,expect,check,shot,noOverflow,prisma,databasePool,password,hash,codes,email,userId,parentPage,origin,org}){
  const candidateEmail=`candidate-${randomUUID()}@example.test`,person=await prisma.user.create({data:{email:candidateEmail,passwordHash:hash,emailVerifiedAt:new Date(),firstName:'Мария',lastName:'Лебедева'}})
  await databasePool.query('UPDATE staffly_admin.management_state SET alerts_checked_at=NULL WHERE id=1');await databasePool.query('SELECT public.platform_reconcile_admin_alerts()')
  const age=()=>databasePool.query("UPDATE staffly_admin.action_challenges SET created_at=now()-interval '2 minutes',expires_at=now()+interval '1 minute' WHERE user_id=$1",[userId])
@@ -27,7 +27,7 @@ export async function checkManagement({page,nav,expect,check,shot,noOverflow,pri
   if(page.viewportSize().width>1050){const a=await page.locator('.admin-main .admin-search').boundingBox(),b=await page.getByRole('button',{name:'Найти',exact:true}).boundingBox();assert(Math.abs(a.y+a.height-b.y-b.height)<3);assert(b.height>=40)}
  })
  await check('profile shows only the public user number and organization settings show the owner organization number',async()=>{
-  await parentPage.goto(origin+'/app');await parentPage.getByRole('button',{name:'Открыть профиль',exact:true}).click();const profile=parentPage.locator('.topbar-popover--profile');await expect(profile).toBeVisible();await expect(profile.locator('.copy-reference code')).toHaveText(String(publicId));assert.doesNotMatch(await profile.innerText(),/Данные для поддержки|Последние ошибки|ID организации|Документы организации/);assert(!(await profile.innerText()).includes(userId))
+  await parentPage.goto(origin+'/app');await parentPage.getByRole('button',{name:'Открыть профиль',exact:true}).click();const profile=parentPage.locator('.topbar-popover--profile');await expect(profile).toBeVisible();await expect(profile.locator('.copy-reference code')).toHaveCount(0);await expect(profile.getByRole('link',{name:/Настройки профиля/})).toHaveAttribute('href','/app/settings');assert.doesNotMatch(await profile.innerText(),/Данные для поддержки|Последние ошибки|ID организации|Документы организации/);assert(!(await profile.innerText()).includes(userId))
   await parentPage.goto(origin+'/app/organizations/'+org.id+'/employees');await expect(parentPage.getByRole('heading',{name:'Сотрудники',exact:true})).toBeVisible();assert.equal(await parentPage.locator('.list-context').count(),0)
   await parentPage.goto(origin+'/app/organizations/'+org.id+'/settings');await expect(parentPage.getByRole('heading',{name:'Профиль организации',exact:true})).toBeVisible();await expect(parentPage.getByRole('button',{name:'Скопировать id организации',exact:true})).toBeVisible();assert(!(await parentPage.locator('main').innerText()).includes(org.id))
  })

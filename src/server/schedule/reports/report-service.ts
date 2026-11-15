@@ -1,3 +1,4 @@
+import { calculateWorkTime, workTimeRules, workTimeStateNames, workTimeSourceNames } from '../../../shared/work-time.ts'
 import { requirePlanFeature } from '../../subscriptions/access.ts'
 import { locationsFor, hasPermission } from '../../organizations/access/access.ts'
 import type { Permission } from '../../../app/access/catalog.ts'
@@ -90,7 +91,7 @@ export async function buildReport(userId: string, organizationId: string, input:
     let templateName: string | null = null
     if (input.templateId) { const template = await db.reportTemplate.findFirst({ where: { id: input.templateId, organizationId } }); if (!template) throw new ApiError(404, 'TEMPLATE_NOT_FOUND', 'Настройка больше недоступна.'); templateName = template.name }
     const rows: BuiltReport['rows'] = { summary: [], shifts: [], absences: [], parameters: [] }
-    const totals = new Map<string, { memberId: string; locationId: string; minutes: number; shifts: number; locations: Set<string>; positions: Set<string> }>()
+    const totals = new Map<string, { memberId: string; locationId: string; minutes: number; plannedMinutes: number; confirmedMinutes: number; confirmedShifts: number; unconfirmedShifts: number; shifts: number; locations: Set<string>; positions: Set<string> }>()
     const locationLabels = new Map(locations.map(point => {
       const duplicates = locations.filter(other => other.name === point.name)
       const label = duplicates.length > 1 ? `${point.name} (${point.city}, ${point.address || 'без адреса'})` : point.name
@@ -98,8 +99,10 @@ export async function buildReport(userId: string, organizationId: string, input:
     }))
     const locationLabel = (id: string) => locationLabels.get(id)!
     const startsByMemberPoint = new Map<string, number[]>()
-    const metrics = { employees: 0, shifts: shifts.length, minutes: 0, hours: 0, futureShifts: 0, futureHours: 0 }
+    const metrics = { employees: 0, shifts: shifts.length, minutes: 0, hours: 0, futureShifts: 0, futureHours: 0, plannedHours: 0, confirmedHours: 0, confirmedShifts: 0, pendingShifts: 0 }
     let futureMinutes = 0
+    let totalPlannedMinutes = 0
+    let totalConfirmedMinutes = 0
     const nameCounts = new Map<string, number>()
     for (const member of selectedMembers) { const name = nameOf(member.user); nameCounts.set(name, (nameCounts.get(name) ?? 0) + 1) }
     const identity = (id: string) => {
@@ -111,13 +114,42 @@ export async function buildReport(userId: string, organizationId: string, input:
       const scopeKey = `${shift.memberId}:${shift.locationId}`
       const starts = startsByMemberPoint.get(scopeKey) ?? []
       starts.push(shift.scheduledStartAt.getTime()); startsByMemberPoint.set(scopeKey, starts)
-      const location = locations.find(location => location.id === shift.locationId)!, minutes = shift.attendance==='NO_SHOW'?0:Math.max(0, Math.floor(((shift.actualEndAt??shift.scheduledEndAt).getTime() - (shift.actualStartAt??shift.scheduledStartAt).getTime()) / 60000))
-      const aggregate = totals.get(scopeKey) ?? { memberId: shift.memberId, locationId: shift.locationId, minutes: 0, shifts: 0, locations: new Set<string>(), positions: new Set<string>() }
-      aggregate.minutes += minutes; aggregate.shifts++; aggregate.locations.add(locationLabel(location.id)); if (shift.positionNameSnapshot) aggregate.positions.add(shift.positionNameSnapshot); totals.set(scopeKey, aggregate)
-      metrics.minutes += minutes
-      const future = shift.scheduledStartAt > now
-      if (future) { metrics.futureShifts++; futureMinutes += minutes }
-      rows.shifts.push({ id: shift.id, ...identity(shift.memberId), locationId: location.id, location: locationLabel(location.id), timezone: location.timezone, position: shift.positionNameSnapshot, start: localExcelDate(shift.actualStartAt??shift.scheduledStartAt, location.timezone), end: localExcelDate(shift.actualEndAt??shift.scheduledEndAt, location.timezone), break: shift.breakMinutes, minutes, hours: minutes / 60, state: shift.attendance==='NO_SHOW'?'Неявка':shift.attendance==='PARTIAL'?'Частично отработана':future ? 'Будущая' : shift.scheduledEndAt <= now ? 'Завершена' : 'Идёт', comment: shift.description })
+      const location = locations.find(location => location.id === shift.locationId)!;
+      const time = calculateWorkTime(shift, now);
+      const aggregate = totals.get(scopeKey) ?? {
+        memberId: shift.memberId, locationId: shift.locationId, minutes: 0, plannedMinutes: 0,
+        confirmedMinutes: 0, confirmedShifts: 0, unconfirmedShifts: 0, shifts: 0,
+        locations: new Set<string>(), positions: new Set<string>(),
+      };
+      aggregate.minutes += time.estimatedMinutes;
+      aggregate.plannedMinutes += time.plannedMinutes;
+      aggregate.confirmedMinutes += time.confirmedMinutes ?? 0;
+      aggregate.confirmedShifts += time.confirmedMinutes !== null ? 1 : 0;
+      aggregate.unconfirmedShifts += time.confirmedMinutes === null ? 1 : 0;
+      aggregate.shifts++;
+      aggregate.locations.add(locationLabel(location.id));
+      if (shift.positionNameSnapshot) aggregate.positions.add(shift.positionNameSnapshot);
+      totals.set(scopeKey, aggregate);
+      metrics.minutes += time.estimatedMinutes;
+      totalPlannedMinutes += time.plannedMinutes;
+      totalConfirmedMinutes += time.confirmedMinutes ?? 0;
+      metrics.confirmedShifts += time.confirmedMinutes !== null ? 1 : 0;
+      metrics.pendingShifts += time.pending ? 1 : 0;
+      if (!time.completed) { metrics.futureShifts++; futureMinutes += time.plannedMinutes; }
+      rows.shifts.push({
+        id: shift.id, ...identity(shift.memberId), locationId: location.id, location: locationLabel(location.id),
+        timezone: location.timezone, position: shift.positionNameSnapshot,
+        plannedStart: localExcelDate(shift.scheduledStartAt, location.timezone),
+        plannedEnd: localExcelDate(shift.scheduledEndAt, location.timezone),
+        actualStart: shift.actualStartAt ? localExcelDate(shift.actualStartAt, location.timezone) : null,
+        actualEnd: shift.actualEndAt ? localExcelDate(shift.actualEndAt, location.timezone) : null,
+        start: localExcelDate(shift.actualStartAt ?? shift.scheduledStartAt, location.timezone),
+        end: localExcelDate(shift.actualEndAt ?? shift.scheduledEndAt, location.timezone),
+        break: shift.breakMinutes, actualBreak: shift.actualBreakMinutes,
+        minutes: time.estimatedMinutes, hours: time.estimatedMinutes / 60, plannedHours: time.plannedMinutes / 60,
+        confirmedHours: time.confirmedMinutes === null ? null : time.confirmedMinutes / 60,
+        source: workTimeSourceNames[time.source], state: workTimeStateNames[time.state], comment: shift.description,
+      });
     }
     for (const absence of absences) {
       const start = absence.startDate.toISOString().slice(0, 10), end = absence.endDate.toISOString().slice(0, 10), overlapStart = start > input.from ? start : input.from, overlapEnd = end < input.to ? end : input.to
@@ -130,7 +162,7 @@ export async function buildReport(userId: string, organizationId: string, input:
       if (!relevant.length) continue
       for (const location of relevant) {
         const scopeKey = `${absence.memberId}:${location.id}`
-        if (!totals.has(scopeKey)) totals.set(scopeKey, { memberId: absence.memberId, locationId: location.id, minutes: 0, shifts: 0, locations: new Set([locationLabel(location.id)]), positions: new Set() })
+        if (!totals.has(scopeKey)) totals.set(scopeKey, { memberId: absence.memberId, locationId: location.id, minutes: 0, plannedMinutes: 0, confirmedMinutes: 0, confirmedShifts: 0, unconfirmedShifts: 0, shifts: 0, locations: new Set([locationLabel(location.id)]), positions: new Set() })
       }
       const details = relevant.every(l=>hasPermission(access.actor,'absences.details',l.id))
       rows.absences.push({ locations: relevant.map(location => locationLabel(location.id)).join('; '), id: absence.id, ...identity(absence.memberId), type: details ? ({ VACATION: 'Отпуск', SICK: 'Больничный', SICK_LEAVE: 'Больничный', DAY_OFF: 'Отгул', ABSENCE: 'Отсутствие' } as Record<string, string>)[absence.type] ?? 'Отсутствие' : 'Отсутствие', start: new Date(start), end: new Date(end), overlapStart: new Date(overlapStart), overlapEnd: new Date(overlapEnd), days: (Date.parse(overlapEnd) - Date.parse(overlapStart)) / 86400000 + 1, source: absence.sourceRequestId ? 'Одобренная заявка' : 'Зарегистрированное отсутствие', comment: details ? absence.comment : null })
@@ -139,15 +171,15 @@ export async function buildReport(userId: string, organizationId: string, input:
     for (const aggregate of totals.values()) {
       const id = aggregate.memberId
       const member = memberMap.get(id)!, identityRow = identity(id)
-      rows.summary.push({ ...identityRow, locationId: aggregate.locationId, locations: [...aggregate.locations].sort().join('; ') || null, positions: [...aggregate.positions].sort().join('; ') || null, status: member.leftAt || member.user.deletedAt ? 'Бывший' : 'Активный', shifts: aggregate.shifts, hours: aggregate.minutes / 60 })
+      rows.summary.push({ ...identityRow, locationId: aggregate.locationId, locations: [...aggregate.locations].sort().join('; ') || null, positions: [...aggregate.positions].sort().join('; ') || null, status: member.leftAt || member.user.deletedAt ? 'Бывший' : 'Активный', shifts: aggregate.shifts, hours: aggregate.minutes / 60, plannedHours: aggregate.plannedMinutes / 60, confirmedHours: aggregate.confirmedShifts ? aggregate.confirmedMinutes / 60 : null, unconfirmedShifts: aggregate.unconfirmedShifts })
       if ((!member.user.firstName || !member.user.lastName || !member.user.middleName) && !warnings.incompleteName.some(item => item.id === id)) warnings.incompleteName.push({ id, name: identityRow.name })
     }
     rows.summary.sort((a, b) => String(a.locations).localeCompare(String(b.locations), 'ru') || String(a.locationId).localeCompare(String(b.locationId)) || String(a.name).localeCompare(String(b.name), 'ru') || String(a.memberId).localeCompare(String(b.memberId)))
     rows.shifts.sort((a, b) => String(a.location).localeCompare(String(b.location), 'ru') || String(a.locationId).localeCompare(String(b.locationId)) || String(a.name).localeCompare(String(b.name), 'ru') || (a.start as Date).getTime() - (b.start as Date).getTime())
     rows.absences.sort((a, b) => String(a.locations).localeCompare(String(b.locations), 'ru') || String(a.name).localeCompare(String(b.name), 'ru') || (a.start as Date).getTime() - (b.start as Date).getTime())
-    metrics.employees = new Set([...totals.values()].map(value => value.memberId)).size; metrics.hours = metrics.minutes / 60; metrics.futureHours = futureMinutes / 60
+    metrics.employees = new Set([...totals.values()].map(value => value.memberId)).size; metrics.hours = metrics.minutes / 60; metrics.futureHours = futureMinutes / 60; metrics.plannedHours = totalPlannedMinutes / 60; metrics.confirmedHours = totalConfirmedMinutes / 60
     const parameters: Record<string, string> = {
-      'Организация': organization.name, 'Период включительно': `${input.from.split('-').reverse().join('.')} — ${input.to.split('-').reverse().join('.')}`, 'Время формирования': `${new Intl.DateTimeFormat('ru-RU', { timeZone: organization.timezone, dateStyle: 'short', timeStyle: 'medium' }).format(now)} (${organization.timezone})`, 'Точки и часовые пояса': locations.map(location => `${locationLabel(location.id)} (${location.timezone})`).join('; '), 'Сотрудники': input.memberIds.length ? selectedMembers.map(member => nameOf(member.user)).join('; ') : 'Все с данными периода в выбранной области', 'Бывшие сотрудники': input.includeFormer ? 'Включены при наличии данных' : 'Исключены', 'Расчёт часов': 'Фактическое время, если указано, иначе план; неявка — 0 часов', 'Перерыв': 'Включён в длительность', 'Отменённые смены': 'Исключены', 'Будущие смены': `${metrics.futureShifts}; ${metrics.futureHours.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ч; включены`, 'Ночные смены': 'Целиком по местной дате начала в часовом поясе точки', 'Отсутствия': 'Неотменённые записи; пересечение дат включительно; не уменьшают часы и не означают оплату', 'Область отсутствий': 'Смены, назначения или переводы в выбранные точки, пересекающиеся с датами отсутствия; каждое отсутствие один раз', 'Точность': 'Полные минуты; суммирование до перевода в часы; отображение 2 знака', 'Сохранённая настройка': templateName ?? 'Не использована', 'Разделение заведений': 'Сводка: отдельная строка для каждого сотрудника в каждом заведении. Смены сгруппированы по заведению и сотруднику.', 'Идентификаторы': 'Технические ID доступны только по выбору колонок.',
+      'Организация': organization.name, 'Период включительно': `${input.from.split('-').reverse().join('.')} — ${input.to.split('-').reverse().join('.')}`, 'Время формирования': `${new Intl.DateTimeFormat('ru-RU', { timeZone: organization.timezone, dateStyle: 'short', timeStyle: 'medium' }).format(now)} (${organization.timezone})`, 'Точки и часовые пояса': locations.map(location => `${locationLabel(location.id)} (${location.timezone})`).join('; '), 'Сотрудники': input.memberIds.length ? selectedMembers.map(member => nameOf(member.user)).join('; ') : 'Все с данными периода в выбранной области', 'Бывшие сотрудники': input.includeFormer ? 'Включены при наличии данных' : 'Исключены', 'Расчёт часов': 'План, предварительная оценка и подтверждённый факт — отдельные колонки. Нет подтверждения — пустая ячейка; подтверждённая неявка — 0.', 'Версия правил': workTimeRules.version, 'Перерыв': 'Включён в длительность', 'Отменённые смены': 'Исключены', 'Будущие смены': `${metrics.futureShifts}; ${metrics.futureHours.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ч по плану; входят только в план и предварительный прогноз`, 'Ночные смены': 'Целиком по местной дате начала в часовом поясе точки', 'Отсутствия': 'Неотменённые записи; пересечение дат включительно; не уменьшают часы и не означают оплату', 'Область отсутствий': 'Смены, назначения или переводы в выбранные точки, пересекающиеся с датами отсутствия; каждое отсутствие один раз', 'Точность': 'Полные минуты; суммирование до перевода в часы; отображение 2 знака', 'Сохранённая настройка': templateName ?? 'Не использована', 'Разделение заведений': 'Сводка: отдельная строка для каждого сотрудника в каждом заведении. Смены сгруппированы по заведению и сотруднику.', 'Идентификаторы': 'Технические ID доступны только по выбору колонок.',
     }
     rows.parameters = Object.entries(parameters).map(([parameter, value]) => ({ parameter, value }))
     for (const sheet of input.config.sheets.filter(sheet => sheet.enabled)) {

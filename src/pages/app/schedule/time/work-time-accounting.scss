@@ -1,0 +1,42 @@
+.work-time-totals {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0;
+  margin: 22px 0;
+  padding-bottom: 22px;
+  border-bottom: 1px solid var(--theme-border, #ddd);
+  > article { min-width: 0; padding: 0 20px; border-left: 1px solid var(--theme-border, #ddd); }
+  > article:first-child { padding-left: 0; border: 0; }
+  span, small { display: block; font-size: 12px; line-height: 1.5; color: var(--theme-muted, #666); }
+  strong { display: block; margin: 8px 0 4px; font-size: 25px; font-weight: 650; font-variant-numeric: tabular-nums; color: var(--theme-text-strong, #222); }
+}
+.work-time-footnote { margin: 10px 0; font-size: 12px; line-height: 1.6; color: var(--theme-muted, #666); }
+.work-time-attention { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin: 16px 0; padding: 12px 14px; border: 1px solid var(--theme-border, #ddd); border-radius: 8px; background: var(--theme-surface-muted, #f9f9f9); color: var(--theme-text, #555); font-size: 12px; }
+.work-time-rules-button { font-size: 12px; min-height: 38px; }
+.work-time-rules-dialog { max-width: 560px; footer { display: flex; justify-content: flex-end; margin-top: 18px; } }
+.work-time-rule-list { margin: 0; > div { padding: 13px 0; border-bottom: 1px solid var(--theme-border, #ddd); } dt { font-size: 13px; font-weight: 600; } dd { margin: 5px 0 0; color: var(--theme-muted, #666); font-size: 12px; line-height: 1.6; } }
+.work-time-state { display: inline-flex; padding: 4px 7px; border-radius: 5px; background: var(--theme-raised, #eee); color: var(--theme-text, #555); font-size: 11px; font-weight: 400; }
+.schedule-page.time-accounting-page {
+  .statistics-table__head, .statistics-table__row { grid-template-columns: minmax(200px, 1.4fr) repeat(4, minmax(110px, .8fr)); }
+  .statistics-table__row > span { flex-direction: column; justify-content: center; align-items: flex-start; gap: 4px; }
+  .statistics-table__row > span.statistics-employee { flex-direction: row; align-items: center; justify-content: flex-start; }
+  .statistics-table__row small { font-size: 11px; }
+  .statistics-review-button { position: relative; z-index: 2; pointer-events: auto; font-size: 11px; min-height: 30px; }
+}
+@media (max-width: 650px) {
+  .work-time-totals { grid-template-columns: 1fr; gap: 16px; > article { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 14px; align-items: center; padding: 0; border: 0; } strong { grid-column: 2; grid-row: 1 / 3; margin: 0; font-size: 22px; white-space: nowrap; } small { grid-column: 1; } }
+  .schedule-page.time-accounting-page {
+    .statistics-table { overflow: visible; }
+    .statistics-table__head { display: none; }
+    .statistics-table__row { display: grid; min-width: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 14px; gap: 12px; }
+    .statistics-table__row > span { min-height: 0; padding: 0; font-size: 13px; }
+    .statistics-table__row > span.statistics-employee { grid-column: 1 / -1; }
+    .statistics-table__row > span[data-label]::before { content: attr(data-label); font-size: 11px; color: var(--theme-muted, #666); }
+  }
+}
+.accounting-shift-history {
+  > header { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; h3 { margin: 0; } }
+}
+.accounting-history-row { border-bottom: 1px solid var(--theme-border, #ddd); padding: 14px 0; > footer { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 10px; > small { color: var(--theme-muted, #666); font-size: 11px; } .time-correction-action { margin-left: auto; } } }
+.accounting-history-summary { display: grid; grid-template-columns: minmax(130px, 1.3fr) repeat(3, minmax(75px, 1fr)); gap: 12px; width: 100%; padding: 0; text-align: left; border: 0; background: transparent; color: var(--theme-text-strong, #222); > span { display: grid; gap: 5px; align-content: start; min-width: 0; } small { font-size: 11px; color: var(--theme-muted, #666); } strong { font-size: 13px; font-weight: 500; } &:disabled { opacity: 1; cursor: default; } }
+@media (max-width: 650px) { .accounting-history-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); .accounting-history-date { grid-column: 1 / -1; } } }

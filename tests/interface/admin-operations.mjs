@@ -11,7 +11,7 @@ export async function checkOperations({page,nav,check,expect,org,user,pin,contex
   await check('user identity and a real rejected request have copyable references searchable by the administrator',async()=>{
     await parentPage.goto(new URL(page.url()).origin+'/app/settings')
     await expect(parentPage.locator('.account-settings-content')).toContainText(String(user.publicId))
-    await parentPage.getByRole('button',{name:'Открыть профиль',exact:true}).click();await expect(parentPage.locator('.profile-account-reference')).toContainText(String(user.publicId))
+    await parentPage.getByRole('button',{name:'Открыть профиль',exact:true}).click();await expect(parentPage.locator('.profile-account-reference')).toHaveCount(0);await expect(parentPage.getByRole('region',{name:'Профиль пользователя'}).getByRole('link',{name:/Настройки профиля/})).toHaveAttribute('href','/app/settings')
     const identity=path.join(output,'operations-'+tag+'-user-identity.png');await parentPage.screenshot({path:identity,fullPage:true});result.screenshots.push(path.basename(identity))
     await parentPage.goto(new URL(page.url()).origin+'/app/organizations/6f3521d3-a3a1-4bd1-b5da-1cf249394d9f')
     const reference=parentPage.locator('.request-error-reference code').first();await expect(reference).toBeVisible();const code=await reference.innerText();assert.match(code,/^[0-9a-f-]{36}$/)

@@ -1,3 +1,4 @@
+import { reportWorkbook } from '../../src/server/schedule/reports/report-workbook.ts'
 import assert from 'node:assert/strict'
 import { it } from 'node:test'
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
@@ -18,8 +19,8 @@ it('renders a production XLSX without database or application secrets and preser
     const start = new Date('2026-10-30T09:00:00Z'), config = defaultReportConfig()
     config.layout = 'table'
     const report: BuiltReport = { generatedAt: start, config,
-      metrics: { employees: 1, shifts: 1, minutes: 480, hours: 8, futureShifts: 0, futureHours: 0 }, warnings: { incompleteName: [] },
-      rows: { summary: [{ name: '=HYPERLINK("https://example.test")', shifts: 1, hours: 8 }], shifts: [{ name: 'Анна', start, hours: 8 }], absences: [], parameters: [] } }
+      metrics: { employees: 1, shifts: 1, minutes: 480, hours: 8, futureShifts: 0, futureHours: 0, plannedHours: 0, confirmedHours: 0, confirmedShifts: 0, pendingShifts: 0 }, warnings: { incompleteName: [] },
+      rows: { summary: [{ name: '=HYPERLINK("https://example.test")', shifts: 1, hours: 8 }], shifts: [{ name: 'Анна', plannedStart: start, start, hours: 8 }], absences: [], parameters: [] } }
     await writeFile(source, serialize(report), { mode: 0o600 })
     await promisify(execFile)(process.execPath, ['--import', fileURLToPath(import.meta.resolve('tsx')),
       fileURLToPath(new URL('../../src/server/schedule/reports/export-child.ts', import.meta.url)), source, output], {
@@ -30,9 +31,15 @@ it('renders a production XLSX without database or application secrets and preser
     const summary = workbook.getWorksheet('Сводка')!, shifts = workbook.getWorksheet('Смены')!
     assert.equal(summary.getCell('A2').value, report.rows.summary[0].name)
     assert.equal(summary.getCell('E2').value, 1)
-    assert.equal(summary.getCell('F2').value, 8)
+    assert.equal(summary.getCell(2, config.sheets[0].columns.findIndex(column => column.key === 'hours') + 1).value, 8)
     assert.deepEqual(shifts.getCell('E2').value, start)
     assert.equal((await stat(output)).mode & 0o777, 0o600)
+    const factOnly = structuredClone(report)
+    factOnly.config.sheets = factOnly.config.sheets.map(sheet => ({ ...sheet, enabled: sheet.key === 'summary', columns: sheet.key === 'summary' ? [{key:'confirmedHours',title:'Подтверждено'}] : sheet.columns }))
+    const missingFact = new ExcelJS.Workbook()
+    await missingFact.xlsx.load(new Uint8Array(await reportWorkbook(factOnly)).buffer)
+    assert.equal(missingFact.getWorksheet('Сводка')!.getCell('A2').value,null)
+    assert.equal(missingFact.getWorksheet('Сводка')!.getCell('A3').value,null,'Unknown confirmed total stays empty even in a numeric-only template')
     // The renderer cannot overwrite an existing output file on accidental replay.
     await assert.rejects(promisify(execFile)(process.execPath, ['--import', 'tsx', 'src/server/schedule/reports/export-child.ts', source, output], { env: { PATH: process.env.PATH, NODE_ENV: 'production' } }))
   } finally { await rm(directory, { recursive: true, force: true }) }

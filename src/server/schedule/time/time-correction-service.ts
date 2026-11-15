@@ -10,8 +10,8 @@ import { publicShift, shiftInclude } from '../service.ts'
 import { correctionReason, resolveTimeCorrection } from '../../../app/schedule/time/time-correction.ts'
 
 export const timeCorrectionBody = z.object({
-  mode: z.enum(['LATE', 'EARLY', 'NO_SHOW', 'CUSTOM', 'RESTORE']),
-  startAt: z.iso.datetime().optional(), endAt: z.iso.datetime().optional(),
+  mode: z.enum(['LATE', 'EARLY', 'NO_SHOW', 'CUSTOM', 'RESTORE', 'MARKS', 'CONFIRM']),
+  startAt: z.iso.datetime().nullable().optional(), endAt: z.iso.datetime().nullable().optional(),
   comment: z.string().trim().max(400).optional(), expectedUpdatedAt: z.iso.datetime(),
 })
 
@@ -39,6 +39,7 @@ export async function saveTimeCorrection(userId: string, organizationId: string,
     catch (error) { throw new ApiError(400, 'INVALID_CORRECTION', error instanceof Error ? error.message : 'Проверьте время.') }
     assertPartialShiftBounds(shift, result.actualStartAt ? new Date(result.actualStartAt) : null, result.actualEndAt ? new Date(result.actualEndAt) : null, result.attendance)
     const reason = correctionReason(input)
+    await tx.$queryRaw`SELECT set_config('staffly.actor_user_id',${userId},true),set_config('staffly.correction_reason',${reason},true)`
     const snapshot = (value: typeof shift | typeof result) => ({ attendance: value.attendance, actualStartAt: value.actualStartAt instanceof Date ? value.actualStartAt.toISOString() : value.actualStartAt, actualEndAt: value.actualEndAt instanceof Date ? value.actualEndAt.toISOString() : value.actualEndAt, actualBreakMinutes: value.actualBreakMinutes })
     await tx.workShiftAdjustment.create({ data: {
       shiftId, changedByMemberId: actor.id, kind: 'TIME_CORRECTION', reason,

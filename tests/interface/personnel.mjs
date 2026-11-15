@@ -188,7 +188,7 @@ export async function runPersonnel({ prisma, env, root, output, options, tempora
               const correction = await card.getByRole('button', { name: 'Исправить время', exact: true }).boundingBox()
               const edit = await card.getByRole('button', { name: 'Изменить расписание', exact: true }).boundingBox()
               assert(replacement && correction && edit && replacement.width > correction.width)
-              assert(Math.abs(correction.y - edit.y) < 1 && Math.abs(correction.width - edit.width) < 1)
+              assert(Math.abs(correction.y - edit.y) < 1 && Math.abs(correction.width - edit.width) < 1, JSON.stringify({ width, correction, edit }))
             }
             await card.screenshot({ path: path.join(output, viewport + '-' + theme + '-day-card-' + width + '.png') })
           }

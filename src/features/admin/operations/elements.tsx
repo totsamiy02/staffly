@@ -36,5 +36,5 @@ function RetrySurface({job,close,onDone,busy,setBusy}:{job:OperationalJob;close:
 }
 export function RetryReportDialog({job,onClose,onDone}:{job:OperationalJob;onClose:()=>void;onDone:()=>void}){
   const [busy,setBusy]=useState(false)
-  return <AnimatedOverlay variant="modal" className="admin-root admin-ops-overlay admin-console-overlay" onClose={onClose} dismissible={!busy}>{close=><RetrySurface job={job} busy={busy} setBusy={setBusy} close={close} onDone={()=>{onClose();onDone()}}/>}</AnimatedOverlay>
+  return <AnimatedOverlay variant="modal" className="admin-lock-backdrop admin-ops-overlay admin-console-overlay" onClose={onClose} dismissible={!busy}>{close=><RetrySurface job={job} busy={busy} setBusy={setBusy} close={close} onDone={()=>{onClose();onDone()}}/>}</AnimatedOverlay>
 }

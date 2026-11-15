@@ -1,0 +1,68 @@
+.request-modal.document-dialog.subscription-gate {
+  width: min(460px, 100%);
+  max-width: 460px;
+  padding: 28px;
+  color: var(--theme-text-strong, #222);
+
+  > header {
+    align-items: flex-start;
+    margin: 0 0 16px;
+    h2 { font-size: 21px; line-height: 1.35; letter-spacing: -.4px; }
+    .app-eyebrow { font-size: 10px; margin-bottom: 7px; }
+  }
+  .subscription-gate__description {
+    margin: 0 0 24px;
+    font-size: 13px;
+    line-height: 1.65;
+    color: var(--theme-muted, #666);
+  }
+  .subscription-gate__plan {
+    border-top: 1px solid var(--theme-border, #e7e7e7);
+    border-bottom: 1px solid var(--theme-border, #e7e7e7);
+    padding: 18px 0;
+  }
+  .subscription-gate__plan-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+    strong { font-size: 17px; font-weight: 600; }
+    span { font-size: 11px; color: var(--theme-muted, #666); }
+  }
+  .subscription-gate__limits {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+    margin-top: 18px;
+    div { display: flex; flex-direction: column; gap: 5px; }
+    dt { font-size: 11px; color: var(--theme-muted, #666); }
+    dd { margin: 0; font-size: 18px; font-weight: 600; }
+  }
+  .subscription-gate__organization {
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+    margin: 18px 0 0;
+    font-size: 12px;
+    span { color: var(--theme-muted, #666); }
+    strong { font-weight: 500; overflow-wrap: anywhere; }
+  }
+  > p:not([class]) { font-size: 12px; line-height: 1.6; margin-top: 16px; color: var(--theme-muted, #666); }
+  > footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin: 24px 0 0;
+    padding: 0;
+    > button { width: auto; flex: 0 1 auto; min-height: 42px; padding: 10px 14px; font-size: 12px; }
+  }
+}
+@media (max-width: 480px) {
+  .request-modal.document-dialog.subscription-gate {
+    padding: 22px;
+    > header h2 { font-size: 20px; }
+    > footer { display: grid; grid-template-columns: auto minmax(0, 1fr); }
+  }
+}

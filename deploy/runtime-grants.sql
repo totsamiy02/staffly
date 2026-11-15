@@ -28,3 +28,9 @@ DO $$ BEGIN
   REVOKE INSERT,UPDATE,DELETE,TRUNCATE ON public.platform_public_content,public.platform_maintenance_notice FROM staffly_app;
  END IF;
 END $$;
+
+-- Closed accounting versions and correction history are append-only at runtime.
+REVOKE UPDATE,DELETE,TRUNCATE ON public.timesheet_versions,public.timesheet_events FROM staffly_app;
+REVOKE DELETE,TRUNCATE ON public.timesheet_periods FROM staffly_app;
+REVOKE ALL ON public.timesheet_write_locks FROM staffly_app;
+GRANT EXECUTE ON FUNCTION public.staffly_purge_deleted_timesheets(uuid) TO staffly_app;

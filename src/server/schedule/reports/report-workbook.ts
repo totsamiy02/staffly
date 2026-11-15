@@ -6,7 +6,14 @@ type Cell = string | number | Date | null
 
 export function totalCells(report: BuiltReport, key: ReportSheet, columns: Array<{ key: string }>): Array<string | number | null> | null {
   if (key !== 'summary' || !report.config.totals) return null
-  return columns.map(column => column.key === 'shifts' ? report.metrics.shifts : column.key === 'hours' ? report.metrics.hours : null)
+  const totals: Record<string, number | null> = {
+    shifts: report.metrics.shifts,
+    hours: report.metrics.hours,
+    plannedHours: report.metrics.plannedHours,
+    confirmedHours: report.metrics.confirmedShifts ? report.metrics.confirmedHours : null,
+    unconfirmedShifts: report.rows.summary.reduce((sum, row) => sum + Number(row.unconfirmedShifts ?? 0), 0),
+  };
+  return columns.map(column => totals[column.key] ?? null);
 }
 export async function reportWorkbook(report: BuiltReport) {
   const workbook = new ExcelJS.Workbook()
@@ -65,7 +72,7 @@ export async function reportWorkbook(report: BuiltReport) {
       total.font = { name: 'Arial', size: 11, bold: true, color: { argb: ink } }; total.height = 34
       total.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE9ECEF' } }
       total.eachCell({ includeEmpty: true }, cell => { cell.border = { top: { style: 'thin', color: { argb: 'FFBBC1C9' } } } })
-      const label = totals.findIndex(value => value === null)
+      const label = sheet.columns.findIndex(column => reportCatalog.summary.fields.find(field => field.key === column.key)?.type === 'text')
       if (label >= 0) total.getCell(label + 1).value = 'Итого'
     }
     const lastTableRow = worksheet.rowCount

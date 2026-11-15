@@ -1,4 +1,4 @@
-.admin-root .admin-users {
+:is(.admin-root, .admin-console-overlay) .admin-users {
   .admin-table-wrap table { table-layout: auto; }
   .admin-table-wrap th:last-child { width: 1%; }
   .admin-table-wrap td:last-child { text-align: right; padding-right: 16px; }
@@ -10,7 +10,7 @@
   .admin-record-actions .admin-user-actions { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1.3fr); gap: 8px; width: 100%; .admin-btn { min-width: 0; min-height: 42px; padding: 8px; white-space: normal; } }
   .admin-stat { transition: none; &:hover { transform: none; box-shadow: none; } }
 }
-.admin-root .admin-analytics {
+:is(.admin-root, .admin-console-overlay) .admin-analytics {
   container: analytics / inline-size;
   min-width: 0;
   .admin-page-head { align-items: flex-start; gap: 20px; flex-wrap: wrap; p { font-size: 13px; } }
@@ -30,14 +30,14 @@
   .admin-cohort-caption { display: flex; align-items: center; gap: 8px; margin-top: 14px; font-size: 12px; color: var(--admin-muted); }
 }
 @container analytics (max-width:1000px) {
-  .admin-root .admin-analytics {
+  :is(.admin-root, .admin-console-overlay) .admin-analytics {
     .admin-analytics-grid { grid-template-columns: minmax(0,1fr); }
     .admin-lifetime-stats { grid-template-columns: repeat(3,minmax(0,1fr)); gap: 24px 16px; }
     .admin-stats { grid-template-columns: repeat(2,minmax(0,1fr)); }
   }
 }
 @container analytics (max-width:600px) {
-  .admin-root .admin-analytics {
+  :is(.admin-root, .admin-console-overlay) .admin-analytics {
     .admin-panel { padding: 18px; }
     .admin-panel h2 { font-size: 15px; }
     .admin-lifetime-stats { grid-template-columns: repeat(2,minmax(0,1fr)); }

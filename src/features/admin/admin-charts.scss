@@ -1,4 +1,4 @@
-.admin-root .admin-chart {
+:is(.admin-root, .admin-console-overlay) .admin-chart {
   min-width: 0;
   .admin-chart-frame { margin-top: 12px; border-radius: 8px; }
   .admin-chart-frame svg { height: clamp(220px, 20vw, 280px); overflow: visible; }
@@ -13,5 +13,5 @@
   .admin-chart-empty-symbol { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px; background: var(--admin-soft); color: var(--admin-accent); font-size: 20px; margin-bottom: 6px; }
 }
 @keyframes admin-chart-appear { from { opacity: 0; } to { opacity: 1; } }
-@media(max-width:600px) { .admin-root .admin-chart { .admin-chart-frame svg { height: 220px; } .admin-legend { gap: 6px 14px; } .admin-chart-history-note { flex-basis: 100%; margin-left: 0; } } }
-@media(prefers-reduced-motion:reduce) { .admin-root .admin-chart .admin-chart-series { animation: none; } }
+@media(max-width:600px) { :is(.admin-root, .admin-console-overlay) .admin-chart { .admin-chart-frame svg { height: 220px; } .admin-legend { gap: 6px 14px; } .admin-chart-history-note { flex-basis: 100%; margin-left: 0; } } }
+@media(prefers-reduced-motion:reduce) { :is(.admin-root, .admin-console-overlay) .admin-chart .admin-chart-series { animation: none; } }

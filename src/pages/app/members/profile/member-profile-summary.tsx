@@ -1,3 +1,4 @@
+import { confirmedDuration } from '../../../../app/schedule/date-utils.ts'
 import EmploymentPeriods from '../../../../component/ui/employment-periods/employment-periods.tsx'
 import type { MemberProfileData } from '../../../../app/member-profile/types.ts'
 import { formatDuration, formatTime, formatMonth, zonedDateAndTime } from '../../../../app/schedule/date-utils.ts'
@@ -46,8 +47,8 @@ export function ProfileMetrics({ data }: { data: MemberProfileData }) {
   return <section className="member-profile-statistics" aria-label={`Рабочие показатели: ${formatMonth(data.month)}`}>
     <p className="member-profile-period-label">{formatMonth(data.month)}</p>
     <div className="member-profile-metrics">
-      <article className="member-profile-metric--primary"><span><AccessIcon name="history" />Учтено часов</span><strong>{formatDuration(period?.workedMinutes ?? 0)}</strong><small>По расписанию и правкам</small></article>
-      <article><span><ModuleIcon section="events" />Завершено смен</span><strong>{period?.workedShifts ?? 0}</strong><small>За выбранный месяц</small></article>
+      <article className="member-profile-metric--primary"><span><AccessIcon name="history" />Подтверждено часов</span><strong>{confirmedDuration(period?.workedMinutes ?? 0, period?.confirmedShifts ?? 0)}</strong><small>Только подтверждённый факт</small></article>
+      <article><span><ModuleIcon section="events" />Предварительно</span><strong>{formatDuration(period?.estimatedMinutes ?? 0)}</strong><small>Без подтверждения: {period?.pendingShifts ?? 0} смен</small></article>
       <article><span><ModuleIcon section="schedule" />Запланировано</span><strong>{formatDuration(period?.plannedMinutes ?? 0)}</strong><small>{period?.plannedShifts ? `Впереди смен: ${period.plannedShifts}` : 'Будущих смен в месяце нет'}</small></article>
     </div>
     <p className={`member-profile-corrections${overview?.corrections ? ' has-corrections' : ''}`}><AccessIcon name={overview?.corrections ? 'history' : 'check'} />{overview?.corrections ? `Смен с корректировками: ${overview.corrections}` : 'Без корректировок за месяц'}</p>

@@ -30,13 +30,14 @@ const OrganizationDashboard = lazy(() => import('../dashboard/organization-dashb
 const OrganizationMembers = lazy(() => import('../members/organization-members.tsx'))
 const OrganizationSettings = lazy(() => import('../settings/organization/organization-settings.tsx'))
 const SchedulePage = lazy(() => import('../schedule/calendar/schedule-page.tsx'))
+const TimesheetPage = lazy(() => import('../schedule/timesheets/timesheet-page.tsx'))
 const StatisticsPage = lazy(() => import('../schedule/statistics/statistics-page.tsx'))
 const MyWorkTimePage = lazy(() => import('../schedule/time/my-work-time-page.tsx'))
 const DocumentsPage = lazy(() => import('../documents/documents-page.tsx'))
 const RequestsPage = lazy(() => import('../requests/requests-page.tsx'))
 const EventsPage = lazy(() => import('../events/events-page.tsx'))
 
-const modulePermissions:Record<string,Permission[]> = {employees:['members.view'],schedule:['coverage.view','drafts.view','schedule.own','schedule.view','statistics.own','statistics.view','reports.preview','reports.export'],requests:['offers.accept','offers.approve','offers.transfer','offers.swap','vacations.view','vacations.collect','requests.own','requests.view','staffing.respond','staffing.create'],documents:['documents.view'],events:['events.view','events.create','events.edit','events.cancel'],settings:['coverage.manage','organization.edit','schedule.settings','schedule.templates','positions.manage','offers.settings','locations.edit','locations.create','requestTypes.manage']}
+const modulePermissions:Record<string,Permission[]> = {employees:['members.view'],schedule:['timesheets.view','coverage.view','drafts.view','schedule.own','schedule.view','statistics.own','statistics.view','reports.preview','reports.export'],requests:['offers.accept','offers.approve','offers.transfer','offers.swap','vacations.view','vacations.collect','requests.own','requests.view','staffing.respond','staffing.create'],documents:['documents.view'],events:['events.view','events.create','events.edit','events.cancel'],settings:['coverage.manage','organization.edit','schedule.settings','schedule.templates','positions.manage','offers.settings','locations.edit','locations.create','requestTypes.manage']}
 const navigation = [
   ['', 'Главная'], ['employees', 'Сотрудники'], ['schedule', 'Расписание'], ['requests', 'Заявки'], ['events', 'События'], ['documents', 'Документы'], ['settings', 'Настройки'],
 ] as const
@@ -122,6 +123,7 @@ export default function OrganizationLayout() {
         <Route path="schedule/drafts" element={module(<PlanFeatureBoundary organization={organization} feature="planning"><DraftPage organization={organization} /></PlanFeatureBoundary>)} />
         <Route path="schedule/drafts/:draftId" element={module(<DraftPage organization={organization} />)} />
         <Route path="schedule/history" element={!canAccess(organization, 'schedule.history') ? <Navigate to={`/app/organizations/${organization.id}/schedule`} replace /> : module(<SchedulePage key="history" organization={organization} historyMode />)} />
+        <Route path="schedule/timesheet" element={module(<TimesheetPage organization={organization} />)} />
         <Route path="schedule/statistics" element={module(<StatisticsPage organization={organization} />)} />
         <Route path="schedule/work-time" element={module(<MyWorkTimePage organization={organization} />)} />
         <Route path="requests" element={module(<RequestsPage organization={organization} />)} />

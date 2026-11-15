@@ -39,9 +39,16 @@ export const supportResponses:RequestHandler=(request,response,next)=>{
       recorded=true
       const data=body&&typeof body==='object'&&!Array.isArray(body)?body as Record<string,unknown>:{}
       const id=identifier(data.errorId)??securityCorrelationId()??randomUUID()
-      response.set('X-Support-Code',id)
       captureRequestFailure(response.locals.supportError??{name:'ApiError'},request,response.statusCode,id,response.locals.operationsOrganizationId,data.code)
-      return json({...data,errorId:id})
+      if (response.statusCode >= 500) {
+        response.set('X-Support-Code',id)
+        return json({...data,errorId:id})
+      }
+      // Expected validation, access and business conflicts remain observable by
+      // operators, but do not become support incidents in the user's interface.
+      response.removeHeader('X-Support-Code')
+      const { errorId: _errorId, ...publicReply } = data
+      return json(publicReply)
     }
     return json(body)
   }

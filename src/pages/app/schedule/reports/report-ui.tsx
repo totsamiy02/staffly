@@ -10,8 +10,8 @@ export function ReportIcon({ kind }: { kind: 'download' | 'copy' | 'clock' | 'br
 }
 
 export function ReportRules({ compact = false }: { compact?: boolean }) {
-  const rules = [ ['clock', 'Фактическое время, иначе план'], ['break', 'Перерыв включён'], ['cancel', 'Отменённые смены исключены'], ['calendar', 'Будущие смены включены'], ['night', 'Ночная смена относится к местной дате начала в часовом поясе точки'], ['document', 'Неявка даёт 0 часов; отсутствие требует обработки смен'] ] as const
-  return compact ? <div className="report-rules-inline"><ReportIcon kind="info" /><p>Фактические часы, иначе план · Перерыв включён · Отменённые смены исключены · Будущие смены входят в отчёт.<br />Ночная смена относится к местной дате начала в часовом поясе точки. Неявка даёт 0 часов; отсутствие требует обработки смен.</p></div> : <section className="report-rules"><h3>Правила расчёта</h3><ul>{rules.map(([kind, text]) => <li key={kind}><ReportIcon kind={kind} /><span>{text}</span></li>)}</ul></section>
+  const rules = [ ['clock', 'План, предварительная оценка и факт — отдельно'], ['break', 'Перерыв включён'], ['cancel', 'Отменённые смены исключены'], ['calendar', 'Будущие смены включены'], ['night', 'Ночная смена относится к местной дате начала в часовом поясе точки'], ['document', 'Неявка даёт 0 часов; отсутствие требует обработки смен'] ] as const
+  return compact ? <div className="report-rules-inline"><ReportIcon kind="info" /><p>План, предварительная оценка и подтверждённый факт — отдельно · Перерыв включён · Отменённые смены исключены · Будущие смены входят в отчёт.<br />Ночная смена относится к местной дате начала в часовом поясе точки. Неявка даёт 0 часов; отсутствие требует обработки смен.</p></div> : <section className="report-rules"><h3>Правила расчёта</h3><ul>{rules.map(([kind, text]) => <li key={kind}><ReportIcon kind={kind} /><span>{text}</span></li>)}</ul></section>
 }
 
 export function ReportSheets({ config, selected, onSelect, onToggle }: { config: ReportConfig; selected: ReportSheet; onSelect: (key: ReportSheet) => void; onToggle: (key: ReportSheet, enabled: boolean) => void }) {
@@ -19,13 +19,13 @@ export function ReportSheets({ config, selected, onSelect, onToggle }: { config:
 }
 
 export function ReportMetrics({ result }: { result?: ReportPreview }) {
-  return <div className="report-metrics" aria-label="Итоги всего отчёта"><span><strong>{result?.metrics.employees ?? '—'}</strong> сотрудников</span><span><strong>{result?.metrics.shifts ?? '—'}</strong> смен</span><span><strong>{result ? reportNumber(result.metrics.hours) : '—'} ч</strong> учтено</span></div>
+  return <div className="report-metrics" aria-label="Итоги всего отчёта"><span><strong>{result?.metrics.employees ?? '—'}</strong> сотрудников</span><span><strong>{result?.metrics.shifts ?? '—'}</strong> смен</span><span><strong>{result?.metrics.confirmedShifts ? reportNumber(result.metrics.confirmedHours) : '—'} ч</strong> подтверждено</span><span><strong>{result ? reportNumber(result.metrics.hours) : '—'} ч</strong> предварительно</span></div>
 }
 
 export function ReportChecks({ result }: { result: ReportPreview }) {
-  const issues = result.metrics.futureShifts || result.warnings.incompleteName.length
+  const issues = result.metrics.pendingShifts || result.metrics.futureShifts || result.warnings.incompleteName.length
   if (!issues) return null
-  return <section className="report-checks" aria-label="Проверка перед выгрузкой"><h3>Проверка перед выгрузкой</h3>{!!result.metrics.futureShifts && <p className="report-future"><ReportIcon kind="clock" /><span>Будущих смен: {result.metrics.futureShifts} · {reportNumber(result.metrics.futureHours)} ч — включены в итог.</span></p>}{(['incompleteName'] as const).map(key => !!result.warnings[key].length && <details key={key}><summary>Неполное ФИО: {result.warnings[key].length}</summary><ul>{result.warnings[key].map(member => <li key={member.id}>{member.name}</li>)}</ul></details>)}</section>
+  return <section className="report-checks" aria-label="Проверка перед выгрузкой"><h3>Проверка перед выгрузкой</h3>{!!result.metrics.pendingShifts && <p>Без подтверждения после окончания: {result.metrics.pendingShifts} смен. Предварительные часы не являются фактом.</p>}{!!result.metrics.futureShifts && <p className="report-future"><ReportIcon kind="clock" /><span>Будущих смен: {result.metrics.futureShifts} · {reportNumber(result.metrics.futureHours)} ч по плану — включены только в предварительный прогноз.</span></p>}{(['incompleteName'] as const).map(key => !!result.warnings[key].length && <details key={key}><summary>Неполное ФИО: {result.warnings[key].length}</summary><ul>{result.warnings[key].map(member => <li key={member.id}>{member.name}</li>)}</ul></details>)}</section>
 }
 
 // Full identifiers stay available to assistive technology, by hover and by copy.

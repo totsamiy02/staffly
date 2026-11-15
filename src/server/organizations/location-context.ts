@@ -1,3 +1,4 @@
+import { timesheetMutationContext } from '../schedule/timesheets/mutation-context.ts'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import type { RequestHandler } from 'express'
 import { z } from 'zod'
@@ -43,7 +44,11 @@ export const selectLocation: RequestHandler = async (request, _response, next) =
     const location = await prisma.organizationLocation.findFirst({ where: { organizationId, ...(requestedId ? { id: requestedId } : { archivedAt: null }) }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] })
     if (!location) throw new ApiError(404, 'LOCATION_NOT_FOUND', 'Точка не найдена.')
     if (location.archivedAt && membership.role !== 'OWNER') throw new ApiError(404, 'LOCATION_NOT_FOUND', 'Точка закрыта.')
-    locationContext.run({ organizationId, locationId: location.id }, next)
+    const reason = request.get('x-staffly-correction-reason') ?? request.body?.timesheetReason ?? request.body?.changeReason ?? request.body?.reason ?? request.body?.comment ?? ''
+    timesheetMutationContext.run({
+      userId: (request as AuthenticatedRequest).auth!.userId,
+      reason: typeof reason === 'string' ? reason.trim().slice(0, 1000) : '',
+    }, () => locationContext.run({ organizationId, locationId: location.id }, next))
   } catch (error) {
     next(error instanceof z.ZodError ? new ApiError(400, 'VALIDATION_ERROR', 'Некорректная точка организации.') : error)
   }

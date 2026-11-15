@@ -1,3 +1,4 @@
+import { useSearchParams } from 'react-router-dom'
 import AsyncPanel from '../../../../component/ui/async-panel.tsx'
 import Select from '../../../../component/ui/select/select.tsx'
 import { useState } from 'react'
@@ -11,7 +12,8 @@ const months = ['Январь', 'Февраль', 'Март', 'Апрель', '�
 
 export default function MyWorkTimePage({ organization }: { organization: OrganizationSummary }) {
   const initial = monthKeyInZone(new Date(), organization.timezone)
-  const [month, setMonth] = useState(initial)
+  const [params] = useSearchParams()
+  const [month, setMonth] = useState(() => { const value = params.get('month'); return value && /^(20\d{2}|21\d{2})-(0[1-9]|1[0-2])$/.test(value) ? value : initial })
   const [page, setPage] = useState(1)
   const [year, monthNumber] = month.split('-').map(Number)
   const query = useMyWorkTime(organization.id, { from: `${month}-01`, to: `${moveMonth(month, 1)}-01`, page })

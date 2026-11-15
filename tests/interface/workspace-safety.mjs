@@ -53,6 +53,10 @@ export async function runWorkspaceSafety({ prisma, env, root, temporary, output,
               result.screenshots.push(file); result.checks.push({ browser: name, viewport, label, status: 'failed', error: error.message }); await save(); throw new Error(label + ': ' + error.message.slice(0,1200))
             }
           }
+          await check('modal layouts preserve checkbox geometry and readable event and request forms', async () => {
+            const { checkFormLayouts } = await import('./form-layout.mjs')
+            await checkFormLayouts({ page, origin, base, location, output, name, viewport, expect })
+          })
           const dialog = () => page.getByRole('dialog', { name: 'Новое событие', exact: true })
           const leave = () => page.getByRole('dialog', { name: 'Есть несохранённые изменения', exact: true })
           const openEvent = async () => {

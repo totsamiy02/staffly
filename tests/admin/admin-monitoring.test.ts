@@ -188,13 +188,14 @@ describe('Platform administrator boundary and monitoring',()=>{
   const none=await(await browser.request('/api/admin/operations/jobs?search=absent-'+randomUUID())).json();assert.equal(none.total,0);assert.equal(none.summary.length,0)
   await prisma.emailDelivery.delete({where:{id:old.id}})
  })
- it('records the exact public code for direct and thrown 4xx replies, while service failure counts remain 5xx only',async()=>{
+ it('keeps expected 4xx observable internally without showing a public support reference',async()=>{
   const browser=await account();await browser.ready()
   const response=await browser.request('/api/support-probe/'+randomUUID());assert.equal(response.status,409)
-  const body=await response.json();assert.match(body.errorId,/^[0-9a-f-]{36}$/);assert.equal(response.headers.get('x-support-code'),body.errorId)
+  const body=await response.json();assert.equal(body.errorId,undefined);assert.equal(response.headers.get('x-support-code'),null)
   await publishOperationsSnapshot({role:'api',ready:()=>true})
-  const result=await(await browser.request('/api/admin/operations/support?search='+body.errorId)).json();assert.equal(result.total,1);assert.equal(result.items[0].eventCode,'CONCURRENT_UPDATE');assert.equal(result.items[0].route,'/api/support-probe/:id');assert.equal(result.items[0].status,409)
-  assert.equal((await prisma.platformRequestError.findUniqueOrThrow({where:{id:body.errorId}})).status,409)
+  const incident=await prisma.platformRequestError.findFirstOrThrow({where:{userId:browser.userId,eventCode:'CONCURRENT_UPDATE',route:'/api/support-probe/:id'},orderBy:{createdAt:'desc'}})
+  const result=await(await browser.request('/api/admin/operations/support?search='+incident.id)).json();assert.equal(result.total,1);assert.equal(result.items[0].eventCode,'CONCURRENT_UPDATE');assert.equal(result.items[0].route,'/api/support-probe/:id');assert.equal(result.items[0].status,409)
+  assert.equal((await prisma.platformRequestError.findUniqueOrThrow({where:{id:incident.id}})).status,409)
  })
  it('preserves a wrapped provider cause as an allowlisted diagnostic without exposing its message, stack or credentials',async()=>{
   const browser=await account();await browser.ready();const id=randomUUID(),marker='private-provider-password'

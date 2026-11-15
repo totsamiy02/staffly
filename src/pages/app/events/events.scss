@@ -82,3 +82,4 @@
 }
 
 .event-form .event-form-check {display:flex;align-items:flex-start;gap:10px;padding:14px;border:1px solid var(--theme-border,#e7e7e7);border-radius:11px;background:var(--theme-surface-muted,#fafafa);}.event-form-check input[type=checkbox]{width:17px;height:17px;flex:0 0 17px;margin-top:3px;}.event-form-check small{display:block;margin-top:4px;font-size:11px;font-weight:400;color:var(--theme-muted,#7d8490);line-height:1.6;}
+.event-form-dialog .event-form label > span { font-weight: 500; }

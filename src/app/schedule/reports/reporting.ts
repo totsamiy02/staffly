@@ -4,8 +4,8 @@ export type ReportField = { key: string; title: string; type: 'text' | 'number' 
 const field = (key: string, title: string, type: ReportField['type'] = 'text', width = 24): ReportField => ({ key, title, type, width })
 const identity = [field('name', 'Полные ФИО', 'text', 36), field('memberId', 'ID сотрудника (технический)', 'text', 38)]
 export const reportCatalog: Record<ReportSheet, { title: string; fields: ReportField[] }> = {
-  summary: { title: 'Сводка', fields: [...identity, field('locations', 'Заведение', 'text', 30), field('positions', 'Должности на сменах', 'text', 30), field('status', 'Статус сотрудника'), field('shifts', 'Количество назначений', 'number'), field('hours', 'Часы с учётом результата', 'hours')] },
-  shifts: { title: 'Смены', fields: [...identity, field('id', 'ID смены (технический)', 'text', 38), field('location', 'Точка'), field('timezone', 'Часовой пояс'), field('position', 'Должность на смене'), field('start', 'Начало (факт или план)', 'datetime'), field('end', 'Конец (факт или план)', 'datetime'), field('break', 'Перерыв по графику, мин', 'number'), field('minutes', 'Длительность, мин', 'number'), field('hours', 'Часы с учётом результата', 'hours'), field('state', 'Результат / состояние'), field('comment', 'Комментарий к смене', 'text', 48)] },
+  summary: { title: 'Сводка', fields: [...identity, field('locations', 'Заведение', 'text', 30), field('positions', 'Должности на сменах', 'text', 30), field('status', 'Статус сотрудника'), field('shifts', 'Количество назначений', 'number'), field('plannedHours', 'План, ч', 'hours'), field('hours', 'Предварительно, ч', 'hours'), field('confirmedHours', 'Подтверждено, ч', 'hours'), field('unconfirmedShifts', 'Без подтверждения, смен', 'number')] },
+  shifts: { title: 'Смены', fields: [...identity, field('id', 'ID смены (технический)', 'text', 38), field('location', 'Точка'), field('timezone', 'Часовой пояс'), field('position', 'Должность на смене'), field('plannedStart', 'План: начало', 'datetime'), field('plannedEnd', 'План: конец', 'datetime'), field('actualStart', 'Отметка прихода', 'datetime'), field('actualEnd', 'Отметка ухода', 'datetime'), field('start', 'Расчёт: начало', 'datetime'), field('end', 'Расчёт: конец', 'datetime'), field('break', 'Перерыв по графику, мин', 'number'), field('actualBreak', 'Перерыв по факту, мин', 'number'), field('minutes', 'Предварительно, мин', 'number'), field('plannedHours', 'План, ч', 'hours'), field('hours', 'Предварительно, ч', 'hours'), field('confirmedHours', 'Подтверждено, ч', 'hours'), field('source', 'Источник часов'), field('state', 'Результат / состояние'), field('comment', 'Комментарий к смене', 'text', 48)] },
   absences: { title: 'Отсутствия', fields: [...identity, field('locations', 'Заведения в области отсутствия', 'text', 36), field('id', 'ID отсутствия (технический)', 'text', 38), field('type', 'Тип'), field('start', 'Исходное начало', 'date'), field('end', 'Исходный конец', 'date'), field('overlapStart', 'Начало пересечения', 'date'), field('overlapEnd', 'Конец пересечения', 'date'), field('days', 'Календарных дней в периоде', 'number'), field('source', 'Основание', 'text', 32), field('comment', 'Комментарий', 'text', 48)] },
   parameters: { title: 'Параметры', fields: [field('parameter', 'Параметр', 'text', 38), field('value', 'Значение', 'text', 100)] },
 }
@@ -13,7 +13,7 @@ export type ReportConfig = { layout?: 'report' | 'table'; sheets: Array<{ key: R
 /** Older saved templates silently lose the retired field; a single-column sheet stays usable. */
 export function normalizeReportConfig(config: ReportConfig): ReportConfig {
   return { ...config, sheets: config.sheets.map(sheet => {
-    const columns = sheet.columns.filter(column => column.key !== 'personnelNumber')
+    const columns = sheet.columns.filter(column => column.key !== 'personnelNumber').map(column => column.key === 'hours' && column.title === 'Часы с учётом результата' ? { ...column, title: 'Предварительно, ч' } : column)
     return { ...sheet, columns: !columns.length && columns.length !== sheet.columns.length ? [{ key: 'name', title: reportCatalog.summary.fields[0].title }] : columns }
   }) }
 }
@@ -39,7 +39,7 @@ export type ReportInput = { from: string; to: string; locationIds: string[]; mem
 export type ReportTemplate = { id: string; name: string; config: ReportConfig; canManage: boolean }
 export type ReportPreview = {
   generatedAt: string
-  metrics: { employees: number; shifts: number; minutes: number; hours: number; futureShifts: number; futureHours: number }
+  metrics: { employees: number; shifts: number; minutes: number; hours: number; futureShifts: number; futureHours: number; plannedHours: number; confirmedHours: number; confirmedShifts: number; pendingShifts: number }
   warnings: { incompleteName: Array<{ id: string; name: string }> }
   sheets: Array<{ key: ReportSheet; title: string; columns: Array<ReportField>; rows: Array<Array<string | number | null>>; total: number; totals: Array<string | number | null> | null }>
 }

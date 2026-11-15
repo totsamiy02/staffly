@@ -141,7 +141,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       headers: { ...(options.body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}),
     })
-    return guardRequest(async () => readJson<T>(await requestWithSession(execute, () => tokenRef.current, refresh)), { mutation: (options.method ?? 'GET') !== 'GET', signal: options.signal })
+    return guardRequest(async () => readJson<T>(await requestWithSession(execute, () => tokenRef.current, refresh), { notifySubscription: (options.method ?? 'GET') !== 'GET' }), { mutation: (options.method ?? 'GET') !== 'GET', signal: options.signal })
   }, [refresh])
 
   const uploadImage = useCallback(async <T,>(path: string, file: File): Promise<T> => {
@@ -152,12 +152,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       headers: { 'Content-Type': file.type, ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: file,
     })
-    return guardRequest(async () => readJson<T>(await requestWithSession(execute, () => tokenRef.current, refresh)), { mutation: true })
+    return guardRequest(async () => readJson<T>(await requestWithSession(execute, () => tokenRef.current, refresh), { notifySubscription: true }), { mutation: true })
   }, [refresh])
 
   const uploadFile = useCallback(async <T,>(path: string, file: File): Promise<T> => {
     const execute = (token: string | null) => fetch(`/api${path}`, { method: 'PUT', signal: requestSignal(undefined, 120000), credentials: 'same-origin', headers: { 'Content-Type': documentMime(file.name) || file.type || 'application/octet-stream', 'X-File-Name': encodeURIComponent(file.name), ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: file })
-    return guardRequest(async () => readJson<T>(await requestWithSession(execute, () => tokenRef.current, refresh)), { mutation: true })
+    return guardRequest(async () => readJson<T>(await requestWithSession(execute, () => tokenRef.current, refresh), { notifySubscription: true }), { mutation: true })
   }, [refresh])
 
   const downloadFile = useCallback((path: string, fileName: string, method: 'GET' | 'POST' = 'GET', body?: unknown) => guardRequest(async () => {

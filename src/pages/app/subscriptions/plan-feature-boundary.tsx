@@ -1,3 +1,4 @@
+import { RequestErrorState } from '../../../component/ui/request-error-message.tsx'
 import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import type { OrganizationSummary } from '../../../app/organizations/types.ts'
@@ -9,6 +10,8 @@ export default function PlanFeatureBoundary({ organization, feature, children }:
   const subscription = useSubscription(), [opened, setOpened] = useState(false)
   // Published discussions also admit individual recipients without manager
   // permissions. The page/API checks their access to the particular draft.
+  if (subscription.pending) return <div className="route-loading" role="status">Проверяем доступ…</div>
+  if (subscription.error) return <RequestErrorState error={subscription.error} onRetry={() => subscription.refresh?.()} />
   if (subscription.available(feature)) return children
   const permitted = feature === 'reports' ? canAccess(organization, 'reports.preview') || canAccess(organization, 'reports.export') : feature === 'customRoles' ? !!organization.owner : canAccess(organization, 'coverage.view') || canAccess(organization, 'drafts.view')
   if (!permitted) return <div className="app-state"><h2>Раздел недоступен</h2><p>Обратитесь к администратору организации.</p></div>

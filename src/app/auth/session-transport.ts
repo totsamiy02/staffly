@@ -15,7 +15,7 @@ const serviceMessages: Record<string, string> = {
   YANDEX_DISABLED: 'Вход через Яндекс пока недоступен.',
 }
 
-export async function readJson<T>(response: Response): Promise<T> {
+export async function readJson<T>(response: Response, { notifySubscription = false }: { notifySubscription?: boolean } = {}): Promise<T> {
   if (response.status === 204) return undefined as T
   const text = await response.text()
   let parsed: unknown
@@ -24,7 +24,9 @@ export async function readJson<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const fallback = response.status === 401 ? 'Сессия завершена. Войдите в аккаунт снова.' : response.status === 403 ? 'Недостаточно прав для этого действия.' : response.status === 404 ? 'Запрошенные данные не найдены.' : response.status === 429 ? 'Слишком много запросов. Подождите немного и повторите попытку.' : response.status >= 500 ? 'Сервис временно недоступен. Попробуйте немного позже.' : 'Не удалось выполнить запрос.'
     const reference=data.errorId??response.headers.get('x-support-code')
-    const errorId = typeof reference === 'string' && supportIdPattern.test(reference) ? reference : reportClientFailure('INVALID_RESPONSE')
+    const errorId = response.status >= 500
+      ? typeof reference === 'string' && supportIdPattern.test(reference) ? reference : reportClientFailure('INVALID_RESPONSE')
+      : undefined
     const code = typeof data.code === 'string' && /^[A-Z][A-Z0-9_]{0,79}$/.test(data.code) ? data.code : undefined
     // Only known service messages may replace the generic 5xx message. Never show
     // an upstream exception, SQL, stack trace, or proxy response to the user.
@@ -38,7 +40,7 @@ export async function readJson<T>(response: Response): Promise<T> {
     if (retryAfter) error.retryAfterMs = Math.min(30000, Math.max(0, Number.isFinite(Number(retryAfter)) ? Number(retryAfter) * 1000 : Date.parse(retryAfter) - Date.now())) || undefined
     if (typeof window !== 'undefined' && ['SUBSCRIPTION_FEATURE_REQUIRED', 'SUBSCRIPTION_LIMIT_REACHED', 'SUBSCRIPTION_EXPIRED', 'ORGANIZATION_STORAGE_QUOTA'].includes(data.code ?? '')) {
       const organizationId = /\/organizations\/([0-9a-f-]{36})/.exec(response.url)?.[1]
-      if (organizationId) window.dispatchEvent(new CustomEvent('staffly:subscription-required', { detail: { organizationId, ...(data.errors && typeof data.errors === 'object' ? data.errors : {}), ...(data.code === 'ORGANIZATION_STORAGE_QUOTA' ? { kind: 'storage' } : {}), message: error.message } }))
+      if (organizationId) window.dispatchEvent(new CustomEvent('staffly:subscription-required', { detail: { organizationId, ...(data.errors && typeof data.errors === 'object' ? data.errors : {}), ...(data.code === 'ORGANIZATION_STORAGE_QUOTA' ? { kind: 'storage' } : {}), message, interactive: notifySubscription } }))
     }
     throw error
   }

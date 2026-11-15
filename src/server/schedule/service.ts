@@ -1,3 +1,4 @@
+import { calculateWorkTime, intervalMinutes } from '../../shared/work-time.ts'
 import { assertPartialShiftBounds } from './partial-shift-bounds.ts'
 import {requireLocationInPlan} from '../subscriptions/access.ts'
 import {checkOpeningHours} from './opening-hours.ts'
@@ -35,7 +36,7 @@ function displayName(user: { firstName: string | null; lastName: string | null; 
 }
 
 export function countedMinutes(start: Date, end: Date) {
-  return Math.max(0, Math.floor((end.getTime() - start.getTime()) / 60_000))
+  return intervalMinutes(start, end)
 }
 
 export function validateDuration(startAt: Date, endAt: Date, breakMinutes: number) {
@@ -74,8 +75,7 @@ export async function assertNoApprovedAbsence(organizationId: string, memberId: 
 }
 
 export function publicShift(shift: WorkShift & { member: { user: { email: string; firstName: string | null; lastName: string | null; middleName: string | null; avatarFileId: string | null } }; _count?: { adjustments: number }; offerReservation?: { offer: { id: string; kind: string; status: string } } | null }) {
-  const effectiveStartAt = shift.actualStartAt ?? shift.scheduledStartAt
-  const effectiveEndAt = shift.actualEndAt ?? shift.scheduledEndAt
+  const accounting = calculateWorkTime(shift)
   return {
     id: shift.id,
     updatedAt: shift.updatedAt,
@@ -95,7 +95,8 @@ export function publicShift(shift: WorkShift & { member: { user: { email: string
     actualStartAt: shift.actualStartAt,
     actualEndAt: shift.actualEndAt,
     actualBreakMinutes: shift.actualBreakMinutes,
-    effectiveMinutes: shift.attendance==='NO_SHOW'?0:countedMinutes(effectiveStartAt, effectiveEndAt),
+    effectiveMinutes: accounting.estimatedMinutes,
+    accounting,
     description: shift.description,
     status: shift.status,
     cancelledAt: shift.cancelledAt,

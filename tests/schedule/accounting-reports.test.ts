@@ -64,7 +64,8 @@ after(async () => {
 describe('accounting export rules and security', { concurrency: false }, () => {
   it('matches the reference: four shifts, 1710 minutes, actual time and paid breaks', async () => {
     const report = await buildReport(people.owner.id, orgId, input(), now)
-    assert.deepEqual(report.metrics, { employees: 2, shifts: 4, minutes: 1710, hours: 28.5, futureShifts: 2, futureHours: 16 })
+    assert.equal(report.rows.summary.every(row => row.confirmedHours === null), true, 'Legacy ranges without explicit confirmation remain estimates')
+    assert.deepEqual(report.metrics, { employees: 2, shifts: 4, minutes: 1710, hours: 28.5, futureShifts: 2, futureHours: 16, plannedHours: 31.5, confirmedHours: 0, confirmedShifts: 0, pendingShifts: 2 })
     assert.deepEqual(report.rows.summary.filter(row => row.memberId === people.anna.memberId).map(row => row.hours).sort((a,b)=>Number(a)-Number(b)), [5, 8])
     assert.equal(report.rows.summary.filter(row => row.memberId === people.anna.memberId).length, 2)
     assert.equal(report.rows.summary.find(row => row.memberId === people.ivan.memberId)?.hours, 15.5)

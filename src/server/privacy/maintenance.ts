@@ -17,6 +17,7 @@ async function purgeOrganization(tx: Prisma.TransactionClient, organizationId: s
   const scope = { organizationId }
   // Explicit ordering for Restrict relations. The final delete cascades the
   // remaining tenant-only tables, including the protected resource budget.
+  await tx.$executeRaw`SELECT public.staffly_purge_deleted_timesheets(${organizationId}::uuid)`
   await tx.accountNotification.deleteMany({ where: scope })
   await tx.emailDelivery.deleteMany({ where: scope })
   await tx.reportExport.deleteMany({ where: scope })

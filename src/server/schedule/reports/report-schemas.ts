@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { reportConfigError, reportSheets, normalizeReportConfig } from '../../../app/schedule/reports/reporting.ts'
 
 export const reportConfigSchema = z.object({
-  sheets: z.array(z.object({ key: z.enum(reportSheets), enabled: z.boolean(), columns: z.array(z.object({ key: z.string().max(40), title: z.string().trim().min(1).max(80) }).strict()).max(20) }).strict()).min(1).max(4),
+  sheets: z.array(z.object({ key: z.enum(reportSheets), enabled: z.boolean(), columns: z.array(z.object({ key: z.string().max(40), title: z.string().trim().min(1).max(80) }).strict()).max(32) }).strict()).min(1).max(4),
   totals: z.boolean(),
   layout: z.enum(['report', 'table']).optional(),
 }).strict().transform(normalizeReportConfig).superRefine((value, context) => { const error = reportConfigError(value); if (error) context.addIssue({ code: 'custom', message: error }) })

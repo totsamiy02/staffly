@@ -1,3 +1,5 @@
+import { timesheetDatabaseError } from './schedule/timesheets/errors.ts'
+import timesheetRouter from './schedule/timesheets/routes.ts'
 import { publicContentRouter,maintenanceWriteGate } from './public-content.ts'
 import { createSiteRouter } from './site/router.ts'
 import { organizationServiceGate,suspendedWriteError } from './organizations/service-state.ts'
@@ -154,6 +156,7 @@ app.use('/api', (_request, response, next) => { response.set('Cache-Control', 'n
 app.use('/api', documentsRouter)
 app.use('/api', eventsRouter)
 app.use('/api', teamPlanningRouter)
+app.use('/api', timesheetRouter)
 app.use('/api', (_request, response) => response.status(404).json({ code: 'API_NOT_FOUND', message: 'Запрошенный адрес не найден.' }))
 app.use(createSiteRouter({ origin: appUrl, publications: async () => (await databasePool.query('SELECT key,title,left(body,1000) AS body,metadata FROM public.platform_public_content')).rows }))
 app.use((error: unknown, request: express.Request, response: express.Response, _next: express.NextFunction) => {
@@ -161,6 +164,8 @@ app.use((error: unknown, request: express.Request, response: express.Response, _
   if (error && typeof error === 'object' && 'type' in error && ['entity.parse.failed', 'request.aborted', 'request.size.invalid'].includes(String(error.type))) {
     response.status(400).json({ code: 'INVALID_BODY', message: 'Некорректное тело запроса.' }); return
   }
+  const timesheetFailure = timesheetDatabaseError(error)
+  if (timesheetFailure) { response.status(409).json(timesheetFailure); return }
   if(suspendedWriteError(error)){response.status(423).json({code:'ORGANIZATION_SUSPENDED',message:'Работа организации приостановлена. Обратитесь к владельцу или в поддержку.'});return}
   const errorId = securityCorrelationId() ?? randomUUID()
   if (!(error instanceof ApiError)&&isDatabaseBusy(error)) {

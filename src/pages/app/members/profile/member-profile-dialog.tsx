@@ -1,3 +1,4 @@
+import { WorkTimeTotals } from '../../schedule/time/work-time-totals.tsx'
 import MemberPersonnel from './member-personnel.tsx'
 import { AccessIcon } from '../../settings/access/access-elements.tsx'
 import AsyncPanel from '../../../../component/ui/async-panel.tsx'
@@ -16,7 +17,7 @@ import type { ProfileSection } from '../../../../app/member-profile/types.ts'
 import { useLocations } from '../../../../app/organizations/queries.ts'
 import type { OrganizationSummary } from '../../../../app/organizations/types.ts'
 import type { ShiftDetails } from '../../../../app/schedule/types.ts'
-import { formatDuration, formatTime, zonedDateAndTime } from '../../../../app/schedule/date-utils.ts'
+import { formatTime, zonedDateAndTime } from '../../../../app/schedule/date-utils.ts'
 import Avatar from '../../../../component/ui/avatar/avatar.tsx'
 import RoleBadge from '../../../../component/ui/role-badge/role-badge.tsx'
 import Select from '../../../../component/ui/select/select.tsx'
@@ -86,11 +87,11 @@ export default function MemberProfileDialog({ organization, memberId, initialLoc
       {section === 'overview' && data.overview && <><MemberPersonnel organizationId={organization.id} memberId={memberId} locationId={pointId} own={data.own}/>{data.capabilities.time ? <ProfileMetrics data={data} /> : <ProfileWorkplaces data={data} />}<ProfileUpcoming data={data} timezone={timeZone} onOpen={openShift} onSchedule={openSchedule} />
       {(data.overview.pendingRequests !== null) && <section className="member-profile-block member-profile-attention" aria-label="Документы и заявки">{data.overview.pendingRequests !== null && <button type="button" className="member-profile-row" onClick={() => { selectSection('requests'); setRequestState('pending') }}><ModuleIcon section="requests" /><strong>Заявки</strong><span className={`member-profile-status ${data.overview.pendingRequests ? 'is-pending' : 'is-success'}`}><AccessIcon name={data.overview.pendingRequests ? 'history' : 'check'} />{data.overview.pendingRequests ? `На рассмотрении: ${data.overview.pendingRequests}` : 'Нет ожидающих'}</span><AccessIcon name="chevron" /></button>}</section>}{data.overview.nextAbsence && <section className="member-profile-absence"><AccessIcon name="absence" /><div><span>Следующее отсутствие</span><strong>{dateLabel(data.overview.nextAbsence.startDate)}–{dateLabel(data.overview.nextAbsence.endDate)}</strong><small>{absenceLabels[data.overview.nextAbsence.type] ?? 'Отсутствие'}</small></div></section>}</>}
       {section === 'time' && data.time && <>
-        <div className="member-profile-time-summary"><div><span>Учтено за месяц</span><strong>{formatDuration(data.time.period?.workedMinutes ?? 0)}</strong></div><div><span>Завершено смен</span><strong>{data.time.period?.workedShifts ?? 0}</strong></div><p>По расписанию и правкам руководителя</p></div>
-        {data.time.history.length ? <div className="member-profile-table-scroll"><table className="member-profile-table"><thead><tr><th>Дата</th><th>Смена по плану</th><th>Учтено</th><th>Источник</th><th><span className="member-profile-sr-only">Действия со сменой</span></th></tr></thead><tbody>{data.time.history.map(item => <tr key={item.id}>
+        <WorkTimeTotals metrics={data.time.period} />
+        {data.time.history.length ? <div className="member-profile-table-scroll"><table className="member-profile-table"><thead><tr><th>Дата</th><th>Смена по плану</th><th>Расчёт и состояние</th><th>Источник</th><th><span className="member-profile-sr-only">Действия со сменой</span></th></tr></thead><tbody>{data.time.history.map(item => <tr key={item.id}>
           <td data-label="Дата"><strong>{dateLabel(item.scheduledStartAt, timeZone)}</strong><small>{new Date(item.scheduledStartAt).toLocaleDateString('ru-RU', { timeZone, weekday: 'long' })}</small></td>
           <td data-label="Смена по плану">{formatTime(item.scheduledStartAt, timeZone)}–{formatTime(item.scheduledEndAt, timeZone)}</td>
-          <td data-label="Учтено"><strong className={item.status === 'CANCELLED' || item.attendance === 'NO_SHOW' ? 'member-profile-value--muted' : undefined}>{item.status === 'CANCELLED' ? 'Отменена' : item.attendance === 'NO_SHOW' ? 'Неявка' : accountedTimeLabel(item, timeZone)}</strong></td>
+          <td data-label="Расчёт и состояние"><strong className={item.status === 'CANCELLED' || item.attendance === 'NO_SHOW' ? 'member-profile-value--muted' : undefined}>{item.status === 'CANCELLED' ? 'Отменена' : item.attendance === 'NO_SHOW' ? 'Неявка' : accountedTimeLabel(item, timeZone)}</strong></td>
           <td data-label="Источник"><span className="member-profile-source">{item.adjusted || item.actualStartAt ? 'Правка' : 'Расписание'}</span></td>
           <td className="member-profile-table__actions"><div className="member-profile-time-actions"><TimeCorrectionAction shift={item} locationId={pointId} />{data.capabilities.schedule && <button type="button" className="member-profile-details-action" aria-label={`Открыть смену ${profileDate(item.scheduledStartAt, timeZone)}`} onClick={() => openShift(item.id)}>Подробнее<AccessIcon name="chevron" /></button>}</div></td>
         </tr>)}</tbody></table></div> : <div className="member-profile-block"><ProfileEmpty icon="schedule" title="В этом месяце смен нет" description="Выберите другой месяц или точку, чтобы посмотреть историю." /></div>}

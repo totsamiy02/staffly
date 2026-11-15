@@ -28,3 +28,21 @@ button.time-correction-action {position:relative;z-index:2;pointer-events:auto;d
 @media(max-width:600px) { .request-modal.document-dialog.time-correction-dialog>header {padding:18px;} .time-correction-form .staffly-segmented>button {flex:1 1 40%;} .dashboard-home .dashboard-shift:has(.time-correction-action) {grid-template-columns:85px minmax(0,1fr) 12px; .time-correction-action {grid-column:2;grid-row:2;justify-self:start;} >svg {grid-column:3;grid-row:1;} } }
 
 .time-correction-person>div {min-width:0;overflow-wrap:anywhere;}
+
+.request-modal.document-dialog.time-correction-dialog {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  > header { flex: none; }
+  .time-correction-form { display: flex; flex: 1; flex-direction: column; gap: 0; min-height: 0; overflow: hidden; padding: 0; }
+  .time-correction-scroll { display: grid; gap: 16px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 20px 24px; }
+  .time-correction-result { padding: 14px 0; border-width: 1px 0; border-radius: 0; background: transparent; }
+  .time-correction-restore { color: var(--theme-text, #555); border-color: var(--theme-border, #ddd); background: var(--theme-surface, #fff); }
+  .time-correction-form > footer { flex: none; margin: 0; padding: 14px 24px; border-top: 1px solid var(--theme-border, #ddd); background: var(--theme-surface, #fff); }
+}
+@media (max-width: 600px) {
+  .request-modal.document-dialog.time-correction-dialog {
+    .time-correction-scroll { padding: 16px 18px; }
+    .time-correction-form > footer { padding: 12px 18px; }
+  }
+}

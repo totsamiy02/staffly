@@ -1,37 +1,107 @@
-import { useSubscriptionDetails } from '../../../app/subscriptions/queries.ts'
 import { useEffect, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useSubscriptionDetails } from '../../../app/subscriptions/queries.ts'
 import type { OrganizationSummary } from '../../../app/organizations/types.ts'
 import { featureLabels, featurePlans, plans } from '../../../app/subscriptions/plans.ts'
 import { SubscriptionContext, type PlanNotice } from '../../../app/subscriptions/context.ts'
+import { requestErrorDetails } from '../../../app/auth/request-errors.ts'
 import AnimatedOverlay from '../../../component/ui/modal/animated-overlay.tsx'
 import DocumentDialog from '../../../component/ui/modal/document-dialog.tsx'
-import { PlanIcon } from './plan-ui.tsx'
-export default function SubscriptionProvider({ organization, children }: { organization: OrganizationSummary; children: ReactNode }) {
-  const query = useSubscriptionDetails(organization.id), navigate = useNavigate()
+import './subscription-gate.scss'
+
+type SubscriptionRefusal = PlanNotice & { organizationId: string; interactive?: boolean }
+
+export default function SubscriptionProvider({ organization, children }: {
+  organization: OrganizationSummary
+  children: ReactNode
+}) {
+  const query = useSubscriptionDetails(organization.id)
+  const navigate = useNavigate()
   const subscription = query.data?.subscription ?? organization.subscription
   const [notice, setNotice] = useState<PlanNotice | null>(null)
-  function choose(plan = notice?.requiredPlan ?? (notice?.feature ? featurePlans[notice.feature] : undefined)) {
-    setNotice(null); navigate(`/app/organizations/${organization.id}/settings?section=subscription${plan ? `&plan=${plan}` : ''}`)
-  }
   const refetch = query.refetch
+
+  function choose(plan = notice?.requiredPlan ?? (notice?.feature ? featurePlans[notice.feature] : undefined)) {
+    setNotice(null)
+    navigate(`/app/organizations/${organization.id}/settings?section=subscription${plan ? `&plan=${plan}` : ''}`)
+  }
+
   useEffect(() => {
-    const listener = (event: Event) => { const detail = (event as CustomEvent<PlanNotice & { organizationId: string }>).detail; if (detail.organizationId === organization.id) { setNotice({ ...detail, requiredPlan: detail.requiredPlan ?? (detail.kind === 'storage' ? subscription?.effectivePlan === 'FREE' ? 'TEAM' : subscription?.effectivePlan === 'TEAM' ? 'BUSINESS' : null : undefined) }); void refetch() } }
+    function listener(event: Event) {
+      const detail = (event as CustomEvent<SubscriptionRefusal>).detail
+      if (detail.organizationId !== organization.id) return
+      void refetch()
+      // Focus/reconnect/background queries refresh access without interrupting
+      // the user or reopening a tariff dialog that they already dismissed.
+      if (!detail.interactive) return
+      const storagePlan = detail.kind === 'storage'
+        ? subscription?.effectivePlan === 'FREE' ? 'TEAM' : subscription?.effectivePlan === 'TEAM' ? 'BUSINESS' : null
+        : undefined
+      setNotice({ ...detail, requiredPlan: detail.requiredPlan ?? storagePlan })
+    }
     window.addEventListener('staffly:subscription-required', listener)
     return () => window.removeEventListener('staffly:subscription-required', listener)
   }, [organization.id, refetch, subscription?.effectivePlan])
-  const required = notice?.requiredPlan ?? (notice?.feature ? featurePlans[notice.feature] : null), target = required ? plans[required] : null
+
+  const required = notice?.requiredPlan ?? (notice?.feature ? featurePlans[notice.feature] : null)
+  const target = required ? plans[required] : null
   const owner = !!organization.owner
-  return <SubscriptionContext.Provider value={{ subscription, usage: query.data?.usage, available: feature => !!subscription?.features.includes(feature), request: setNotice, choose }}>
-    {children}
-    {notice && <AnimatedOverlay variant="modal" onClose={() => setNotice(null)}>{close => <DocumentDialog title={notice.feature ? featureLabels[notice.feature] : notice.kind === 'members' ? 'Больше места для команды' : notice.kind === 'locations' ? 'Больше точек для бизнеса' : notice.kind === 'storage' ? 'Больше места для файлов' : 'Продолжите работу с командой'} eyebrow="Возможности Staffly" className="subscription-gate" onClose={close}>
-      <div className="subscription-gate__preview" aria-hidden="true"><div className="subscription-gate__preview-lines"><i/><i/><i/></div><PlanIcon plan={required ?? subscription?.effectivePlan ?? 'TEAM'} /><div className="subscription-gate__preview-bars"><i/><i/><i/><i/></div></div>
-      <p>{notice.message ?? (notice.feature ? `Подключите «${required === 'TEAM' ? 'Команду' : target?.name}» в настройках организации без оплаты.` : 'Владелец организации может выбрать тариф без оплаты.')}</p>
-      {target && <div className="subscription-gate__offer"><div><PlanIcon plan={required!}/><span><strong>{target.name}</strong><small>{target.members} участников · {target.locations} точек · {target.storageLabel}</small></span></div><p>Без оплаты</p></div>}
-      <div className="subscription-gate__organization"><span>Для организации</span><strong>{organization.name}</strong></div>
-      {!owner && <p>Изменение доступа согласует владелец организации.</p>}
-      {notice.kind === 'storage' && <button className="subscription-text-button" onClick={() => { setNotice(null); navigate(`/app/organizations/${organization.id}/documents?section=history`) }}>Управлять файлами</button>}
-      <footer><button className="app-secondary" onClick={close}>{owner ? 'Не сейчас' : 'Понятно'}</button><button className="app-primary" onClick={() => choose()}>Возможности и лимиты</button></footer>
-    </DocumentDialog>}</AnimatedOverlay>}
-  </SubscriptionContext.Provider>
+  const title = notice?.feature ? featureLabels[notice.feature]
+    : notice?.kind === 'members' ? 'Больше места для команды'
+    : notice?.kind === 'locations' ? 'Больше точек для бизнеса'
+    : notice?.kind === 'storage' ? 'Больше места для файлов'
+    : 'Продолжите работу с командой'
+
+  return (
+    <SubscriptionContext.Provider value={{
+      pending: query.isPending,
+      error: query.error,
+      refresh: () => { void refetch() },
+      subscription,
+      usage: query.data?.usage,
+      available: feature => !!subscription?.features.includes(feature),
+      request: setNotice,
+      choose,
+    }}>
+      {children}
+      {notice && (
+        <AnimatedOverlay variant="modal" onClose={() => setNotice(null)}>
+          {close => (
+            <DocumentDialog title={title} eyebrow="Тариф организации" className="subscription-gate" onClose={close}>
+              <p className="subscription-gate__description">
+                {notice.message ? requestErrorDetails(notice.message).message
+                  : notice.feature ? `Функция доступна на тарифе «${target?.name}». Выберите его в настройках организации.`
+                  : 'Выберите подходящий тариф в настройках организации.'}
+              </p>
+              {target && (
+                <section className="subscription-gate__plan" aria-label="Возможности тарифа">
+                  <div className="subscription-gate__plan-heading">
+                    <strong>{target.name}</strong>
+                    <span>Подключение без оплаты</span>
+                  </div>
+                  <dl className="subscription-gate__limits">
+                    <div><dt>Участников</dt><dd>{target.members}</dd></div>
+                    <div><dt>Точек</dt><dd>{target.locations}</dd></div>
+                    <div><dt>Хранилище</dt><dd>{target.storageLabel}</dd></div>
+                  </dl>
+                </section>
+              )}
+              <p className="subscription-gate__organization"><span>Организация</span><strong>{organization.name}</strong></p>
+              {!owner && <p>Изменение доступа согласует владелец организации.</p>}
+              {notice.kind === 'storage' && (
+                <button className="subscription-text-button" onClick={() => {
+                  setNotice(null)
+                  navigate(`/app/organizations/${organization.id}/documents?section=history`)
+                }}>Управлять файлами</button>
+              )}
+              <footer>
+                <button className="app-secondary" onClick={close}>Закрыть</button>
+                <button className="app-primary" onClick={() => choose()}>Перейти к тарифам</button>
+              </footer>
+            </DocumentDialog>
+          )}
+        </AnimatedOverlay>
+      )}
+    </SubscriptionContext.Provider>
+  )
 }

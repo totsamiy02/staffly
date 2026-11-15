@@ -112,3 +112,7 @@ export function shiftsByDate<T extends Pick<WorkShift, 'scheduledStartAt' | 'sch
 export function localDateTimeIso(date: string, time: string, timezone: string) {
   return wallClockToInstant(date, time, timezone).toISOString()
 }
+
+export function confirmedDuration(minutes: number, confirmedShifts: number) {
+  return confirmedShifts ? formatDuration(minutes) : '—';
+}

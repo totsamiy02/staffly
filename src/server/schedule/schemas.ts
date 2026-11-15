@@ -56,7 +56,7 @@ export const statisticsQuery = z.object({
   from: date.optional(),
   to: date.optional(),
   memberState: z.enum(['active', 'all', 'former']).default('active'),
-  sort: z.enum(['name', 'workedMinutes', 'workedShifts', 'averageMinutes', 'plannedMinutes', 'plannedShifts']).default('name'),
+  sort: z.enum(['name', 'workedMinutes', 'workedShifts', 'averageMinutes', 'plannedMinutes', 'plannedShifts', 'estimatedMinutes', 'pendingShifts']).default('name'),
   direction: z.enum(['asc', 'desc']).default('asc'),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(50),

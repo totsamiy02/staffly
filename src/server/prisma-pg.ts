@@ -1,3 +1,4 @@
+import { timesheetMutationContext } from './schedule/timesheets/mutation-context.ts'
 import { PrismaPg } from '@prisma/adapter-pg'
 
 type Adapter = Awaited<ReturnType<PrismaPg['connect']>>
@@ -29,7 +30,27 @@ export class SequentialPrismaPg extends PrismaPg {
   override async connect() {
     const adapter = await super.connect()
     const start = adapter.startTransaction.bind(adapter)
-    adapter.startTransaction = async isolation => serializePgTransaction(await start(isolation))
+    adapter.startTransaction = async isolation => {
+      const transaction = serializePgTransaction(await start(isolation))
+      const context = timesheetMutationContext.getStore()
+      if (context) {
+        try {
+          await transaction.queryRaw({
+            sql: "SELECT set_config('staffly.actor_user_id', $1, true), set_config('staffly.correction_reason', $2, true)",
+            args: [context.userId, context.reason],
+            argTypes: [{ scalarType: 'string', arity: 'scalar' }, { scalarType: 'string', arity: 'scalar' }],
+          })
+        } catch (error) {
+          try {
+            await transaction.executeRaw({ sql: 'ROLLBACK', args: [], argTypes: [] })
+          } finally {
+            await transaction.rollback()
+          }
+          throw error
+        }
+      }
+      return transaction
+    }
     return adapter
   }
 }

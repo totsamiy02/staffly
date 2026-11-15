@@ -1,3 +1,4 @@
+import type { ShiftAccounting } from '../../shared/work-time.ts'
 import type { OrganizationRole } from '../organizations/types.ts'
 
 export type WorkShift = { updatedAt?: string; replacementOfId?: string|null; replacementCutoffAt?: string|null; attendance?:'UNCONFIRMED'|'WORKED'|'PARTIAL'|'NO_SHOW';attendanceReason?:string|null; positionId?: string | null; positionName?: string | null;
@@ -12,6 +13,7 @@ export type WorkShift = { updatedAt?: string; replacementOfId?: string|null; rep
   actualStartAt: string | null
   actualEndAt: string | null
   actualBreakMinutes: number | null
+  accounting?: ShiftAccounting
   effectiveMinutes: number
   description: string | null
   status: 'SCHEDULED' | 'CANCELLED'
@@ -51,6 +53,11 @@ export type WorkTimeMember = {
   active: boolean
   joinedAt: string
   leftAt: string | null
+  estimatedMinutes: number
+  confirmedShifts: number
+  pendingShifts: number
+  futureMinutes: number
+  firstPendingShiftId: string | null
   workedMinutes: number
   workedShifts: number
   averageMinutes: number
@@ -59,7 +66,7 @@ export type WorkTimeMember = {
 }
 
 export type WorkTimeStatistics = {
-  summary: { workedMinutes: number; workedShifts: number; plannedMinutes: number; plannedShifts: number; employees: number }
+  summary: { estimatedMinutes: number; confirmedShifts: number; pendingShifts: number; futureMinutes: number; workedMinutes: number; workedShifts: number; plannedMinutes: number; plannedShifts: number; employees: number }
   members: WorkTimeMember[]
   pagination: { page: number; limit: number; total: number; pages: number }
 }
@@ -68,7 +75,7 @@ export type MemberWorkTime = {
   member: { avatarUrl: string | null; id: string; name: string; role: OrganizationRole; active: boolean }
   period: WorkTimeMember | null
   allTime: WorkTimeMember | null
-  history: Array<{ attendance?: 'UNCONFIRMED' | 'WORKED' | 'PARTIAL' | 'NO_SHOW'; id: string; scheduledStartAt: string; scheduledEndAt: string; actualStartAt: string | null; actualEndAt: string | null; status: 'SCHEDULED' | 'CANCELLED'; minutes: number; plannedMinutes: number; actualMinutes: number | null; breakMinutes: number; actualBreakMinutes: number | null; cancellationReason: string | null; adjusted: boolean; description: string | null }>
+  history: Array<{ accounting: ShiftAccounting; timezone: string; locationId: string; attendance?: 'UNCONFIRMED' | 'WORKED' | 'PARTIAL' | 'NO_SHOW'; id: string; scheduledStartAt: string; scheduledEndAt: string; actualStartAt: string | null; actualEndAt: string | null; status: 'SCHEDULED' | 'CANCELLED'; minutes: number; plannedMinutes: number; actualMinutes: number | null; breakMinutes: number; actualBreakMinutes: number | null; cancellationReason: string | null; adjusted: boolean; description: string | null }>
   pagination: { page: number; limit: number; total: number; pages: number }
   timezone: string
 }

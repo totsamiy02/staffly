@@ -231,6 +231,7 @@ export const permissionCatalog = [
     "group": "Статистика и отчёты",
     "scope": "location"
   },
+  { "key": "timesheets.view", "label": "Просмотр табеля", "group": "Табель", "scope": "location" },
   {
     "key": "reports.preview",
     "label": "Предпросмотр отчётов",
@@ -433,6 +434,7 @@ export const permissionDependencies: Partial<Record<Permission, Permission[]>> =
   'schedule.create':['schedule.view'], 'schedule.edit':['schedule.view'], 'schedule.cancel':['schedule.view'], 'schedule.actual':['schedule.view'], 'schedule.history':['schedule.view'],
   'absences.details':['absences.view'], 'absences.edit':['absences.view'], 'absences.cancel':['absences.view'],
   'requests.create':['requests.own'], 'requests.edit':['requests.own'], 'requests.resolve':['requests.view'], 'requests.attachments':['requests.view'], 'staffing.resolve':['requests.view'],
+  'timesheets.view':['absences.details','members.personnel.view'],
   'reports.export':['reports.preview'], 'reports.templates':['reports.preview'], 'reports.templates.all':['reports.templates'],
   'documents.download':['documents.view'], 'documents.upload':['documents.view'], 'documents.folders':['documents.view'], 'documents.edit':['documents.view'], 'documents.delete':['documents.view'], 'documents.access':['documents.view'], 'documents.assign':['documents.view','documents.control'], 'documents.control':['documents.view'], 'documents.personal.view':['documents.view'], 'documents.personal.edit':['documents.personal.view','documents.edit'],
   'events.create':['events.view'], 'events.edit':['events.view'], 'events.cancel':['events.view'],
