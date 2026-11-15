@@ -2,7 +2,7 @@ import { startBackgroundTask } from '../background-task.ts'
 import { prisma } from '../db.ts'
 import { maintainShiftOffers } from '../schedule/offer-service.ts'
 import { markRequestNoticesRead,publishRequestNotices } from './request-notifications.ts'
-import { loadReviewerContext,reviewersFromContext } from './reviewers.ts'
+import { maintainAttention } from '../attention/reminders.ts'
 import { reconcileShiftRequests } from './shift-conflicts.ts'
 export async function maintainRequests(now=new Date(),shouldContinue=()=>true){
   await maintainShiftOffers(shouldContinue)
@@ -14,13 +14,6 @@ export async function maintainRequests(now=new Date(),shouldContinue=()=>true){
       await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${org.id},1))::text`
       const expired=await tx.organizationRequest.findMany({where:{organizationId:org.id,status:'PENDING',systemCodeSnapshot:{in:['SHIFT_PROPOSAL','STAFFING','STAFFING_RESPONSE']},proposedStartAt:{lte:now}},include:{creator:true},orderBy:[{proposedStartAt:'asc'},{id:'asc'}],take:100})
       for(const r of expired){const changed=await tx.organizationRequest.updateMany({where:{id:r.id,status:'PENDING',updatedAt:r.updatedAt},data:{status:'EXPIRED',cancelledAt:now,resolutionComment:'Предложенное время истекло.'}});if(!changed.count)continue;await tx.requestEvent.create({data:{requestId:r.id,actorMemberId:r.createdByMemberId,type:'EXPIRED',comment:'Автоматическое закрытие: предложенное время истекло.',changes:{automatic:true}}});await markRequestNoticesRead(tx, {requestId:r.id,readAt:null}, now);await publishRequestNotices(tx, [{organizationId:org.id,userId:r.creator.userId,requestId:r.id,type:'REQUEST_CANCELLED',title:'Срок обращения истёк',message:r.typeNameSnapshot}])}
-      const overdue=await tx.organizationRequest.findMany({where:{organizationId:org.id,status:'PENDING',systemCodeSnapshot:{notIn:['STAFFING','STAFFING_RESPONSE']},dueAt:{lte:now},remindedAt:null},orderBy:[{dueAt:'asc'},{id:'asc'}],take:100})
-      if (overdue.length) {
-        const context = await loadReviewerContext(tx, org.id)
-        const notifications = overdue.flatMap(r => reviewersFromContext(context,r).map(m => ({organizationId:org.id,userId:m.userId,requestId:r.id,type:'REQUEST_CREATED' as const,title:'Обращение на рассмотрении',message:r.typeNameSnapshot})))
-        if (notifications.length) await publishRequestNotices(tx, notifications)
-        await tx.organizationRequest.updateMany({where:{id:{in:overdue.map(r=>r.id)}},data:{remindedAt:now}})
-      }
       const campaigns=await tx.vacationCampaign.findMany({where:{organizationId:org.id,closedAt:null,dueAt:{lte:now}},include:{requests:{select:{createdByMemberId:true},distinct:['createdByMemberId']}},orderBy:[{dueAt:'asc'},{id:'asc'}],take:10})
       if (campaigns.length) {
         const missing = campaigns.map(c => { const answered = new Set(c.requests.map(r=>r.createdByMemberId)); return {campaign:c,ids:c.memberIds.filter(id=>!answered.has(id))} })
@@ -32,6 +25,7 @@ export async function maintainRequests(now=new Date(),shouldContinue=()=>true){
         await tx.vacationCampaign.updateMany({where:{id:{in:campaigns.map(c=>c.id)}},data:{closedAt:now}})
       }
     })
+    if (shouldContinue()) await maintainAttention(org.id, now, shouldContinue, 'requests')
   }
 }
 export function startRequestMaintenance(){return startBackgroundTask({name:'Request maintenance',intervalMs:60_000,retryExpiredTransaction:true,run:shouldContinue=>maintainRequests(new Date(),shouldContinue)})}

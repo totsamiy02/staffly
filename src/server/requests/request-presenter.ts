@@ -42,6 +42,8 @@ export function publicRequest(item: RequestViewRow, viewerMemberId: string, acto
     allowsAttachments: snapshot.allowsAttachments ?? item.requestType.allowsAttachments }
   return {
     ...fields, isOwn: own, isAuthor: item.authorMemberId === viewerMemberId,
+    canCompleteTask: item.status === 'APPROVED' && fields.outcome?.kind === 'TASK' && fields.outcome.status === 'OPEN'
+      && (fields.outcome.assignees.includes(viewerMemberId) && hasPermission(actor, 'requests.own', item.locationId) || hasPermission(actor, 'requests.resolve', item.locationId)),
     processLabel: item.absence?.cancelledAt ? 'Отменён' : processLabel({ ...item, startDate: dateText(item.absence?.startDate ?? item.startDate), endDate: dateText(item.absence?.endDate ?? item.endDate) }),
     activeAbsence: item.absence ? { id: item.absence.id, startDate: dateText(item.absence.startDate)!, endDate: dateText(item.absence.endDate)!, cancelledAt: instant(item.absence.cancelledAt), updatedAt: item.absence.updatedAt.toISOString() } : null,
     comment: details ? item.comment : null,

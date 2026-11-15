@@ -7,13 +7,14 @@ export const requestDefinition = z.object({
   visibility: z.enum(['REVIEWERS','TEAM']).default('REVIEWERS'),
   stages: z.array(z.object({ name: z.string().trim().min(2).max(100), memberId: z.uuid().optional(), roleId: z.uuid().optional() }).refine(v=>!!v.memberId !== !!v.roleId,'Выберите человека или роль.')).max(10).default([]),
   deadlineDays: z.number().int().min(1).max(365).default(7),
+  taskDeadlineDays: z.number().int().min(1).max(365).optional(),
   action: z.enum(['REGISTER','NOTIFY','TASK','DOCUMENT']).default('REGISTER'),
   recipientMemberIds: z.array(z.uuid()).max(100).default([]),
 }).superRefine((v,c)=>{const seen=new Set<string>();for(const f of v.fields){if(seen.has(f.key))c.addIssue({code:'custom',message:'Ключи полей должны различаться.'});if(f.when && !seen.has(f.when.field))c.addIssue({code:'custom',message:'Условие должно ссылаться на предыдущее поле.'});if(f.kind==='SELECT'&&!f.options.length)c.addIssue({code:'custom',message:'Добавьте варианты списка.'});seen.add(f.key)}})
 export type RequestDefinition = z.infer<typeof requestDefinition>
 export const requestAnswers = z.record(z.string(), z.union([z.string(), z.number(), z.object({ start: z.string(), end: z.string() })]))
 export type RequestAnswers = z.infer<typeof requestAnswers>
-export const requestOutcome = z.object({ kind: z.enum(['REGISTER','NOTIFY','TASK','DOCUMENT']), status: z.enum(['OPEN','DONE']), text: z.string(), createdAt: z.string().optional(), assignees: z.array(z.string()).default([]) })
+export const requestOutcome = z.object({ kind: z.enum(['REGISTER','NOTIFY','TASK','DOCUMENT']), status: z.enum(['OPEN','DONE']), text: z.string(), createdAt: z.string().optional(), deadline: z.iso.date().optional(), assignees: z.array(z.string()).default([]) })
 export const definitionOf = (value: unknown): RequestDefinition => requestDefinition.parse(value ?? {})
 export function visibleField(field: RequestDefinition['fields'][number], answers: RequestAnswers) { return !field.when || String(answers[field.when.field] ?? '') === field.when.equals }
 const holidays = new Set(['01-01','01-02','01-03','01-04','01-05','01-06','01-07','01-08','02-23','03-08','05-01','05-09','06-12','11-04'])

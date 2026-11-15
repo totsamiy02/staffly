@@ -70,7 +70,9 @@ export type RequestEvent = {
   actorMemberId: string
 }
 export type StaffRequest = RequestMutation & {
+  canTransferReview?: boolean
   canReview?: boolean
+  canCompleteTask?: boolean
   isOwn: boolean
   isAuthor: boolean
   processLabel: string

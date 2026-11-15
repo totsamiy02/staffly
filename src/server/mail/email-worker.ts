@@ -1,31 +1,13 @@
+import { maintainAttention } from '../attention/reminders.ts'
 import { prisma } from '../db.ts'
 import { startBackgroundTask } from '../background-task.ts'
 import { enqueueEmail, processEmailDeliveries } from './email-outbox.ts'
-import { zonedDateAndTime, addDays } from '../../app/schedule/date-utils.ts'
 import { emailDeliveryPaused } from './delivery-control.ts'
 
 export async function scheduleEmailReminders(now = new Date()) {
   const soon = new Date(+now + 86400_000)
-  const documentIds = await prisma.$queryRaw<Array<{id:string}>>`
-    WITH eligible AS (
-      SELECT a.id, row_number() OVER(PARTITION BY d.organization_id ORDER BY a.id) AS turn
-      FROM document_acknowledgements a JOIN documents d ON d.id=a.document_id
-      JOIN organizations o ON o.id=d.organization_id JOIN organization_resource_budgets b ON b.organization_id=o.id
-      JOIN organization_members m ON m.id=a.member_id JOIN users u ON u.id=m.user_id
-      LEFT JOIN organization_locations l ON l.id=d.location_id
-      WHERE a.acknowledged_at IS NULL AND a.cancelled_at IS NULL AND d.deleted_at IS NULL AND o.deleted_at IS NULL AND public.platform_organization_available(o.id)
-      AND m.left_at IS NULL AND u.deleted_at IS NULL AND u.email_notifications_enabled AND u.email_notification_categories->'documents'='true'::jsonb
-      AND b.pending_emails<b.email_queue_limit
-      AND a.deadline=(((${now}::timestamptz AT TIME ZONE COALESCE(l.timezone,o.timezone))::date)+1)
-      AND NOT EXISTS(SELECT 1 FROM email_deliveries e WHERE e.source_key='document-reminder:'||a.id::text||':'||a.deadline::text)
-    ) SELECT id FROM eligible WHERE turn<=25 ORDER BY turn,id LIMIT 250`
-  const documents = documentIds.length ? await prisma.documentAcknowledgement.findMany({where:{id:{in:documentIds.map(r=>r.id)}}, include: { member: true, document: { include: { organization: true, location: true } } } }) : []
-  for (const ack of documents) {
-    const zone = ack.document.location?.timezone ?? ack.document.organization.timezone
-    const tomorrow = addDays(zonedDateAndTime(now.toISOString(),zone).date,1)
-    if (ack.deadline!.toISOString().slice(0,10) !== tomorrow) continue
-    await enqueueEmail(prisma,{ userId:ack.member.userId,organizationId:ack.document.organizationId,sourceKind:'DOCUMENT_REMINDER',sourceId:ack.id,sourceKey:`document-reminder:${ack.id}:${tomorrow}`,category:'documents' })
-  }
+  const organizations = await prisma.organization.findMany({where:{deletedAt:null,OR:[{serviceState:'ACTIVE'},{serviceUntil:{lte:now}}]},select:{id:true}})
+  for (const org of organizations) await maintainAttention(org.id, now, () => true, 'documents')
   const draftIds = await prisma.$queryRaw<Array<{draftId:string;memberId:string}>>`
     WITH eligible AS (
       SELECT r.draft_id AS "draftId",r.member_id AS "memberId",row_number() OVER(PARTITION BY r.organization_id ORDER BY r.draft_id,r.member_id) AS turn

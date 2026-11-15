@@ -1,3 +1,4 @@
+import { attentionQuery, listAttention } from '../attention/service.ts'
 import {getMemberPersonnel,updateMemberPersonnel} from './member-personnel-service.ts'
 import {personnelBody} from '../../shared/member-personnel.ts'
 import { safeError } from '../security/safe-error.ts'
@@ -75,6 +76,11 @@ router.post('/organizations', async (request, response) => {
   const current = auth(request)
   const organization = await createOrganization(current.userId, input)
   response.status(201).json({ organization })
+})
+
+router.get('/organizations/:organizationId/attention', async (request, response) => {
+  const { organizationId } = parse(organizationIdParams, request.params)
+  response.json(await listAttention(auth(request).userId, organizationId, parse(attentionQuery, request.query)))
 })
 
 router.get('/organizations/:organizationId', async (request, response) => {

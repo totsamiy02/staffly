@@ -1,29 +1,23 @@
 import { useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useEmailPreferences } from '../../../../app/notifications/email-preferences-query.ts'
 import { useAuth } from '../../../../app/auth/auth-context.tsx'
-import { emailCategories, type EmailCategory, type EmailPreferences } from '../../../../app/notifications/email-preferences.ts'
+import { emailCategories } from '../../../../app/notifications/email-preferences.ts'
 import ModuleIcon from '../../../../component/ui/module-icon.tsx'
 import AsyncPanel from '../../../../component/ui/async-panel.tsx'
-import { useToast } from '../../../../component/ui/toast/toast-context.ts'
 import DocumentDialog from '../../../../component/ui/modal/document-dialog.tsx'
 import AnimatedOverlay from '../../../../component/ui/modal/animated-overlay.tsx'
 import './email-notification-settings.scss'
 
-type Settings = EmailPreferences & { availableCategories: EmailCategory[] }
-type Change = { enabled?: boolean; categories?: Partial<Record<EmailCategory, boolean>>; confirmDisable?: boolean }
 function MailIcon({ lock = false }: { lock?: boolean }) { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">{lock ? <><rect x="5" y="10" width="14" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3" /></> : <><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m3 6 9 7 9-7" /></>}</svg> }
 function Switch({ checked, disabled, label, onChange }: { checked: boolean; disabled?: boolean; label: string; onChange: () => void }) {
   return <button className="email-switch" type="button" role="switch" aria-checked={checked} aria-label={label} disabled={disabled} onClick={onChange}><span /></button>
 }
-const groups = [{ key: 'schedule', title: 'Расписание', description: 'Ваши смены, предложения и обсуждение графика', icon: 'schedule' }, { key: 'requests', title: 'Заявки и отпуск', description: 'Решения и сбор пожеланий', icon: 'requests' }, { key: 'documents', title: 'Документы', description: 'Ознакомление с назначенными документами', icon: 'documents' }, { key: 'events', title: 'События', description: 'Важные встречи и изменения планов', icon: 'events' }, { key: 'management', title: 'Для руководителей', description: 'Только в пределах вашего доступа', icon: 'employees' }]
+const groups = [{ key: 'schedule', title: 'Расписание', description: 'Ваши смены, предложения и обсуждение графика', icon: 'schedule' }, { key: 'requests', title: 'Заявки и отпуск', description: 'Решения и сбор пожеланий', icon: 'requests' }, { key: 'documents', title: 'Документы', description: 'Ознакомление с назначенными документами', icon: 'documents' }, { key: 'events', title: 'События', description: 'Важные встречи и изменения планов', icon: 'events' }, { key: 'management', title: 'Задачи и управление', description: 'Только в пределах вашего доступа', icon: 'employees' }]
 
 export default function EmailNotificationSettings() {
-  const { user, apiRequest } = useAuth(), cache = useQueryClient()
-  const toast = useToast()
-  const key = ['email-preferences', user?.id]
-  const query = useQuery({ queryKey: key, queryFn: () => apiRequest<Settings>('/profile/email-preferences'), enabled: !!user, staleTime: 60_000 })
+  const { user } = useAuth()
   const [confirm, setConfirm] = useState(false)
-  const mutation = useMutation({ mutationFn: (change: Change) => apiRequest<Settings>('/profile/email-preferences', { method: 'PATCH', body: { ...change, revision: cache.getQueryData<Settings>(key)?.revision ?? 0 } }), onSuccess: (settings, change) => { cache.setQueryData(key, settings); setConfirm(false); toast(change.enabled === true ? 'Рабочие письма включены. Ваш выбор категорий сохранён.' : change.enabled === false ? 'Рабочие письма отключены.' : 'Настройки уведомлений сохранены.', 'success') }, onError: (error) => { toast(error instanceof Error ? error.message : 'Не удалось сохранить настройки уведомлений.', 'error'); void query.refetch() } })
+  const { query, mutation } = useEmailPreferences(() => setConfirm(false))
   const settings = query.data, busy = mutation.isPending
   return <div className="email-settings">
     <header className="email-settings__intro"><span className="email-settings__mail"><MailIcon /></span><div><h2>Уведомления на почту</h2><p>Дополнительный канал. Все уведомления доступны на сайте.</p></div></header>

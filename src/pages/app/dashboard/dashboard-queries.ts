@@ -29,8 +29,6 @@ export function useDashboardRecords(organizationId: string, locationId: string |
   const scope = manager ? 'incoming' : 'mine'
   const params = new URLSearchParams({ locationId: locationId ?? '', pointId })
   const enabled = Boolean(locationId)
-  const requests = useQuery({ ...liveQueryOptions, queryKey: ['requests', organizationId, 'dashboard', scope, pointId, locationId], enabled: enabled && access.requests,
-    queryFn: () => apiRequest<RequestList>(`/organizations/${organizationId}/requests/${scope}?${params}&page=1&pageSize=4`) })
   const pending = useQuery({ ...liveQueryOptions, queryKey: ['requests', organizationId, 'dashboard-pending', scope, pointId, locationId], enabled: enabled && access.requests,
     queryFn: () => apiRequest<RequestList>(`/organizations/${organizationId}/requests/${scope}?${params}&status=PENDING&page=1&pageSize=1`) })
   const documents = useQuery({ ...liveQueryOptions, queryKey: ['documents', organizationId, 'dashboard', pointId, locationId], enabled: enabled && access.documents,
@@ -38,5 +36,5 @@ export function useDashboardRecords(organizationId: string, locationId: string |
   // The directory count is distinct members, not the sum of point memberships.
   const members = useQuery({ ...liveQueryOptions, queryKey: ['organization-members', organizationId, 'dashboard-count', pointId, locationId], enabled: enabled && access.members,
     queryFn: () => apiRequest<{ pagination: { total: number } }>(`/organizations/${organizationId}/members?locationId=${locationId}&directory=true&page=1&pageSize=1${pointId === 'all' ? '' : `&pointId=${pointId}`}`) })
-  return { requests, pending, documents, members }
+  return { pending, documents, members }
 }

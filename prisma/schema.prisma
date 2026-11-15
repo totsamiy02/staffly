@@ -246,6 +246,10 @@ enum AccountNotificationType {
   SHIFT_CANCELLED
   ROLE_CHANGED
   REQUEST_CREATED
+  REQUEST_REMINDER
+  REQUEST_TASK_REMINDER
+  REQUEST_BLOCKED
+  DOCUMENT_REMINDER
   REQUEST_APPROVED
   REQUEST_REJECTED
   REQUEST_CANCELLED
@@ -414,6 +418,7 @@ model StoredFile {
 }
 
 model AccountNotification {
+  attentionDeliveryKey String? @unique @map("attention_delivery_key") @db.VarChar(300)
   timesheetPeriodId String? @map("timesheet_period_id") @db.Uuid
   timesheetPeriod TimesheetPeriod? @relation(fields: [organizationId, timesheetPeriodId], references: [organizationId, id], onDelete: Cascade)
   @@index([timesheetPeriodId], map: "account_notifications_timesheet_period_idx")

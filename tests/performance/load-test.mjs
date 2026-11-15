@@ -18,6 +18,7 @@ import { resolveAdminSuite } from '../interface/admin-suites.mjs'
 // Run: npm run test:load -- --seconds=20
 const root = fileURLToPath(new URL('../../', import.meta.url))
 const options = Object.fromEntries(process.argv.slice(2).map(arg => arg.replace(/^--/, '').split('=')))
+if (options.profile === 'attention' && !options.output) options.output = await mkdtemp(path.join(os.tmpdir(), 'staffly-attention-'))
 if (options.profile === 'admin') options['admin-suite'] = resolveAdminSuite(options)
 const databaseTimezone = options['db-timezone'] ?? 'UTC'
 assert(/^[A-Za-z0-9_+/-]+$/.test(databaseTimezone), 'Invalid database timezone')
@@ -291,6 +292,9 @@ try {
   if (options.profile === 'admin') {
     const { runAdminInterface } = await import('../interface/admin-monitoring.mjs')
     results.admin = await runAdminInterface({ prisma, env, root, temporary, output, options })
+  } else if (options.profile === 'attention') {
+    const { runAttention } = await import('../interface/attention.mjs')
+    results.attention = await runAttention({ prisma, env, root, temporary, output, options, startApi })
   } else if (options.profile === 'timesheet') {
     const { runTimesheet } = await import('../interface/timesheet.mjs')
     results.timesheet = await runTimesheet({ prisma, env, root, temporary, output, options, startApi })

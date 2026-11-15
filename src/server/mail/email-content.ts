@@ -1,3 +1,7 @@
+import { resolveAttentionReminder } from '../attention/reminders.ts'
+import { supportsReviewTransfer } from '../requests/reviewer-transfer.ts'
+import { Prisma } from '../../generated/prisma/client.ts'
+import { requestReadSql } from '../access/request-policy.ts'
 import type { EmailDelivery } from '../../generated/prisma/client.ts'
 import { prisma } from '../db.ts'
 import { ApiError } from '../api-error.ts'
@@ -45,6 +49,13 @@ async function buildWorkEmail(job: EmailDelivery, now: Date): Promise<EmailConte
     const own = shifts.filter(s => { const day = zonedDateAndTime(s.scheduledStartAt.toISOString(),draft.timezone).date; return day >= from && day <= to })
     return make({ title: 'Ваш график опубликован', eyebrow: 'Расписание', intro: `${org} · ${draft.location.name}\n${date(draft.fromDate,'UTC')} — ${date(draft.toDate,'UTC')}`, fields: [...own.slice(0,8).map(s => [date(s.scheduledStartAt,draft.timezone), period(s.scheduledStartAt,s.scheduledEndAt,draft.timezone)] as [string,string]), ['Всего смен', String(own.length)]], action: { label: 'Открыть весь график', path: `${base}/schedule?view=mine&month=${from.slice(0,7)}&location=${draft.locationId}` } })
   }
+  if (job.sourceKind === 'DOCUMENT_REMINDER' && record(job.payload).attention) {
+    const reminder = await prisma.$transaction(db => resolveAttentionReminder(db, actor, record(job.payload).attention, now));
+    if (!reminder) return null;
+    return make({ title: reminder.title, eyebrow: 'Документы', intro: reminder.message,
+      fields: [['Организация и точка', `${org} · ${reminder.locationName}`], ...(reminder.due ? [['Срок', stamp(reminder.due,reminder.timezone)] as [string,string]] : [])],
+      action: { label: reminder.label, path: reminder.path } });
+  }
   if (job.sourceKind === 'DOCUMENT_REMINDER') {
     const ack = await prisma.documentAcknowledgement.findUnique({ where: { id: job.sourceId! }, include: { document: true, member: true } })
     if (!ack || ack.member.userId !== job.userId || ack.acknowledgedAt || ack.cancelledAt || !ack.deadline || ack.document.deletedAt || !canReadDocument(actor,ack.document)) return null
@@ -69,10 +80,20 @@ async function buildWorkEmail(job: EmailDelivery, now: Date): Promise<EmailConte
   if (job.sourceKind !== 'NOTIFICATION') return null
   const n = await prisma.accountNotification.findFirst({ where: { id: job.sourceId!, userId: job.userId, organizationId: actor.organizationId }, include: { shift: true, request: true, document: true, vacationCampaign: true, scheduleDraft: true, shiftOffer: { include: { sourceShift: true, targetShift: true } }, event: { include: { recipients: true, locations: true } }, absence: { include: { member: { include: { user: true, locationMemberships: { where: { leftAt: null } } } } } } } })
   if (!n || n.hiddenAt || +now - +n.createdAt > 2*86400_000) return null
+  if (['REQUEST_REMINDER','REQUEST_TASK_REMINDER','REQUEST_BLOCKED','DOCUMENT_REMINDER'].includes(n.type)) {
+    const reminder = await prisma.$transaction(db => resolveAttentionReminder(db, actor, record(n.emailContext).attention, now));
+    if (!reminder) return null;
+    return make({ title: reminder.title, eyebrow: 'Требует внимания', intro: reminder.message,
+      fields: [['Организация и точка', `${org} · ${reminder.locationName}`], ...(reminder.due ? [['Срок', stamp(reminder.due,reminder.timezone)] as [string,string]] : [])],
+      action: { label: reminder.label, path: reminder.path } });
+  }
   if (job.category === 'actionDigest' && n.type === 'REQUEST_CREATED' && n.request) {
     const r = n.request, permission = r.systemCodeSnapshot === 'VACATION' ? 'vacations.resolve' : ['STAFFING','STAFFING_RESPONSE'].includes(r.systemCodeSnapshot ?? '') ? 'staffing.resolve' : 'requests.resolve'
     if (r.status !== 'PENDING' || !hasPermission(actor,permission,r.locationId) || r.createdByMemberId === actor.id && !hasPermission(actor,'requests.selfResolve',r.locationId)) return null
-    if ((!r.systemCodeSnapshot || r.systemCodeSnapshot === 'VACATION') && !(await stageReviewers(prisma,r)).some(reviewer => reviewer.id === actor.id)) return null
+    if (supportsReviewTransfer(r) && !(await stageReviewers(prisma,r)).some(reviewer => reviewer.id === actor.id)) return null
+    const roles = actor.owner ? [] : await prisma.accessRole.findMany({ where: { organizationId: actor.organizationId }, select: { id: true, systemCode: true } })
+    const readable = await prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT r.id FROM requests r WHERE r.id=${r.id}::uuid AND ${requestReadSql(actor, roles)}`)
+    if (!readable.length) return null
     const p = await point(r.locationId)
     if (!p || p.archivedAt) return null
     return make({ title: 'Заявка ожидает вашего решения', eyebrow: 'Заявки', intro: 'Поступила заявка, по которой требуется ваше решение.', fields: [['Тип заявки',r.typeNameSnapshot], ['Организация и точка',`${org} · ${p.name}`], ...(r.startDate ? [['Период',date(r.startDate,'UTC') + (r.endDate ? ` — ${date(r.endDate,'UTC')}` : '')] as [string,string]] : [])], action: { label: 'Рассмотреть заявку', path: `${base}/requests?tab=incoming&request=${r.id}&location=${r.locationId}` } })

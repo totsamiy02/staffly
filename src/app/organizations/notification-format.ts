@@ -24,8 +24,8 @@ export function formatLegacyNotificationMessage(message: string) {
   return formatNotificationPeriod(new Date(`${y1}-${m1}-${d1}T${h1}:${min1}:00Z`), new Date(`${y2}-${m2}-${d2}T${h2}:${min2}:00Z`), 'UTC')
 }
 
-const typeLabels: Record<string, string> = { SUBSCRIPTION_STATUS: 'Тариф организации', SCHEDULE_DISCUSSION: 'Согласование графика', SHIFT_OFFER_CREATED: 'Расписание', SHIFT_OFFER_APPROVAL: 'Расписание', SHIFT_OFFER_RESULT: 'Расписание', EVENT_PUBLISHED: 'События', EVENT_CHANGED: 'События', EVENT_CANCELLED: 'События', EVENT_STARTED: 'События', DOCUMENT_ASSIGNED: 'Документ', ABSENCE_REPORTED: 'Отсутствие', ABSENCE_CHANGED: 'Отсутствие', ABSENCE_CANCELLED: 'Отсутствие', ORGANIZATION_INVITATION: 'Приглашение', SHIFT_ASSIGNED: 'Расписание', SHIFT_CHANGED: 'Расписание', SHIFT_CANCELLED: 'Расписание', ROLE_CHANGED: 'Доступ', REQUEST_CREATED: 'Заявка', REQUEST_APPROVED: 'Заявка', REQUEST_REJECTED: 'Заявка', REQUEST_CANCELLED: 'Заявка' }
-const stateLabels: Record<string, string> = { AWAITING_APPROVAL: 'Ожидает согласования', COMPLETED: 'Завершено', INVALID: 'Неактуально', REQUIRED: 'Требует ознакомления', ACKNOWLEDGED: 'Ознакомлен', ACCEPTED: 'Принято', REJECTED: 'Отклонено', REVOKED: 'Отозвано', EXPIRED: 'Срок истёк', APPROVED: 'Одобрено', CANCELLED: 'Отменено', PENDING: 'На рассмотрении' }
+const typeLabels: Record<string, string> = { REQUEST_REMINDER: 'Заявка', REQUEST_TASK_REMINDER: 'Задача', REQUEST_BLOCKED: 'Требует внимания', DOCUMENT_REMINDER: 'Документ', SUBSCRIPTION_STATUS: 'Тариф организации', SCHEDULE_DISCUSSION: 'Согласование графика', SHIFT_OFFER_CREATED: 'Расписание', SHIFT_OFFER_APPROVAL: 'Расписание', SHIFT_OFFER_RESULT: 'Расписание', EVENT_PUBLISHED: 'События', EVENT_CHANGED: 'События', EVENT_CANCELLED: 'События', EVENT_STARTED: 'События', DOCUMENT_ASSIGNED: 'Документ', ABSENCE_REPORTED: 'Отсутствие', ABSENCE_CHANGED: 'Отсутствие', ABSENCE_CANCELLED: 'Отсутствие', ORGANIZATION_INVITATION: 'Приглашение', SHIFT_ASSIGNED: 'Расписание', SHIFT_CHANGED: 'Расписание', SHIFT_CANCELLED: 'Расписание', ROLE_CHANGED: 'Доступ', REQUEST_CREATED: 'Заявка', REQUEST_APPROVED: 'Заявка', REQUEST_REJECTED: 'Заявка', REQUEST_CANCELLED: 'Заявка' }
+const stateLabels: Record<string, string> = { AWAITING_APPROVAL: 'Ожидает согласования', COMPLETED: 'Завершено', INVALID: 'Неактуально', REQUIRED: 'Требует ознакомления', ACKNOWLEDGED: 'Ознакомлен', ACCEPTED: 'Принято', REJECTED: 'Отклонено', REVOKED: 'Отозвано', EXPIRED: 'Срок истёк', APPROVED: 'Одобрено', CANCELLED: 'Отменено', OPEN: 'Требует выполнения', DONE: 'Выполнено', PENDING: 'На рассмотрении' }
 
 export function notificationTypeLabel(type: string) { return typeLabels[type] ?? 'Уведомление' }
 export function notificationStateLabel(item: Pick<HistoryNotification, 'type' | 'state'>) {
@@ -34,7 +34,7 @@ export function notificationStateLabel(item: Pick<HistoryNotification, 'type' | 
   return stateLabels[item.state ?? ''] ?? item.state
 }
 export function notificationActionLabel(item: Pick<HistoryNotification, 'type' | 'shiftOfferId' | 'eventId' | 'documentId' | 'requestId'>) {
-  return item.type==='SUBSCRIPTION_STATUS'?'Управлять тарифом':item.type==='SCHEDULE_DISCUSSION'?'Открыть обсуждение':item.shiftOfferId ? 'Посмотреть предложение' : item.eventId ? 'Открыть событие' : item.documentId ? 'Открыть документ' : item.requestId ? 'Открыть заявку' : item.type.startsWith('SHIFT_') ? 'Открыть смену' : 'Подробнее'
+  return item.type==='REQUEST_TASK_REMINDER'?'Открыть задачу':item.type==='SUBSCRIPTION_STATUS'?'Управлять тарифом':item.type==='SCHEDULE_DISCUSSION'?'Открыть обсуждение':item.shiftOfferId ? 'Посмотреть предложение' : item.eventId ? 'Открыть событие' : item.documentId ? 'Открыть документ' : item.requestId ? 'Открыть заявку' : item.type.startsWith('SHIFT_') ? 'Открыть смену' : 'Подробнее'
 }
 
 export function notificationDayLabel(createdAt: string, now: number) {

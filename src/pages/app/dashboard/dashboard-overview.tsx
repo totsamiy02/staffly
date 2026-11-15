@@ -1,9 +1,7 @@
+import AttentionPanel from './attention-panel.tsx'
 import LocationSwitcher from '../../../component/ui/location-switcher/location-switcher.tsx'
 import TimeCorrectionAction from '../schedule/time/time-correction-action.tsx'
-import MemberProfileLink from '../../../component/ui/member-profile-link.tsx'
-import MemberAvatar from '../../../component/ui/member-avatar.tsx'
 import ActionSurface from '../../../component/ui/action-surface.tsx'
-import { requestStatusNames } from '../../../app/requests/workflow.ts'
 import type { Permission } from '../../../app/access/catalog.ts'
 import { useState, type ReactNode } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
@@ -67,7 +65,7 @@ export default function DashboardOverview({ organization }: { organization: Orga
   const manager = can('requests.view')
   const hasRequests = manager || can('requests.own'), hasDocuments = can('documents.view'), hasMembers = can('members.view'), hasEvents = can('events.view'), hasSchedule = calendarPoints.length > 0
   const scope = manager ? 'incoming' : 'mine'
-  const { requests, pending, documents, members } = useDashboardRecords(organization.id, anchorId, pointId, manager, { requests:hasRequests, documents:hasDocuments, members:hasMembers })
+  const { pending, documents, members } = useDashboardRecords(organization.id, anchorId, pointId, manager, { requests:hasRequests, documents:hasDocuments, members:hasMembers })
   const events = useEvents(organization.id, { pointId, locationId: anchorId, pageSize: 3, tab: 'upcoming' },hasEvents)
   const base = `/app/organizations/${organization.id}`
   const href = (module: string, params: Record<string, string> = {}) => `${base}/${module}?${new URLSearchParams({ location: anchorId ?? '', ...(['requests', 'documents', 'employees', 'events'].includes(module) ? { pointId } : {}), ...params })}`
@@ -91,11 +89,11 @@ export default function DashboardOverview({ organization }: { organization: Orga
       <div className="dashboard-metrics">
         {([{ kind: 'people', value: members.isError ? '—' : members.isPending ? '…' : members.data?.pagination.total ?? 0, label: 'Сотрудники', note: selectedPoint ? 'в выбранной точке' : 'во всей организации', to: href('employees') }, { kind: 'calendar', value: upcoming.isError ? '—' : upcoming.isLoading ? '…' : todayShifts.length, label: 'Смены', note: 'на сегодня', to: selectedPoint ? dayHref(today) : '#dashboard-calendar' }, { kind: 'request', value: pending.isError ? '—' : pending.isPending ? '…' : pending.data?.pagination.total ?? 0, label: 'Заявки', note: manager ? 'на рассмотрении' : 'ожидают решения', to: href('requests', { tab: scope }) }, { kind: 'document', value: documents.isError ? '—' : documents.isPending ? '…' : documents.data?.pagination.total ?? 0, label: 'Документы', note: 'для ознакомления', to: href('documents', { section: 'acknowledgements' }) }] as const).filter(item => ({people:hasMembers,calendar:hasSchedule,request:hasRequests,document:hasDocuments})[item.kind]).map(item => <Link className="dashboard-metric" to={item.to} key={item.kind}><span className="dashboard-metric__icon"><DashboardIcon kind={item.kind} /></span><span><strong>{item.value}</strong><span>{item.label}</span><small>{item.note}</small></span></Link>)}
       </div>
+      <AttentionPanel organizationId={organization.id} pointId={pointId} />
       <div className="dashboard-panels">
         {hasEvents && <Panel title="Ближайшие события" className="dashboard-events" action={link(href('events'), 'Все события')}><QueryState loading={events.isLoading} error={events.isError} retry={events.refetch} empty={!events.data?.events.length ? 'Предстоящих событий пока нет.' : undefined}><div>{events.data?.events.map(event => <Link className="event-row" key={event.id} to={eventHref(event, anchorId, pointId)}><EventRowContent event={event} compact /></Link>)}</div></QueryState></Panel>}
         {hasSchedule && <Panel title="Ближайшие смены" action={scheduleLink(today, 'Расписание')}><QueryState loading={upcoming.isLoading} error={upcoming.isError} retry={upcoming.refetch} empty={!nextShifts.length ? 'На ближайшие две недели смен нет.' : undefined}>{shiftRows(nextShifts, true)}</QueryState></Panel>}
-        {hasRequests && <Panel title={manager ? 'Заявки на рассмотрении' : 'Мои заявки'} action={link(href('requests', { tab: scope }), 'Все заявки')}><QueryState loading={requests.isPending} error={requests.isError} retry={requests.refetch} empty={!requests.data?.requests.length ? 'Заявок пока нет.' : undefined}><div className="dashboard-requests">{requests.data?.requests.slice(0, 4).map(request => <ActionSurface key={request.id} aria-label={`Открыть заявку: ${request.creatorName}`} onClick={() => navigate(href('requests', { tab: scope, request: request.id, location: request.locationId }))}><MemberAvatar memberId={request.createdByMemberId} locationId={request.locationId} className="app-avatar" url={request.creatorAvatarUrl} name={request.creatorName} /><span><strong><MemberProfileLink memberId={request.createdByMemberId} locationId={request.locationId}>{request.creatorName}</MemberProfileLink></strong><small>{request.typeNameSnapshot}</small>{!selectedPoint && <small>{request.locationName}</small>}</span><span className={`dashboard-status dashboard-status--${request.status.toLowerCase()}`}>{(request.processLabel??requestStatusNames[request.status])}</span></ActionSurface>)}</div></QueryState></Panel>}
-        {hasDocuments && <Panel title="Ознакомления" action={link(href('documents', { section: 'acknowledgements' }), 'Все документы')}><div className="dashboard-panel-caption">Требуют ознакомления <span>{documents.data?.pagination.total ?? '—'}</span></div><QueryState loading={documents.isPending} error={documents.isError} retry={documents.refetch} empty={!documents.data?.documents.length ? 'Всё готово. Нет документов, требующих ознакомления.' : undefined}><div className="dashboard-document-list">{documents.data?.documents.map(item => <Link key={item.id} to={href('documents', { section: 'acknowledgements', document: item.id, ...(item.locationId ? { location: item.locationId } : {}) })}><DashboardIcon kind="document" /><span><strong>{item.displayName}</strong><small>{item.locationName || 'Вся организация'}</small></span></Link>)}</div></QueryState></Panel>}
+
       </div>
     </div>
     {hasSchedule && <Panel title="Календарь" className="dashboard-calendar" action={scheduleLink(selectedDay, 'Открыть')}>

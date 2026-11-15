@@ -5,11 +5,14 @@ import type { RequestDatabase as DB } from './request-model.ts'
 export type ReviewerItem = { organizationId: string; locationId: string; createdByMemberId: string; formSnapshot: unknown; approvalStep: number; systemCodeSnapshot: string | null }
 export type ReviewerContext = Awaited<ReturnType<typeof loadPermissionMembers>>
 export { loadPermissionMembers as loadReviewerContext }
+export function reviewPermission(systemCode: string | null) {
+  return systemCode === 'VACATION' ? 'vacations.resolve' : systemCode === 'STAFFING_RESPONSE' ? 'staffing.resolve' : 'requests.resolve';
+}
 // A context belongs to one operation/transaction, never a cross-request cache.
 export function reviewersFromContext(context: ReviewerContext, item: ReviewerItem) {
   if (context.organizationId !== item.organizationId) throw new Error('Reviewer context belongs to another organization')
   const stage = definitionOf(item.formSnapshot).stages[item.approvalStep]
-  const key = item.systemCodeSnapshot === 'VACATION' ? 'vacations.resolve' : 'requests.resolve'
+  const key = reviewPermission(item.systemCodeSnapshot)
   const stageRole = stage?.roleId ? context.roles.find(role => role.id === stage.roleId) : undefined
   return context.members.filter(member => {
     if (!member.permissionLocations[key]?.includes(item.locationId)) return false

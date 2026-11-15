@@ -1,7 +1,7 @@
 import type { OrganizationRequest,Prisma } from '../../generated/prisma/client.ts'
 
 export const requestInclude = {
-  location: { select: { id: true, name: true, timezone: true } },
+  location: { select: { id: true, name: true, timezone: true, archivedAt: true } },
   _count: { select: { staffingResponses: true } },
   creator: { include: { accessRole:{select:{name:true}},accessAssignments:{include:{role:{select:{name:true}}}},locationMemberships: { where: { leftAt: null } }, user: { select: { email: true, firstName: true, lastName: true, middleName: true, avatarFileId: true } } } },
   resolvedBy: { include: { user: { select: { email: true, firstName: true, lastName: true, middleName: true } } } },
@@ -68,7 +68,7 @@ export async function readRequestPage(tx: Prisma.TransactionClient, organization
   const ids = selected.map(item => item.id)
   const rows = await tx.$queryRaw<Array<{ item: JsonRow }>>`
     SELECT to_jsonb(r) || jsonb_build_object(
-      'location', jsonb_build_object('id', l.id, 'name', l.name, 'timezone', l.timezone),
+      'location', jsonb_build_object('id', l.id, 'name', l.name, 'timezone', l.timezone, 'archived_at', l.archived_at),
       '_count', jsonb_build_object('staffingResponses', (SELECT count(*) FROM requests sr WHERE sr.staffing_request_id = r.id)),
       'creator', to_jsonb(m) || jsonb_build_object(
         'user', jsonb_build_object('email', u.email, 'firstName', u.first_name, 'lastName', u.last_name,

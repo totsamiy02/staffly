@@ -117,7 +117,7 @@ it('sends reminders for multiple routes and campaign audiences once, excluding d
   const expected=await Promise.all(requests.map(r=>stageReviewers(prisma,r)))
   await maintainRequests(now)
   for(const [i,r] of requests.entries()) {
-    const notifications=await prisma.accountNotification.findMany({where:{requestId:r.id,type:'REQUEST_CREATED'}})
+    const notifications=await prisma.accountNotification.findMany({where:{requestId:r.id,type:'REQUEST_REMINDER'}})
     assert.deepEqual(notifications.map(n=>n.userId).sort(),expected[i].map(m=>m.userId).sort())
     assert.ok((await prisma.organizationRequest.findUniqueOrThrow({where:{id:r.id}})).remindedAt)
   }

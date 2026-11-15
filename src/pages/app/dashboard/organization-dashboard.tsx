@@ -1,3 +1,4 @@
+import AttentionPanel from './attention-panel.tsx'
 import TimeCorrectionAction from '../schedule/time/time-correction-action.tsx'
 import MemberProfileLink from '../../../component/ui/member-profile-link.tsx'
 import MemberAvatar from '../../../component/ui/member-avatar.tsx'
@@ -33,6 +34,7 @@ export default function OrganizationDashboard({ organization }: { organization: 
   const todayPoint = overview.data?.locations.find(point => point.id === todayPointId)
   return <div className="workspace-dashboard dashboard-home">{dashboard ? <DashboardOverview organization={organization} /> : <header><h1>{organization.name}</h1><p>Доступные разделы находятся в меню организации.</p></header>}
     <DraftInbox organization={organization}/>
+    {!dashboard && <AttentionPanel organizationId={organization.id} />}
     {dashboard && <section className="location-overview"><div className="location-overview__heading"><div><h2>Сегодня по точкам</h2><p>{pointList.length} точек организации</p></div>{pointList.length > 6 && <input type="search" aria-label="Найти точку на главной" placeholder="Найти по названию или адресу" value={pointSearch} onChange={e => { setPointSearch(e.target.value); setPointPage(1) }} />}</div>{overview.isLoading ? <p>Загружаем смены…</p> : overview.isError ? <p role="alert">Не удалось загрузить смены. <button className="app-secondary" onClick={() => void overview.refetch()}>Повторить</button></p> : <div className="location-overview__grid">{visiblePoints.map(point => {
       return <ActionSurface type="button" className="location-today-card" data-tone={locationTone(point.id)} key={point.id} onClick={() => setTodayPointId(point.id)} aria-label={`${point.name}: сегодня на смене ${point.todayMemberCount}. Посмотреть сотрудников`}>
         <span className="location-today-card__heading"><PointMark /><span className="location-today-card__title"><strong>{point.name}</strong><span className="location-today-card__address">{point.kind==='REMOTE'?'Удалённая точка':[point.city, point.address].filter(Boolean).join(', ') || 'Адрес не указан'}</span></span></span>

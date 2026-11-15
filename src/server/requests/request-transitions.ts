@@ -1,3 +1,4 @@
+import { supportsReviewTransfer } from './reviewer-transfer.ts'
 import { Prisma } from '../../generated/prisma/client.ts'
 import { applyRequestDecision } from './request-effects.ts'
 import { markRequestNoticesRead,publishRequestNotices } from './request-notifications.ts'
@@ -30,7 +31,7 @@ export async function resolveRequest(userId: string, organizationId: string, req
   const resolveKey = current.systemCodeSnapshot==='VACATION'?'vacations.resolve' as const:['STAFFING','STAFFING_RESPONSE'].includes(current.systemCodeSnapshot??'') ? 'staffing.resolve' as const : 'requests.resolve' as const
   requirePermission(actor,resolveKey,current.locationId)
   if(current.createdByMemberId===actor.id&&!actor.owner)requirePermission(actor,'requests.selfResolve',current.locationId)
-  if((!current.systemCodeSnapshot||current.systemCodeSnapshot==='VACATION')&&!(await stageReviewers(prisma,current)).some(p=>p.id===actor.id))throw new ApiError(403,'WRONG_REVIEWER','Этот этап должен рассмотреть назначенный согласующий.')
+  if(supportsReviewTransfer(current)&&!(await stageReviewers(prisma,current)).some(p=>p.id===actor.id))throw new ApiError(403,'WRONG_REVIEWER','Этот этап должен рассмотреть назначенный согласующий.')
   if (current.systemCodeSnapshot === 'SICK') throw new ApiError(409, 'INFORMATIONAL_REQUEST', 'Сообщение об отсутствии не требует решения.')
   if (decision === 'REJECTED' && !comment?.trim()) throw new ApiError(400, 'RESOLUTION_COMMENT_REQUIRED', 'Укажите причину отклонения.')
   if (decision === 'APPROVED' && current.systemCodeSnapshot === 'STAFFING') throw new ApiError(409, 'STAFFING_RESPONSE_REQUIRED', 'Подтвердите отклик сотрудника, чтобы назначить подмену.')
@@ -107,8 +108,18 @@ export async function amendVacation(userId:string,org:string,id:string,startDate
   return prisma.$transaction(async tx=>{await lockRequest(tx,id);if(await tx.organizationRequest.findFirst({where:{amendmentOfId:id,status:'PENDING'}}))throw new ApiError(409,'AMENDMENT_EXISTS','Перенос уже на рассмотрении.');const r=await tx.organizationRequest.create({data:{organizationId:org,locationId:item.locationId,createdByMemberId:actor.id,authorMemberId:actor.id,requestTypeId:item.requestTypeId,typeNameSnapshot:'Перенос отпуска',systemCodeSnapshot:'VACATION',amendmentOfId:id,formSnapshot:item.formSnapshot as Prisma.InputJsonValue,startDate:new Date(startDate),endDate:new Date(endDate),comment}});await notifyStage(tx,r,await ensureReviewers(tx,r));await tx.requestEvent.create({data:{requestId:r.id,actorMemberId:actor.id,type:'SUBMITTED',changes:{originalRequestId:id}}});return r})
 }
 
-export async function completeRequestTask(userId:string,org:string,id:string){
-  const {actor,item}=await requestForAccess(userId,org,id),outcome=requestOutcome.safeParse(item.outcome).data
-  if(outcome?.kind!=='TASK'||!outcome.assignees?.includes(actor.id)&&!hasPermission(actor,'requests.resolve',item.locationId))throw new ApiError(403,'TASK_FORBIDDEN','Вы не назначены исполнителем.')
-  return prisma.$transaction(async tx=>{await lockRequest(tx,id);await tx.organizationRequest.update({where:{id},data:{outcome:{...outcome,status:'DONE'}}});await tx.requestEvent.create({data:{requestId:id,actorMemberId:actor.id,type:'CHANGED',comment:'Задача выполнена.'}})})
+export async function completeRequestTask(userId: string, org: string, id: string) {
+  await requestForAccess(userId, org, id);
+  return prisma.$transaction(async tx => {
+    await lockRequest(tx, id);
+    const actor = await getMembership(userId, org, tx);
+    const current = await tx.organizationRequest.findUniqueOrThrow({ where: { id } });
+    const outcome = requestOutcome.safeParse(current.outcome).data;
+    if (current.status !== 'APPROVED' || outcome?.kind !== 'TASK') throw new ApiError(409, 'TASK_UNAVAILABLE', 'Задача больше недоступна.');
+    if (!(outcome.assignees.includes(actor.id) && hasPermission(actor, 'requests.own', current.locationId)) && !hasPermission(actor, 'requests.resolve', current.locationId)) throw new ApiError(403, 'TASK_FORBIDDEN', 'Вы не назначены исполнителем.');
+    if (outcome.status === 'DONE') return;
+    await tx.organizationRequest.update({ where: { id }, data: { outcome: { ...outcome, status: 'DONE' } } });
+    await tx.requestEvent.create({ data: { requestId: id, actorMemberId: actor.id, type: 'CHANGED', comment: 'Задача выполнена.' } });
+    await markRequestNoticesRead(tx, { requestId: id, type: 'REQUEST_TASK_REMINDER', readAt: null }, new Date());
+  });
 }

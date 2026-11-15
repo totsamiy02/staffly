@@ -1,3 +1,4 @@
+import { reviewTransferCandidates, transferReview, transferReviewBody } from './reviewer-transfer.ts'
 import { auditSensitiveAccess } from '../security/journal.ts'
 import express,{ Router,type Request } from 'express'
 import { z } from 'zod'
@@ -35,6 +36,15 @@ router.get('/organizations/:organizationId/vacation-warnings',async(q,s)=>{const
 router.post('/organizations/:organizationId/requests/:requestId/submit',mutationLimiter,async(q,s)=>{const {organizationId,requestId}=parse(requestParams,q.params);s.json(mutationResponse(await submitRequest(auth(q).userId,organizationId,requestId)))})
 router.post('/organizations/:organizationId/requests/:requestId/return',mutationLimiter,async(q,s)=>{const {organizationId,requestId}=parse(requestParams,q.params);const b=parse(z.object({comment:z.string().trim().min(3).max(1000),withdraw:z.boolean().default(false)}),q.body);s.json(mutationResponse(await returnRequest(auth(q).userId,organizationId,requestId,b.comment,b.withdraw)))})
 router.post('/organizations/:organizationId/requests/:requestId/amend',mutationLimiter,async(q,s)=>{const {organizationId,requestId}=parse(requestParams,q.params);const b=parse(createRequestBody.pick({startDate:true,endDate:true,comment:true}),q.body);if(!b.startDate||!b.endDate||b.startDate>b.endDate||!b.comment?.trim())throw new ApiError(400,'INVALID_AMENDMENT','Укажите даты и причину переноса.');s.json(mutationResponse(await amendVacation(auth(q).userId,organizationId,requestId,b.startDate,b.endDate,b.comment)))})
+router.get('/organizations/:organizationId/requests/:requestId/reviewer-candidates', async (request, response) => {
+  const { organizationId, requestId } = parse(requestParams, request.params)
+  response.json(await reviewTransferCandidates(auth(request).userId, organizationId, requestId))
+})
+router.post('/organizations/:organizationId/requests/:requestId/transfer-review', mutationLimiter, async (request, response) => {
+  const { organizationId, requestId } = parse(requestParams, request.params)
+  const input = parse(transferReviewBody, request.body)
+  response.json(mutationResponse(await transferReview(auth(request).userId, organizationId, requestId, input)))
+})
 router.post('/organizations/:organizationId/requests/:requestId/complete-task',mutationLimiter,async(q,s)=>{const {organizationId,requestId}=parse(requestParams,q.params);await completeRequestTask(auth(q).userId,organizationId,requestId);s.status(204).end()})
 router.get('/organizations/:organizationId/request-types', async (request, response) => { const { organizationId } = parse(organizationRequestParams, request.params); response.json(typesResponse(await listRequestTypes(auth(request).userId, organizationId, request.query.includeInactive === 'true'))) })
 router.post('/organizations/:organizationId/request-types', mutationLimiter, async (request, response) => { const { organizationId } = parse(organizationRequestParams, request.params); response.status(201).json(typeResponse(await createRequestType(auth(request).userId, organizationId, parse(createRequestTypeBody, request.body)))) })

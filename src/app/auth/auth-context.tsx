@@ -1,3 +1,4 @@
+import { clearSessionQueries } from './query-cache.ts'
 import { startClientDiagnostics } from '../support/client-diagnostics.ts'
 import { readTabValue } from '../workspace/tab-storage.ts'
 import { documentMime } from '../file-preview/formats.ts'
@@ -56,7 +57,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const accept = useCallback((result: AuthResult) => {
     if (!result || typeof result.accessToken !== 'string' || !result.accessToken || !result.user || typeof result.user.id !== 'string' || !result.user.id || typeof result.user.displayName !== 'string') throw invalidResponseError()
-    if (userIdRef.current !== result.user.id) { queryClient.clear(); clearFormDrafts(result.user.id) }
+    if (userIdRef.current !== result.user.id) { clearSessionQueries(queryClient); clearFormDrafts(result.user.id) }
     userIdRef.current = result.user.id
     authVersion.current += 1
     tokenRef.current = result.accessToken
@@ -71,7 +72,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     authVersion.current += 1
     tokenRef.current = null
     userIdRef.current = null
-    queryClient.clear()
+    clearSessionQueries(queryClient)
     setUser(null)
     currentUser.current = null
     setLoading(false)

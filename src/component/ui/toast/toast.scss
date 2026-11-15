@@ -8,6 +8,7 @@
   display: grid;
   gap: 8px;
   pointer-events: none;
+  > * { pointer-events: auto; }
 }
 
 .staffly-toast {

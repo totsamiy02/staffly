@@ -5,10 +5,10 @@ export const emailCategories = [
   { key: 'scheduleDiscussion', group: 'schedule', title: 'Согласование графика', description: 'Начало обсуждения, новая редакция и одно напоминание перед сроком', icon: 'schedule' },
   { key: 'requestResults', group: 'requests', title: 'Результаты заявок', description: 'Окончательное решение по вашим заявкам', icon: 'requests' },
   { key: 'vacationCollection', group: 'requests', title: 'Пожелания на отпуск', description: 'Начало сбора и одно напоминание перед сроком', icon: 'requests' },
-  { key: 'documents', group: 'documents', title: 'Документы для ознакомления', description: 'Назначение и одно напоминание перед сроком', icon: 'documents' },
+  { key: 'documents', group: 'documents', title: 'Документы для ознакомления', description: 'Назначение, напоминание за день до срока и при просрочке', icon: 'documents' },
   { key: 'importantEvents', group: 'events', title: 'Важные события', description: 'Публикация, перенос и отмена событий, отмеченных важными', icon: 'events' },
   { key: 'urgentAbsences', group: 'management', title: 'Срочные отсутствия', description: 'Отсутствие сотрудника, затрагивающее ближайшую смену', icon: 'employees' },
-  { key: 'actionDigest', group: 'management', title: 'Заявки и согласования', description: 'Каждая новая заявка, принятое предложение смены или завершённое обсуждение, где нужно ваше решение', icon: 'requests' },
+  { key: 'actionDigest', group: 'management', title: 'Заявки, задачи и согласования', description: 'Новые действия, напоминания за день до срока и при просрочке заявок и задач', icon: 'requests' },
 ] as const
 
 export type EmailCategory = typeof emailCategories[number]['key']

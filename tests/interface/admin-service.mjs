@@ -51,7 +51,19 @@ export async function checkService({page,check,expect,prisma,databasePool,user,o
   const reader=await page.context().newPage();try{
    await reader.goto(origin+'/guide/'+slug+'#service-section');await expect(reader.getByRole('heading',{name:title,exact:true})).toBeVisible();await expect(reader.locator('#service-section')).toHaveText('Раздел проверки');await expect(reader.locator('.published-content')).toContainText(marker);await reader.getByRole('button',{name:'Увеличить: Фото и личные данные перед сохранением',exact:true}).click();await expect(reader.getByRole('dialog')).toBeVisible();await reader.getByRole('dialog').getByRole('button',{name:'Закрыть',exact:true}).click();await expect(reader.getByRole('dialog')).toHaveCount(0)
    await reader.goto(origin+'/guide?q='+marker);await expect(reader.locator('.guide-article-list a').filter({hasText:title})).toBeVisible()
-   await reader.goto(origin+'/guide/category/getting-started#article-'+slug);const article=reader.locator('#article-'+slug);await expect(article.getByRole('heading',{name:title,exact:true})).toBeVisible();await expect(article.locator('.published-content')).toContainText(marker);await expect(article.locator('#'+slug+'-service-section')).toHaveText('Раздел проверки');await expect(article.getByRole('heading',{name:title,exact:true})).toBeInViewport();await shot('public-guide',reader,false)
+   let releaseBootstrap
+   const bootstrapGate = new Promise(resolve => { releaseBootstrap = resolve })
+   await reader.route('**/api/auth/refresh', async route => { await bootstrapGate; await route.continue() })
+   const bootstrapResponse = reader.waitForResponse(response => response.url().endsWith('/api/auth/refresh'))
+   try {
+    await reader.goto(origin+'/guide/category/getting-started#article-'+slug)
+    const loadedArticle = reader.locator('#article-'+slug)
+    await expect(loadedArticle.getByRole('heading',{name:title,exact:true})).toBeVisible()
+    releaseBootstrap()
+    await (await bootstrapResponse).finished()
+    await reader.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+   } finally { releaseBootstrap(); await reader.unroute('**/api/auth/refresh') }
+   const article=reader.locator('#article-'+slug);await expect(article.getByRole('heading',{name:title,exact:true})).toBeVisible();await expect(article.locator('.published-content')).toContainText(marker);await expect(article.locator('#'+slug+'-service-section')).toHaveText('Раздел проверки');await expect(article.getByRole('heading',{name:title,exact:true})).toBeInViewport();await shot('public-guide',reader,false)
   }finally{await reader.close()}
  })
  await check('service UI: external channel remains disabled and no secret fields or fake delivery success are shown',async()=>{

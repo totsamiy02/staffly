@@ -1,0 +1,17 @@
+.reviewer-transfer {
+  margin-top: 20px;
+  &__form {
+    display: grid;
+    gap: 16px;
+    padding: 20px;
+    border: 1px solid var(--theme-border,#e3e3e8);
+    border-radius: 12px;
+    background: var(--theme-surface-muted,#f8f8fa);
+    > header { h3 { margin: 0 0 7px; font-size: 15px; } p { margin: 0; color: var(--theme-muted,#666); font-size: 12px; line-height: 1.7; } }
+    > label { display: grid; gap: 8px; font-size: 13px; > span { display: flex; align-items: baseline; flex-wrap: wrap; gap: 7px; } small { color: var(--theme-muted,#666); font-size: 11px; font-weight: 400; } }
+    > p { margin: 0; color: var(--theme-muted,#666); font-size: 13px; line-height: 1.7; }
+    textarea { box-sizing: border-box; width: 100%; min-height: 80px; resize: vertical; }
+    > footer { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+  }
+  @media(max-width: 550px) { &__form { padding: 16px; > footer > button { flex: 1 1 auto; } } }
+}

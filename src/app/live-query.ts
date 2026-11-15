@@ -7,7 +7,7 @@ export function setLiveConnected(value: boolean) { const changed = connected !==
 // presence-only UI still refreshes once a minute, since heartbeats are not broadcasts.
 export const liveQueryOptions = {
   refetchInterval: (query: { queryKey: readonly unknown[] }) => connected
-    ? ['organization-members', 'member-profile', 'member-personnel', 'auth-sessions'].includes(String(query.queryKey[0])) ? 60000 : false
+    ? ['attention', 'organization-members', 'member-profile', 'member-personnel', 'auth-sessions'].includes(String(query.queryKey[0])) ? 60000 : false
     : 30000 + Math.floor(Math.random() * 10000),
   refetchIntervalInBackground: false,
   refetchOnWindowFocus: 'always',
@@ -15,14 +15,14 @@ export const liveQueryOptions = {
 } as const
 
 const hintKeys: Record<string, string[]> = {
-  schedule: ['timesheet', 'schedule', 'schedule-planning', 'absences', 'my-upcoming-shifts', 'shift-details', 'shift-offers', 'shift-offer', 'shift-offer-candidates', 'work-time-statistics', 'member-work-time', 'my-work-time', 'locations-overview', 'demand', 'coverage', 'schedule-discussions', 'schedule-drafts', 'schedule-draft', 'draft-validation', 'report-preview', 'report-members', 'vacation-warnings'],
-  requests: ['timesheet', 'organization-resources', 'document-request-files', 'requests', 'request', 'request-types', 'vacations', 'member-profile'],
-  'requests-mine': ['organization-resources', 'document-request-files', 'requests', 'request', 'vacations', 'member-profile'],
-  'requests-review': ['organization-resources', 'document-request-files', 'requests', 'request', 'vacations', 'member-profile'],
-  documents: ['organization-resources', 'documents', 'document', 'document-progress', 'personal-documents', 'document-folders', 'document-members', 'member-profile'],
+  schedule: ['attention', 'timesheet', 'schedule', 'schedule-planning', 'absences', 'my-upcoming-shifts', 'shift-details', 'shift-offers', 'shift-offer', 'shift-offer-candidates', 'work-time-statistics', 'member-work-time', 'my-work-time', 'locations-overview', 'demand', 'coverage', 'schedule-discussions', 'schedule-drafts', 'schedule-draft', 'draft-validation', 'report-preview', 'report-members', 'vacation-warnings'],
+  requests: ['attention', 'timesheet', 'organization-resources', 'document-request-files', 'requests', 'request', 'request-reviewers', 'request-types', 'vacations', 'member-profile'],
+  'requests-mine': ['attention', 'organization-resources', 'document-request-files', 'requests', 'request', 'request-reviewers', 'vacations', 'member-profile'],
+  'requests-review': ['attention', 'organization-resources', 'document-request-files', 'requests', 'request', 'request-reviewers', 'vacations', 'member-profile'],
+  documents: ['attention', 'organization-resources', 'documents', 'document', 'document-progress', 'personal-documents', 'document-folders', 'document-members', 'member-profile'],
   events: ['events', 'event', 'event-members'],
-  organization: ['timesheet', 'member-profile','member-personnel','document-request-files', 'subscription', 'organization-resources', 'organizations', 'organization', 'locations', 'location-directory', 'location-teams', 'organization-members', 'organization-invitations', 'invitations', 'team-planning-settings', 'schedule-planning', 'shift-offer-settings', 'report-options', 'coverage', 'demand', 'schedule-discussions', 'schedule-drafts', 'schedule-draft', 'draft-validation', 'document-members', 'event-members', 'vacation-settings'],
-  profile: ['document-request-files', 'organization-members', 'member-profile', 'member-personnel', 'location-directory', 'auth-login-methods', 'email-preferences', 'schedule', 'my-upcoming-shifts', 'shift-details', 'requests', 'request', 'documents', 'document', 'personal-documents', 'events', 'event', 'event-members', 'document-members', 'report-preview', 'report-members', 'work-time-statistics', 'member-work-time', 'my-work-time'],
+  organization: ['attention', 'timesheet', 'member-profile','member-personnel','document-request-files', 'subscription', 'organization-resources', 'organizations', 'organization', 'locations', 'location-directory', 'location-teams', 'organization-members', 'organization-invitations', 'invitations', 'team-planning-settings', 'schedule-planning', 'shift-offer-settings', 'report-options', 'coverage', 'demand', 'schedule-discussions', 'schedule-drafts', 'schedule-draft', 'draft-validation', 'document-members', 'event-members', 'vacation-settings'],
+  profile: ['attention', 'document-request-files', 'organization-members', 'member-profile', 'member-personnel', 'location-directory', 'auth-login-methods', 'email-preferences', 'schedule', 'my-upcoming-shifts', 'shift-details', 'requests', 'request', 'request-reviewers', 'documents', 'document', 'personal-documents', 'events', 'event', 'event-members', 'document-members', 'report-preview', 'report-members', 'work-time-statistics', 'member-work-time', 'my-work-time'],
   notifications: ['notifications', 'account-notifications', 'shift-notifications', 'invitations'],
 }
 export function liveHintMatches(hint: { topic: string; organizationId?: string }, queryKey: readonly unknown[]) {
@@ -37,7 +37,7 @@ export async function applyLiveHints(client: QueryClient, hints: Array<{ topic: 
 }
 
 export async function invalidateOrganizationWork(client: QueryClient, organizationId: string) {
-  const prefixes = ['timesheet', 'document-request-files', 'organization-resources', 'member-profile', 'member-personnel', 'vacations', 'team-planning-settings', 'demand', 'coverage', 'schedule-discussions', 'schedule-drafts', 'schedule-draft', 'draft-validation', 'shift-offers', 'shift-offer', 'shift-offer-candidates', 'shift-offer-settings', 'locations-overview', 'locations', 'absences', 'schedule', 'my-upcoming-shifts', 'shift-details', 'requests', 'request', 'work-time-statistics', 'member-work-time', 'my-work-time', 'report-preview', 'report-members']
+  const prefixes = ['attention', 'timesheet', 'document-request-files', 'organization-resources', 'member-profile', 'member-personnel', 'vacations', 'team-planning-settings', 'demand', 'coverage', 'schedule-discussions', 'schedule-drafts', 'schedule-draft', 'draft-validation', 'shift-offers', 'shift-offer', 'shift-offer-candidates', 'shift-offer-settings', 'locations-overview', 'locations', 'absences', 'schedule', 'my-upcoming-shifts', 'shift-details', 'requests', 'request', 'request-reviewers', 'work-time-statistics', 'member-work-time', 'my-work-time', 'report-preview', 'report-members']
   await Promise.all([
     ...prefixes.map(prefix => client.invalidateQueries({ queryKey: [prefix, organizationId] })),
     client.invalidateQueries({ queryKey: ['shift-notifications'] }),

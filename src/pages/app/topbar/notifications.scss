@@ -64,3 +64,8 @@
  }
  @media(prefers-reduced-motion:reduce) { .notification-item { animation:none; transition:none; } }
 }
+
+.notification-panel .notification-panel__footer > a { display: inline-block; margin-bottom: 10px; color: var(--theme-text,#555); font-size: 11px; text-decoration: underline; text-underline-offset: 3px; }
+
+.topbar-popover--notifications .notification-mail-settings { color: var(--theme-text,#555); font-size: 11px; text-decoration: underline; text-underline-offset: 3px; }
+.notification-popover-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; border-top: 1px solid var(--theme-border,#e8e9ec); .notifications-history-link { width: auto; padding: 0; border: 0; } }

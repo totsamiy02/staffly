@@ -3,7 +3,7 @@ import { emailCategoryKeys, normalizeEmailCategories } from '../../app/notificat
 import { prisma } from '../db.ts'
 import { ApiError } from '../api-error.ts'
 import { getMembership } from '../organizations/access/permissions.ts'
-import { hasPermission } from '../organizations/access/access.ts'
+import { hasPermission, locationsFor } from '../organizations/access/access.ts'
 
 export const emailPreferencesBody = z.object({
   enabled: z.boolean().optional(), categories: z.partialRecord(z.enum(emailCategoryKeys), z.boolean()).optional(),
@@ -15,8 +15,8 @@ export async function availableEmailCategories(userId: string) {
   let absences = false, digest = false
   for (const membership of memberships) {
     const actor = await getMembership(userId, membership.organizationId)
-    absences ||= hasPermission(actor, 'absences.view')
-    digest ||= ['requests.resolve', 'drafts.resolve', 'offers.approve', 'vacations.resolve'].some(key => hasPermission(actor, key as 'requests.resolve'))
+    absences ||= hasPermission(actor, 'absences.view', null) || locationsFor(actor, 'absences.view').length > 0
+    digest ||= ['requests.own', 'requests.resolve', 'drafts.resolve', 'offers.approve', 'vacations.resolve'].some(key => hasPermission(actor, key as 'requests.resolve', null) || locationsFor(actor, key as 'requests.resolve').length > 0)
   }
   return emailCategoryKeys.filter(key => key !== 'urgentAbsences' && key !== 'actionDigest' || key === 'urgentAbsences' && absences || key === 'actionDigest' && digest)
 }

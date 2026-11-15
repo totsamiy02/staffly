@@ -1,3 +1,5 @@
+import { localDay } from '../attention/policy.ts'
+import { addCalendarDays } from '../schedule/timezone.ts'
 import {requireLocationInPlan} from '../subscriptions/access.ts'
 import {checkOpeningHours} from '../schedule/opening-hours.ts'
 import type { Prisma,RequestSystemCode } from '../../generated/prisma/client.ts'
@@ -112,7 +114,9 @@ async function approveAbsence(context: DecisionContext) {
 async function approveCustom(context: DecisionContext) {
  const {tx, current, organizationId, requestId, decision, definition} = context
  if(decision==='APPROVED'&&!current.systemCodeSnapshot){
-      const outcome={kind:definition.action,status:definition.action==='TASK'?'OPEN':'DONE',text:current.comment??current.typeNameSnapshot,createdAt:new Date().toISOString(),assignees:definition.recipientMemberIds}
+      const zone = (await tx.organizationLocation.findUniqueOrThrow({where:{id:current.locationId},select:{timezone:true}})).timezone
+      const deadline = definition.action === 'TASK' ? addCalendarDays(localDay(new Date(), zone), definition.taskDeadlineDays ?? 7) : undefined
+      const outcome={...(deadline ? {deadline} : {}),kind:definition.action,status:definition.action==='TASK'?'OPEN':'DONE',text:current.comment??current.typeNameSnapshot,createdAt:new Date().toISOString(),assignees:definition.recipientMemberIds}
       await tx.organizationRequest.update({where:{id:requestId},data:{outcome}})
       const recipients=await tx.organizationMember.findMany({where:{organizationId,id:{in:definition.recipientMemberIds},leftAt:null}})
       if(recipients.length)await publishRequestNotices(tx, recipients.map(p=>({organizationId,userId:p.userId,requestId,type:'REQUEST_APPROVED',title:definition.action==='TASK'?'Назначена задача по обращению':'Результат обращения',message:current.typeNameSnapshot})))
