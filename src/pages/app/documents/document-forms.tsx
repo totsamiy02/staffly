@@ -1,18 +1,15 @@
+import MemberBulkDialog from '../shared/member-bulk-dialog.tsx'
 import RequestErrorMessage from '../../../component/ui/request-error-message.tsx'
 import OperationStatus from '../../../component/ui/operation-status.tsx'
 import { useFormSafety } from '../../../app/forms/use-form-safety.ts'
 import EmployeePicker from '../shared/employee-picker.tsx'
-import MemberAvatar from '../../../component/ui/member-avatar.tsx'
 import { documentAccept } from '../../../app/file-preview/formats.ts'
 import FilePicker from '../../../component/ui/file-picker/file-picker.tsx'
-import { useAccessRoles } from '../../../app/access/queries.ts'
 import DocumentAudience, { type Audience } from './document-audience.tsx'
 import { useLocations, useOrganization } from '../../../app/organizations/queries.ts'
 import { useToast } from '../../../component/ui/toast/toast-context.ts'
 import { useDocumentMembers } from '../../../app/documents/queries.ts'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import type { Recipient } from '../../../app/documents/types.ts'
 import { useAuth } from '../../../app/auth/auth-context.tsx'
 import Select from '../../../component/ui/select/select.tsx'
 import type { DocumentItem, Folder, Visibility } from '../../../app/documents/types.ts'
@@ -92,44 +89,13 @@ export function DocumentForm({ organizationId, folders, folderId, item, revision
   </form></DocumentDialog>
 }
 export function AssignmentForm({ item, onClose, onSaved, onBusy }: { item: DocumentItem; onClose: () => void; onSaved: () => Promise<unknown>; onBusy: (busy: boolean) => void }) {
-  const { locationId, apiRequest } = useAuth(); const toast = useToast(); const members = useDocumentMembers(item.organizationId, true, item.locationId === null, item.locationId)
-  const roles=useAccessRoles(item.organizationId)
-  const audiencePreview=useQuery({queryKey:['document-assignment-audience',item.organizationId,item.id,item.updatedAt],queryFn:()=>apiRequest<{members:Array<{id:string;allowed:boolean}>}>(`/organizations/${item.organizationId}/documents/access-preview`,{method:'POST',body:{displayName:item.displayName,pointId:item.locationId??null,folderId:item.folderId,visibility:item.visibility,targetMemberId:item.targetMemberId,audienceRoleIds:item.audienceRoleIds??[],audienceMemberIds:item.audienceMemberIds??[],inheritAccess:item.inheritAccess??false}})})
-  const path = documentPath(item.organizationId, item.id)
-  const current = useQuery({ queryKey: ['document-assignment-edit', item.organizationId, item.id, locationId], queryFn: async () => {
-    const recipients: Recipient[] = []
-    for (let page = 1; ; page++) {
-      const result = await apiRequest<{ recipients: Recipient[]; pagination: { pages: number } }>(`${path}/progress?page=${page}`)
-      recipients.push(...result.recipients)
-      if (page >= result.pagination.pages) break
-    }
-    return recipients
-  } })
-  const [selected, setSelected] = useState<string[]>([]), [initialized, setInitialized] = useState(false), [comment, setComment] = useState(''), [search, setSearch] = useState(''), [error, setError] = useState(''), [busy, setBusy] = useState(false)
-  const safety = useFormSafety({ scope: 'document-assignment:' + item.organizationId + ':' + item.id, value: { selected, comment }, active: initialized, busy })
-  const lock = useRef(false)
-  useEffect(() => { if (!initialized && current.data) { setSelected(current.data.length ? current.data.filter(recipient => !recipient.cancelledAt).map(recipient => recipient.member.id) : item.targetMemberId ? [item.targetMemberId] : []); setInitialized(true) } }, [current.data, initialized, item.targetMemberId])
-  useEffect(() => { onBusy(busy); return () => onBusy(false) }, [busy, onBusy])
-  const active = current.data?.filter(recipient => !recipient.cancelledAt) ?? []
-  const existingIds = new Set(current.data?.map(recipient => recipient.member.id) ?? [])
-  const canReceive = (id:string)=>!!audiencePreview.data?.members.some(m=>m.id===id && m.allowed)
-  const pendingRemoval = active.filter(recipient => !selected.includes(recipient.member.id) && !recipient.acknowledgedAt)
-  const pendingAddition = selected.filter(id => !existingIds.has(id))
-  async function submit(event: FormEvent) {
-    event.preventDefault(); if (lock.current || !initialized) return; lock.current = true; setBusy(true); setError('')
-    try {
-      if (pendingAddition.length) await apiRequest(`${path}/assign`, { method: 'POST', body: { recipients: 'members', memberIds: pendingAddition, roles: [], deadline: null, comment: comment || null } })
-      for (const recipient of pendingRemoval) await apiRequest(`${path}/acknowledgements/${recipient.id}/cancel`, { method: 'POST' })
-      await onSaved(); safety.markSaved(); toast('Получатели ознакомления обновлены.'); onClose()
-    } catch (failure) { setError(failure instanceof Error ? failure.message : 'Не удалось обновить получателей. Проверьте список и повторите.') }
-    finally { lock.current = false; setBusy(false) }
-  }
-  return <DocumentDialog busy={busy} title="Получатели ознакомления" onClose={onClose}><form ref={safety.ref} onSubmit={submit}><p>{item.displayName}</p>
-    {current.isLoading ? <p className="app-state">Загружаем текущих получателей…</p> : current.isError ? <p role="alert">Не удалось загрузить получателей. <button type="button" className="app-secondary" onClick={() => void current.refetch()}>Повторить</button></p> : <fieldset><legend>Сотрудники · выбрано {selected.length}</legend><div className="access-actions"><button type="button" className="app-secondary" disabled={!audiencePreview.data || busy} onClick={()=>setSelected(members.data?.members.filter(m=>!m.former&&canReceive(m.id)).map(m=>m.id)??[])}>Все с доступом</button><Select value="" aria-label="Добавить получателей по роли" disabled={busy || !audiencePreview.data} onChange={e=>setSelected(prev=>[...new Set([...prev,...(members.data?.members.filter(m=>!m.former&&canReceive(m.id)&&m.accessRoleIds.includes(e.target.value)).map(m=>m.id)??[])])])}><option value="">Добавить по роли</option>{roles.data?.roles.map(r=><option key={r.id} value={r.id}>{r.name}</option>)}</Select></div><small>Состав ознакомления фиксируется при сохранении. Доступ по роли остаётся динамическим.</small><input type="search" className="staffly-control" placeholder="Поиск сотрудника" aria-label="Поиск получателя" value={search} onChange={event => setSearch(event.target.value)} /><div className="document-recipient-picker">{members.isLoading ? <p>Загружаем сотрудников…</p> : members.isError ? <p role="alert">Не удалось загрузить сотрудников. <button type="button" onClick={() => void members.refetch()}>Повторить</button></p> : members.data?.members.filter(member => !member.former && canReceive(member.id) && `${member.name} ${member.email}`.toLowerCase().includes(search.toLowerCase())).map(member => { const assigned = current.data?.find(recipient => recipient.member.id === member.id); return <div className="document-checkbox" key={member.id}><input aria-label={`Выбрать: ${member.name}`} type="checkbox" disabled={busy || Boolean(assigned?.acknowledgedAt || assigned?.cancelledAt)} checked={selected.includes(member.id)} onChange={() => setSelected(previous => previous.includes(member.id) ? previous.filter(id => id !== member.id) : [...previous, member.id])} /><MemberAvatar memberId={member.id} className="app-avatar document-avatar" url={member.avatarUrl} name={member.name} /><span>{member.name}{assigned?.acknowledgedAt ? ' · уже ознакомлен' : assigned?.cancelledAt ? ' · назначение отменено' : assigned ? ' · назначено' : ''}</span></div> })}</div></fieldset>}
-    {pendingRemoval.length > 0 && <p className="request-form-note">Будет отменено: {pendingRemoval.length}. История назначений сохранится.</p>}
-    {pendingAddition.length > 0 && <label><span>Комментарий для новых получателей · необязательно</span><textarea rows={3} maxLength={1000} disabled={busy} value={comment} onChange={event => setComment(event.target.value)} /></label>}
-    {error && <p className="form-inline-error" role="alert"><RequestErrorMessage error={error} /></p>}<footer><button type="button" className="app-secondary" disabled={busy} onClick={onClose}>Отмена</button><button className="app-primary" disabled={busy || !initialized || !members.data || (!pendingAddition.length && !pendingRemoval.length)}>{busy ? 'Сохраняем…' : 'Сохранить получателей'}</button></footer>
-  </form></DocumentDialog>
+  return <MemberBulkDialog
+    organizationId={item.organizationId}
+    target={{ kind: 'DOCUMENT', targetId: item.id }}
+    onClose={onClose}
+    onSaved={onSaved}
+    onBusy={onBusy}
+  />
 }
 export function FolderForm({ organizationId, folders, parentId, item, onClose, onSaved, onBusy }: { organizationId: string; folders: Folder[]; parentId: string; item?: Folder; onClose: () => void; onSaved: () => Promise<unknown>; onBusy: (busy: boolean) => void }) {
   const { apiRequest } = useAuth(); const organization = useOrganization(organizationId); const points = useLocations(organizationId); const [pointId, setPointId] = useState(item ? item.locationId ?? '' : parentId ? folders.find(folder => folder.id === parentId)?.locationId ?? '' : (points.data?.locations.find(point=>!point.archivedAt && point.permissions?.includes('documents.folders'))?.id ?? organization.data?.organization.locationId) ?? ''); const shared = !pointId; const [visibility, setVisibility] = useState(item?.visibility ?? 'ORGANIZATION'); const toast = useToast(); const [name, setName] = useState(item?.name ?? ''), [parent, setParent] = useState(item ? item.parentId ?? '' : parentId), [busy, setBusy] = useState(false), [error, setError] = useState(''); const lock = useRef(false)

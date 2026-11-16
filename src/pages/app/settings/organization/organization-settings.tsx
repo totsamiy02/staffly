@@ -70,7 +70,7 @@ export default function OrganizationSettings({ organization }: { organization: O
   const [phone, setPhone] = useState(formatRussianPhone(organization.phone ?? ''))
   const [website, setWebsite] = useState(organization.website ?? '')
   const [address, setAddress] = useState(organization.address ?? '')
-  const planningAllowed = organization.organizationPermissions?.includes('schedule.settings') || ['coverage.manage','schedule.settings','schedule.templates','positions.manage','offers.settings'].some(key=>organization.owner || organization.permissions?.includes(key))
+  const planningAllowed = organization.organizationPermissions?.includes('schedule.settings') || ['coverage.manage','schedule.settings','schedule.templates','positions.manage','members.positions','offers.settings'].some(key=>organization.owner || organization.permissions?.includes(key))
   const canEditProfile = canAccess(organization, 'organization.edit')
   const editing = profileEditing && canEditProfile
   const profileSafety = useFormSafety({ scope: 'organization-profile:' + organization.id, value: { name, description, industry, timezone, contactEmail, phone, website, address }, active: editing, busy: busy || imageBusy, extraDirty: logoDraft.dirty })

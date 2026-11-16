@@ -22,7 +22,7 @@ import { AccessIcon, AccessNote } from './access-elements.tsx'
 import './access-settings.scss'
 
 const errorText = (error: unknown) => error instanceof Error ? error.message : 'Не удалось сохранить изменения.'
-const auditLabels: Record<string, string> = { MEMBER_EXCLUDED: 'Сотрудник исключён из организации', MEMBER_LOCATION_REMOVED: 'Сотрудник убран из точки', ROLE_CREATED: 'Роль создана', ROLE_UPDATED: 'Права роли изменены', ROLE_DELETED: 'Роль удалена', ASSIGNMENTS_UPDATED: 'Назначения изменены', DOCUMENT_ACCESS: 'Доступ к документу изменён', FOLDER_ACCESS: 'Доступ к папке изменён' }
+const auditLabels: Record<string, string> = { MEMBER_BULK_ASSIGNED: 'Массовое назначение сотрудников', MEMBER_EXCLUDED: 'Сотрудник исключён из организации', MEMBER_LOCATION_REMOVED: 'Сотрудник убран из точки', ROLE_CREATED: 'Роль создана', ROLE_UPDATED: 'Права роли изменены', ROLE_DELETED: 'Роль удалена', ASSIGNMENTS_UPDATED: 'Назначения изменены', DOCUMENT_ACCESS: 'Доступ к документу изменён', FOLDER_ACCESS: 'Доступ к папке изменён' }
 
 export default function AccessSettings({ organization }: { organization: OrganizationSummary }) {
   const subscription = useSubscription()

@@ -1,3 +1,5 @@
+import { MemberBulkAction } from '../../shared/member-bulk-dialog.tsx'
+import { AccessIcon } from '../access/access-elements.tsx'
 import { useSubscription } from '../../../../app/subscriptions/context.ts'
 import ProfileDisclosure from '../../organizations/profile-disclosure.tsx'
 import LocationProfileDetails from '../../organizations/location-profile-details.tsx'
@@ -28,6 +30,7 @@ export default function LocationSettings({ organization }: { organization: Organ
   const owner = organization.organizationRole === 'OWNER' || organization.role === 'OWNER'
   const [pointDialog, setPointDialog] = useState<{ id: string | null; value: LocationFieldsValue } | null>(null)
   const [closing, setClosing] = useState<OrganizationLocation | null>(null)
+  const [assigning, setAssigning] = useState<OrganizationLocation | null>(null)
   const [code, setCode] = useState('')
   const [codeSent, setCodeSent] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -137,8 +140,9 @@ export default function LocationSettings({ organization }: { organization: Organ
 
   const lastPoint = (points.data?.locations.filter(point => !point.archivedAt).length ?? 1) <= 1
   return <div className="location-settings">
+    {assigning && <MemberBulkAction organizationId={organization.id} target={{ kind: 'LOCATION', targetId: assigning.id }} onClose={() => setAssigning(null)} onSaved={refresh} />}
     {error && !pointDialog && !closing && <p className="app-alert app-alert--error" role="alert"><RequestErrorMessage error={error}/></p>}
-    <article className="settings-card settings-card--list"><header><h2>Точки организации</h2><p>Данные, контакты и часы работы точек. Состав точек настраивается в разделе «Сотрудники».</p></header>
+    <article className="settings-card settings-card--list"><header><h2>Точки организации</h2><p>Данные, контакты, часы работы и сотрудники рабочих точек.</p></header>
       {points.isLoading ? (
         <p role="status">Загружаем точки…</p>
       ) : points.isError ? (
@@ -168,9 +172,10 @@ export default function LocationSettings({ organization }: { organization: Organ
                   </p>
                   <small>В составе: {point.memberCount}</small>
                 </div>
-                {(owner || point.permissions?.includes('locations.edit')) && !point.archivedAt && (
+                {(owner || point.permissions?.includes('locations.edit') || point.permissions?.includes('members.assign')) && !point.archivedAt && (
                   <div className="location-actions">
-                    <button className="app-secondary" disabled={busy} onClick={() => {
+                    {(owner || point.permissions?.includes('members.assign')) && <button type="button" className="app-secondary" disabled={busy} onClick={() => setAssigning(point)}><AccessIcon name="people" />Добавить сотрудников</button>}
+                    {(owner || point.permissions?.includes('locations.edit')) && <button className="app-secondary" disabled={busy} onClick={() => {
                       setError('')
                       setPointDialog({
                         id: point.id,
@@ -187,7 +192,7 @@ export default function LocationSettings({ organization }: { organization: Organ
                           revision: point.revision,
                         },
                       })
-                    }}>Изменить</button>
+                    }}>Изменить</button>}
                     {owner && (
                       <button className="app-secondary" disabled={busy || lastPoint}
                         title={lastPoint ? 'Последнюю действующую точку нельзя закрыть' : 'Закрытие с подтверждением по почте'}

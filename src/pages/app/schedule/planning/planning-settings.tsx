@@ -13,7 +13,9 @@ import { useSchedulePlanning, type Position, type ShiftTemplate } from '../../..
 import type { OrganizationSummary } from '../../../../app/organizations/types.ts'
 import Select from '../../../../component/ui/select/select.tsx'
 import { TimeInput } from '../../../../component/ui/date-picker/date-picker.tsx'
-import { Link } from 'react-router-dom'
+import { MemberBulkAction } from '../../shared/member-bulk-dialog.tsx'
+import { AccessIcon } from '../../settings/access/access-elements.tsx'
+import { useSearchParams } from 'react-router-dom'
 import '../schedule.scss'
 
 export default function PlanningSettings({ organization }: { organization: OrganizationSummary }) {
@@ -22,6 +24,9 @@ export default function PlanningSettings({ organization }: { organization: Organ
   const { apiRequest } = useAuth()
   const queryClient = useQueryClient()
   const [position, setPosition] = useState<Position | null>(null)
+  const [assigning, setAssigning] = useState<Position | null>(null)
+  const assignAllowed = canAccess(organization, 'members.positions')
+  const positionsAllowed = assignAllowed || canAccess(organization, 'positions.manage')
   const [name, setName] = useState('')
   const [template, setTemplate] = useState<ShiftTemplate | null>(null)
   const [templateName, setTemplateName] = useState('')
@@ -33,12 +38,18 @@ export default function PlanningSettings({ organization }: { organization: Organ
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [feedbackScope, setFeedbackScope] = useState('')
-  const [tab, setTab] = useState(globalSettings || canAccess(organization,'schedule.settings') || canAccess(organization,'coverage.manage') ? 'team' : canAccess(organization,'positions.manage') ? 'positions' : canAccess(organization,'offers.settings') ? 'offers' : canAccess(organization,'schedule.templates') ? 'templates' : 'workload')
+  const [params, setParams] = useSearchParams()
+  const defaultTab = globalSettings || canAccess(organization, 'schedule.settings') || canAccess(organization, 'coverage.manage') ? 'team' : positionsAllowed ? 'positions' : canAccess(organization, 'offers.settings') ? 'offers' : canAccess(organization, 'schedule.templates') ? 'templates' : 'workload'
+  const requestedTab = params.get('planning')
+  const tab = requestedTab && ['team', 'positions', 'offers', 'templates', 'workload'].includes(requestedTab) ? requestedTab : defaultTab
+  function setTab(value: string) {
+    setParams(previous => { previous.set('planning', value); return previous })
+  }
   useEffect(() => { if (!message) return; const timer = window.setTimeout(() => setMessage(''), 4500); return () => window.clearTimeout(timer) }, [message])
   function feedback(scope: string) { return feedbackScope === scope ? <>{error && <p className="form-inline-error" role="alert">{error}</p>}</> : null }
   const [error, setError] = useState('')
   useToastFeedback(message, error)
-  const canManage = globalSettings || ['coverage.manage','schedule.settings','schedule.templates','positions.manage','offers.settings'].some(key=>organization.owner || organization.permissions?.includes(key))
+  const canManage = globalSettings || ['coverage.manage','schedule.settings','schedule.templates','positions.manage','members.positions','offers.settings'].some(key=>organization.owner || organization.permissions?.includes(key))
   useEffect(() => { if (!hoursDirty) setHours(planning.data?.monthlyWorkMinutes ? String(planning.data.monthlyWorkMinutes / 60) : '') }, [planning.data?.monthlyWorkMinutes, hoursDirty])
   const guards = useFormSafetyContext()
   useFormSafety({ scope: 'planning-settings:' + organization.id + ':' + organization.locationId, value: { name, templateName, positionId, startTime, endTime, overnight, hours }, busy, dirty: tab === 'positions' ? name !== (position?.name ?? '') : tab === 'templates' ? templateName !== (template?.name ?? '') || positionId !== (template?.positionId ?? '') || startTime !== (template?.startTime ?? '09:00') || endTime !== (template?.endTime ?? '18:00') || overnight !== Boolean(template?.endDayOffset) : tab === 'workload' && hoursDirty, onDiscard: () => { setName(position?.name ?? ''); editTemplate(template); setHoursDirty(false) } })
@@ -56,11 +67,29 @@ export default function PlanningSettings({ organization }: { organization: Organ
   if (planning.isError) return <article className="settings-card"><p>Не удалось загрузить настройки расписания.</p><button className="app-secondary" onClick={() => void planning.refetch()}>Повторить</button></article>
   const data = planning.data!
   if (!canManage) return <article className="settings-card"><div><h2>Рабочее время</h2><p>Месячная норма: {data.monthlyWorkMinutes ? data.monthlyWorkMinutes / 60 + ' ч' : 'не задана'}. Должности и шаблоны настраивает администратор.</p></div></article>
-  return <article className="planning-settings"><SegmentedNav label="Настройки расписания">{[[ 'team','Планирование команды',canAccess(organization,'schedule.settings')?'schedule.settings':'coverage.manage'],[ 'positions','Должности','positions.manage'],['offers','Передача и обмен','offers.settings'],['templates','Шаблоны смен','schedule.templates'],['workload','Норма часов','schedule.settings']].filter(([tabKey, ,key])=>tabKey==='team'&&globalSettings || organization.owner || organization.permissions?.includes(key)).map(([key, label]) => <button type="button" key={key} aria-pressed={tab === key} onClick={() => { void guards.confirm([...guards.guards.values()]).then(leave => { if (leave) { setTab(key); setMessage(''); setError('') } }) }}>{label}</button>)}</SegmentedNav>
+  return <article className="planning-settings"><SegmentedNav label="Настройки расписания">{[[ 'team','Планирование команды',canAccess(organization,'schedule.settings')?'schedule.settings':'coverage.manage'],[ 'positions','Должности','positions.manage'],['offers','Передача и обмен','offers.settings'],['templates','Шаблоны смен','schedule.templates'],['workload','Норма часов','schedule.settings']].filter(([tabKey, ,key])=>tabKey==='team'&&globalSettings || key==='positions.manage'&&positionsAllowed || organization.owner || organization.permissions?.includes(key)).map(([key, label]) => <button type="button" key={key} aria-pressed={tab === key} onClick={() => { void guards.confirm([...guards.guards.values()]).then(leave => { if (leave) { setTab(key); setMessage(''); setError('') } }) }}>{label}</button>)}</SegmentedNav>
     <AsyncPanel pending={false} identity={tab} minHeight={260}>{tab === 'team' && <TeamPlanningSettings organization={organization} />}
     {tab === 'offers' && canAccess(organization,'offers.settings') && <ShiftOfferSettings organization={organization} />}
     {tab === 'workload' && canAccess(organization,'schedule.settings') && <section><header><h2>Месячная норма часов</h2><p>Порог предупреждения при планировании, для этой точки. Учитываются часы сотрудника во всех точках организации.</p></header>{feedback('workload')}<form onSubmit={event => { event.preventDefault(); void save('/schedule/workload', { monthlyWorkMinutes: hours ? Math.round(Number(hours) * 60) : null }, 'PUT') }}><label><span>Часов на сотрудника в календарный месяц</span><input type="number" min="1" max="744" step="0.5" value={hours} onChange={event => { setHours(event.target.value); setHoursDirty(true) }} placeholder="Норма не задана" /></label><p>В часовом поясе точки. Сумма отработанных и будущих часов; смена относится к месяцу её начала. Превышение требует подтверждения, а не запрещает сохранение.</p><button className="app-primary" disabled={busy}>Сохранить норму</button></form></section>}
-    {tab === 'positions' && canAccess(organization,'positions.manage') && <section><header><h2>Должности организации</h2><p>Рабочие функции сотрудников. Они не меняют права доступа.</p><Link className="planning-members-link" to={"/app/organizations/" + organization.id + "/employees"}>Назначить должности сотрудникам</Link></header>{feedback('positions')}<div className="planning-items">{data.positions.map(item => <div key={item.id}><div className="planning-item__identity"><strong>{item.name}</strong><small>{item.isActive ? 'Назначено сотрудникам: ' + data.assignments.filter(assignment => assignment.positionId === item.id).length : 'Неактивная должность'}</small></div><button type="button" className="app-secondary" disabled={busy} onClick={() => editPosition(item)}>Изменить</button><button type="button" className="app-secondary" disabled={busy} onClick={() => void save('/schedule/positions/' + item.id, { name: item.name, isActive: !item.isActive }, 'PATCH')}>{item.isActive ? 'Деактивировать' : 'Восстановить'}</button></div>)}</div><form onSubmit={submitPosition}><label><span>{position ? 'Изменить должность' : 'Новая должность'}</span><input value={name} onChange={event => setName(event.target.value)} minLength={2} maxLength={120} required placeholder="Например, бариста" /></label><div><button className="app-primary" disabled={busy}>Сохранить</button>{position && <button type="button" className="app-secondary" onClick={() => editPosition(null)}>Отмена</button>}</div></form></section>}
+    {tab === 'positions' && positionsAllowed && <section>
+      <header><h2>Должности организации</h2><p>Рабочие функции сотрудников. Они не меняют права доступа.</p></header>
+      {feedback('positions')}
+      <div className="planning-items planning-position-items">
+        {data.positions.map(item => <div key={item.id}>
+          <div className="planning-item__identity"><strong>{item.name}</strong><small>{item.isActive ? 'Назначено в этой точке: ' + data.assignments.filter(assignment => assignment.positionId === item.id).length : 'Неактивная должность'}</small></div>
+          {assignAllowed && item.isActive && <button type="button" className="app-secondary" disabled={busy} onClick={() => setAssigning(item)}><AccessIcon name="people" />Назначить сотрудникам</button>}
+          {canAccess(organization, 'positions.manage') && <>
+            <button type="button" className="app-secondary" disabled={busy} onClick={() => editPosition(item)}>Изменить</button>
+            <button type="button" className="app-secondary" disabled={busy} onClick={() => void save('/schedule/positions/' + item.id, { name: item.name, isActive: !item.isActive }, 'PATCH')}>{item.isActive ? 'Деактивировать' : 'Восстановить'}</button>
+          </>}
+        </div>)}
+      </div>
+      {canAccess(organization, 'positions.manage') && <form onSubmit={submitPosition}>
+        <label><span>{position ? 'Изменить должность' : 'Новая должность'}</span><input value={name} onChange={event => setName(event.target.value)} minLength={2} maxLength={120} required placeholder="Например, бариста" /></label>
+        <div><button className="app-primary" disabled={busy}>Сохранить</button>{position && <button type="button" className="app-secondary" onClick={() => editPosition(null)}>Отмена</button>}</div>
+      </form>}
+    </section>}
+    {assigning && <MemberBulkAction organizationId={organization.id} target={{ kind: 'POSITION', targetId: assigning.id }} onClose={() => setAssigning(null)} />}
     {tab === 'templates' && canAccess(organization,'schedule.templates') && <section><header><h2>Шаблоны смен</h2><p>Готовое время для должности или всей точки. Сохранённые смены не изменятся.</p></header>{feedback('templates')}<div className="planning-items">{data.templates.map(item => <div key={item.id}><div className="planning-item__identity"><strong>{item.name}</strong><small>{data.positions.find(position => position.id === item.positionId)?.name ?? 'Для всей точки'}{!item.isActive ? ' · Неактивен' : ''}</small></div><span className="planning-item__time">{item.startTime}–{item.endTime}{item.endDayOffset ? ' · следующий день' : ''}</span><button className="app-secondary" disabled={busy} onClick={() => editTemplate(item)}>Изменить</button><button className="app-secondary" disabled={busy} onClick={() => void save('/schedule/templates/' + item.id, { ...item, isActive: !item.isActive }, 'PATCH')}>{item.isActive ? 'Деактивировать' : 'Восстановить'}</button></div>)}</div><form onSubmit={submitTemplate}><label><span>Название шаблона</span><input value={templateName} onChange={event => setTemplateName(event.target.value)} required minLength={2} maxLength={120} /></label><label><span>Для должности</span><Select value={positionId} onChange={event => setPositionId(event.target.value)}><option value="">Общий для точки</option>{data.positions.filter(item => item.isActive).map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</Select></label><div className="planning-time"><label><span>Начало</span><TimeInput required value={startTime} onChange={event => setStartTime(event.target.value)} /></label><label><span>Окончание</span><TimeInput required value={endTime} onChange={event => setEndTime(event.target.value)} /></label></div><label className="planning-checkbox"><input type="checkbox" checked={overnight} onChange={event => setOvernight(event.target.checked)} /><span>Окончание на следующий день</span></label><div><button className="app-primary" disabled={busy}>Сохранить шаблон</button>{template && <button type="button" className="app-secondary" onClick={() => editTemplate(null)}>Отмена</button>}</div></form></section>}
   </AsyncPanel></article>
 }

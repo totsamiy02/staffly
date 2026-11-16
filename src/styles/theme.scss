@@ -1,6 +1,6 @@
 // Light styles keep their original fallbacks. Every UI module consumes these
 // shared roles, including lazy routes and popups portaled to document.body.
-:root {color-scheme:light;--theme-muted:#64616c;--theme-quiet:#696570;}
+:root {color-scheme:light;--theme-muted:#64616c;--theme-quiet:#696570;--theme-scrollbar:#a6a4ab;--theme-scrollbar-hover:#7d7986;}
 :where(html[data-theme=dark]) :where(button,select) {color:inherit;}
 :root[data-theme=dark] {
   color-scheme:dark;
@@ -21,6 +21,7 @@
   --theme-border-strong:#625d6c;
   --theme-focus:#c2aad8;
   --theme-scrollbar:#66616f;
+  --theme-scrollbar-hover:#96909f;
   --theme-primary:#eeebf3;
   --theme-primary-ink:#25212c;
   --theme-primary-hover:#dcd4e6;

@@ -358,6 +358,7 @@ model Organization {
   files                StoredFile[]           @relation("OrganizationFiles")
   accessRoles          AccessRole[]
   accessAudit          AccessAudit[]
+  memberBulkOperations MemberBulkOperation[]
   members              OrganizationMember[]
   invitations          OrganizationInvite[]
   sensitiveActions     SensitiveActionToken[]
@@ -522,6 +523,7 @@ model OrganizationMember {
   personalDocuments   Document[] @relation("DocumentTarget")
   documentAcknowledgements DocumentAcknowledgement[] @relation("AcknowledgementRecipient")
   assignedAcknowledgements DocumentAcknowledgement[] @relation("AcknowledgementAssigner")
+  memberBulkOperations MemberBulkOperation[]
 
   initiatedShiftOffers     ShiftOffer[]              @relation("OfferInitiator")
   receivedShiftOffers      ShiftOffer[]              @relation("OfferRecipient")
@@ -1419,6 +1421,22 @@ model AccessAudit {
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   @@index([organizationId, createdAt])
   @@map("access_audit")
+}
+
+model MemberBulkOperation {
+  id             String @id @default(uuid()) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  actorMemberId  String @map("actor_member_id") @db.Uuid
+  requestKey     String @map("request_key") @db.Uuid
+  fingerprint    String @db.VarChar(64)
+  result         Json
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  actor          OrganizationMember @relation(fields: [actorMemberId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, actorMemberId, requestKey], map: "member_bulk_operation_request_key")
+  @@index([organizationId, createdAt])
+  @@map("member_bulk_operations")
 }
 
 // A version is a complete weekly schedule: null = unconfigured, [] = explicitly no demand.

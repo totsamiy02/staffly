@@ -1,5 +1,6 @@
 import { timesheetDatabaseError } from './schedule/timesheets/errors.ts'
 import timesheetRouter from './schedule/timesheets/routes.ts'
+import memberBulkRouter from './organizations/member-bulk-routes.ts'
 import { publicContentRouter,maintenanceWriteGate } from './public-content.ts'
 import { createSiteRouter } from './site/router.ts'
 import { organizationServiceGate,suspendedWriteError } from './organizations/service-state.ts'
@@ -157,6 +158,7 @@ app.use('/api', documentsRouter)
 app.use('/api', eventsRouter)
 app.use('/api', teamPlanningRouter)
 app.use('/api', timesheetRouter)
+app.use('/api', memberBulkRouter)
 app.use('/api', (_request, response) => response.status(404).json({ code: 'API_NOT_FOUND', message: 'Запрошенный адрес не найден.' }))
 app.use(createSiteRouter({ origin: appUrl, publications: async () => (await databasePool.query('SELECT key,title,left(body,1000) AS body,metadata FROM public.platform_public_content')).rows }))
 app.use((error: unknown, request: express.Request, response: express.Response, _next: express.NextFunction) => {

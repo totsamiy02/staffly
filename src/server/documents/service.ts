@@ -1,7 +1,7 @@
 import { assertCustomFolder, employeeFolder } from './system-folders.ts'
 import { documentReadSql, docPermission, canReadDocument, folderReadable, type DocumentActor } from '../access/document-policy.ts'
 export { canReadDocument } from '../access/document-policy.ts'
-import { hasPermission, requirePermission, locationsFor, ensureAccessRoles, auditAccess, type PermissionActor } from '../organizations/access/access.ts'
+import { hasPermission, requirePermission, locationsFor, ensureAccessRoles, auditAccess, memberAudienceRoleIds, type PermissionActor } from '../organizations/access/access.ts'
 import type { Permission } from '../../app/access/catalog.ts'
 import { scopedLocationId, locationMemberWhere } from '../organizations/location-context.ts'
 import { createHash, randomUUID } from 'node:crypto'
@@ -237,7 +237,8 @@ export async function assignAcknowledgements(userId: string, organizationId: str
     const candidates = await tx.organizationMember.findMany({ where: { organizationId, leftAt: null, user: { deletedAt: null }, ...(data.recipients === 'members' ? { id: { in: data.memberIds } } : {}) }, include: { locationMemberships: { where: { locationId: doc.locationId ?? undefined, leftAt: null } } } })
     await validateAudience(tx, organizationId, {audienceRoleIds:data.accessRoleIds})
     const hydrated = await Promise.all(candidates.map(m => getMembership(m.userId, organizationId, tx)))
-    const members = hydrated.filter(member => data.recipients !== 'roles' || data.roles.includes(member.organizationRole) || (data.accessRoleIds ?? []).some(id => member.accessRoleId === id || member.accessAssignments.some(a => a.roleId === id && a.locationId === doc.locationId)))
+    const roles = await ensureAccessRoles(tx, organizationId)
+    const members = hydrated.filter(member => data.recipients !== 'roles' || data.roles.includes(member.organizationRole) || (data.accessRoleIds ?? []).some(id => memberAudienceRoleIds({ ...member, role: member.organizationRole }, roles, doc.locationId).includes(id)))
     if (!members.length || (data.recipients === 'members' && members.length !== new Set(data.memberIds).size)) throw new ApiError(400, 'INVALID_RECIPIENTS', 'Выберите действующих сотрудников этой организации.')
     if (members.some(member => !canReadDocument(member, doc)) || doc.folderId && (await Promise.all(members.map(member => folderAncestorsReadable(tx, member, doc.folderId!)))).some(allowed => !allowed)) throw new ApiError(409, 'RECIPIENT_ACCESS_DENIED', 'Некоторые получатели не имеют доступа к документу. Измените доступ или список получателей.')
     const existing = await tx.documentAcknowledgement.findMany({ where: { documentId, memberId: { in: members.map(member => member.id) } }, select: { memberId: true } })
@@ -403,7 +404,7 @@ export async function documentMembers(userId: string, organizationId: string, al
   const locationId=scopedLocationId(organizationId)
   const roles=await ensureAccessRoles(prisma,organizationId)
   const items = await prisma.organizationMember.findMany({ where: { organizationId, ...(all || !locationId ? {} : {OR:[locationMemberWhere(organizationId),{accessRoleId:{not:null}},{accessAssignments:{some:{locationId}}}]}) }, include: {accessAssignments:true,locationMemberships:{where:{leftAt:null}}, user: { select: { email: true, firstName: true, lastName: true, middleName: true, avatarFileId: true } } }, orderBy: { joinedAt: 'asc' } })
-  return items.map(item => ({ id: item.id, accessRoleIds:[...(item.role === 'OWNER' ? [roles.find(r=>r.systemCode==='OWNER')!.id] : []),...(item.accessRoleId?[item.accessRoleId]:[]),...(item.accessConfigured ? item.accessAssignments.filter(a=>all || !locationId || a.locationId===locationId).map(a=>a.roleId) : item.locationMemberships.filter(l=>all || !locationId || l.locationId===locationId).map(l=>roles.find(r=>r.systemCode===l.role)!.id))], name: memberName(item.user), email: hasPermission(actor,'members.contacts') ? item.workEmail??'' : '', role: item.role, former: Boolean(item.leftAt), avatarUrl: mediaUrl(item.user.avatarFileId) }))
+  return items.map(item => ({ id: item.id, accessRoleIds: memberAudienceRoleIds(item, roles, all || !locationId ? null : locationId), name: memberName(item.user), email: hasPermission(actor,'members.contacts') ? item.workEmail??'' : '', role: item.role, former: Boolean(item.leftAt), avatarUrl: mediaUrl(item.user.avatarFileId) }))
 }
 
 export async function previewDocumentAudience(userId: string, organizationId: string, data: Metadata) {

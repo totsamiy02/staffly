@@ -6,6 +6,30 @@ const sizes = [
 ]
 export async function checkAdminLayout({page,nav,expect,org,userId,output,result,browser,operationsJobId,operationsErrorId}) {
  result.layoutChecks??=[]
+ // The layout matrix performs hundreds of real interactions in one session.
+ // If it reaches the production throttle, exercise its normal Retry-After recovery
+ // instead of expecting tabs on the error screen or weakening the server limit.
+ let retryAt=0
+ const limited=response=>{
+  if(response.status()!==429||!new URL(response.url()).pathname.startsWith('/api/admin/'))return
+  const seconds=Number(response.headers()['retry-after'])
+  if(Number.isFinite(seconds)&&seconds>0&&seconds<=60)retryAt=Date.now()+seconds*1000
+ }
+ page.on('response',limited)
+ const ready=async()=>{
+  await expect.poll(()=>page.locator('.admin-page-head h1:visible,.admin-load-error:visible').count()).toBeGreaterThan(0)
+  const failure=page.locator('.admin-load-error')
+  if(await failure.isVisible()){
+   await expect(failure).toContainText('Слишком много действий.')
+   assert(retryAt>0,'A throttled read must supply a valid Retry-After header')
+   const remaining=Math.max(0,retryAt-Date.now())
+   await new Promise(resolve=>setTimeout(resolve,remaining))
+   await failure.getByRole('button',{name:'Повторить загрузку',exact:true}).click()
+   await expect(page.locator('.admin-page-head h1')).toBeVisible()
+   result.rateLimitRecoveries??=[]
+   result.rateLimitRecoveries.push({browser,delayMs:remaining})
+  }
+ }
  const routes=[
   ['security','Безопасность','Безопасность'],['backups','Резервные копии','Резервные копии'],['administrators','Администраторы','Администраторы'],['alerts','Оповещения','Оповещения'],
   ['overview','Обзор','Обзор сервиса'],['organizations','Организации','Организации'],['organization','Организации',org.name],['users','Пользователи','Пользователи'],['user','Пользователи',null],['online','Онлайн','Онлайн'],['analytics','Аналитика','Аналитика продукта'],['events','События','События сервиса'],
@@ -17,11 +41,13 @@ export async function checkAdminLayout({page,nav,expect,org,userId,output,result
   await page.setViewportSize({width:1600,height:1100})
   await expect(page.locator('.admin-root')).not.toHaveClass(/has-compact-navigation/)
   await nav(section)
+  await ready()
   // Exercise the app's own links/tabs. A hard document replacement immediately
   // after sidebar navigation aborts the page's reads instead of testing reflow.
   if(route==='organization-service')await page.locator(`a.admin-org-name[href="/admin/organizations/${org.id}"]`).click()
   if(route.startsWith('maintenance-')){
    await page.getByRole('link',{name:'Обслуживание сервиса',exact:true}).click()
+   await ready()
    const tab=new URL(target,page.url()).searchParams.get('tab')
    const labels={backups:'Резервирование',cleanup:'Хранение и удаление',release:'Обслуживание и выпуск',content:'Публичный контент',signals:'Внешние сигналы',reports:'Отчёт команды'}
    await page.getByRole('tab',{name:labels[tab],exact:true}).click()
@@ -80,4 +106,5 @@ export async function checkAdminLayout({page,nav,expect,org,userId,output,result
   }
  }
  await page.setViewportSize({width:1600,height:1100})
+ page.off('response',limited)
 }

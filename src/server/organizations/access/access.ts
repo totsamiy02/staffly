@@ -24,6 +24,27 @@ export function requirePermission(actor: PermissionActor, key: Permission, locat
   if (!hasPermission(actor, key, locationId)) throw new ApiError(403, 'INSUFFICIENT_PERMISSIONS', 'Недостаточно прав для этого действия.')
 }
 export function locationsFor(actor: PermissionActor, key: Permission) { return actor.permissionLocations?.[key] ?? [] }
+
+export function memberAudienceRoleIds(
+  member: {
+    role: string
+    accessConfigured: boolean
+    accessRoleId: string | null
+    accessAssignments: Array<{ locationId: string; roleId: string }>
+    locationMemberships: Array<{ locationId: string; role: string }>
+  },
+  roles: Array<{ id: string; systemCode: string | null }>,
+  locationId: string | null,
+) {
+  // The owner's physical placement uses LocationRole.MEMBER because that enum
+  // has no OWNER value. It must never classify the owner as a staff recipient.
+  if (member.role === 'OWNER') return roles.filter(role => role.systemCode === 'OWNER').map(role => role.id)
+  const local = member.accessConfigured
+    ? member.accessAssignments.filter(item => !locationId || item.locationId === locationId).map(item => item.roleId)
+    : member.locationMemberships.filter(item => !locationId || item.locationId === locationId)
+      .flatMap(item => roles.filter(role => role.systemCode === item.role).map(role => role.id))
+  return [...new Set([...(member.accessRoleId ? [member.accessRoleId] : []), ...local])]
+}
 export function resolveAccess(member: { role: 'OWNER'|'ADMIN'|'MEMBER'; accessConfigured: boolean; _count?: { locationMemberships: number }; accessRoleId: string | null; locationMemberships: Array<{ locationId: string; role: 'ADMIN'|'MEMBER' }>; accessAssignments: Array<{ locationId: string; roleId: string }> }, roles: Array<{ id: string; name: string; systemCode: string | null; permissions: string[] }>, locationIds: string[], selected?: string) {
   const owner = member.role === 'OWNER', global = roles.find(r => r.id === member.accessRoleId)
   const organizationPermissions = owner ? [...permissionKeys] : (global?.permissions ?? [])
