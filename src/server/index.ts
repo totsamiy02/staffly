@@ -14,6 +14,8 @@ import { recordFeature } from './admin/collection.ts'
 import { randomUUID } from 'node:crypto'
 import { safeError, safeApiError } from './security/safe-error.ts'
 import { securityContext } from './security/journal.ts'
+import selfExitRouter from './organizations/self-exit-routes.ts'
+import selfExitWorkRouter from './organizations/self-exit-work-routes.ts'
 import subscriptionRouter, { subscriptionWritePolicy } from './subscriptions/routes.ts'
 import teamPlanningRouter from './schedule/planning/team-planning-routes.ts'
 import express from 'express'
@@ -132,6 +134,7 @@ app.get('/health/ready', async (_request, response) => {
 })
 app.use('/api/public',publicContentRouter)
 app.use('/api',maintenanceWriteGate)
+app.use('/api',selfExitRouter)
 app.use('/api/organizations/:organizationId', (request, response, next) => {
   response.locals.operationsOrganizationId=String(request.params.organizationId)
   if (!['GET', 'HEAD'].includes(request.method)) response.once('finish', () => { if (response.statusCode < 400) readCache.invalidate(String(request.params.organizationId)) })
@@ -147,6 +150,7 @@ app.use('/api/organizations/:organizationId', (request, response, next) => {
 })
 app.use('/api', (_q,s,next)=>{s.set('Cache-Control','no-store');next()}, accessRouter)
 app.use('/api', subscriptionRouter)
+app.use('/api', selfExitWorkRouter)
 app.use('/api', storageRouter)
 app.use('/api/auth', (_request, response, next) => { response.set('Cache-Control', 'no-store'); next() }, authRouter)
 app.use('/api', (_request, response, next) => { response.set('Cache-Control', 'no-store'); next() }, profileRouter)

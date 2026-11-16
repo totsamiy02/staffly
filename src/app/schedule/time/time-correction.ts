@@ -11,7 +11,7 @@ export type CorrectionInput = { mode: CorrectionMode; startAt?: string | null; e
 export type CorrectionShift = Pick<WorkShift, 'status' | 'attendance' | 'scheduledStartAt' | 'scheduledEndAt' | 'actualStartAt' | 'actualEndAt' | 'actualBreakMinutes'> & { breakMinutes?: number };
 
 export function canCorrectShift(shift: Pick<WorkShift, 'status' | 'scheduledStartAt'>, now = Date.now()) {
-  return shift.status !== 'CANCELLED' && Date.parse(shift.scheduledStartAt) <= now;
+  return shift.status === 'SCHEDULED' && Date.parse(shift.scheduledStartAt) <= now;
 }
 export function canConfirmShiftPlan(shift: CorrectionShift, now = Date.now()) {
   return canCorrectShift(shift, now) && Date.parse(shift.scheduledEndAt) <= now

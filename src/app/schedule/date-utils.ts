@@ -71,6 +71,7 @@ export function displayDate(value: string) {
 }
 
 export function shiftState(shift: Pick<WorkShift, 'status' | 'scheduledStartAt' | 'scheduledEndAt' | 'actualStartAt' | 'actualEndAt'>, now = Date.now()) {
+  if (shift.status === 'UNASSIGNED') return { key: 'unassigned', label: 'Нужна замена' }
   if (shift.status === 'CANCELLED') return { key: 'cancelled', label: 'Отменена' }
   const start = new Date(shift.actualStartAt ?? shift.scheduledStartAt).getTime()
   const end = new Date(shift.actualEndAt ?? shift.scheduledEndAt).getTime()

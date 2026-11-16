@@ -228,11 +228,13 @@ enum SensitiveActionType {
 }
 
 enum WorkShiftStatus {
+  UNASSIGNED
   SCHEDULED
   CANCELLED
 }
 
 enum AccountNotificationType {
+  ORGANIZATION_MEMBER_LEFT
   TIMESHEET_REVIEW
   SUBSCRIPTION_STATUS
   REQUEST_VACATION_COLLECTION
@@ -309,6 +311,7 @@ enum RequestEventType {
 }
 
 model Organization {
+  selfExits MemberSelfExit[]
   timesheetPeriods TimesheetPeriod[]
   industry String? @db.VarChar(120)
   profileRevision Int @default(1) @map("profile_revision")
@@ -471,6 +474,7 @@ model AccountNotification {
 }
 
 model OrganizationMember {
+  selfExits MemberSelfExit[]
   vacationAccounts VacationAccount[]
   vacationBalanceEvents VacationBalanceEvent[] @relation("VacationBalanceActor")
   timesheetClosures TimesheetVersion[] @relation("TimesheetCloser")
@@ -543,6 +547,7 @@ model OrganizationMember {
 }
 
 model MemberEmploymentPeriod {
+  selfExit MemberSelfExit?
   id String @id @default(uuid()) @db.Uuid
   organizationId String @map("organization_id") @db.Uuid
   memberId String @map("member_id") @db.Uuid
@@ -579,6 +584,9 @@ enum ShiftAttendance {
 }
 
 model WorkShift {
+  selfExitId String? @map("self_exit_id") @db.Uuid
+  selfExit MemberSelfExit? @relation(fields: [organizationId, memberId, selfExitId], references: [organizationId, memberId, id], onDelete: NoAction)
+  @@index([selfExitId, status])
   replacementOfId String? @map("replacement_of_id") @db.Uuid
   replacementCutoffAt DateTime? @map("replacement_cutoff_at") @db.Timestamptz(3)
   replacementFloorAt DateTime? @map("replacement_floor_at") @db.Timestamptz(3)
@@ -654,6 +662,9 @@ model RequestType {
 }
 
 model OrganizationRequest {
+  selfExitId String? @map("self_exit_id") @db.Uuid
+  selfExit MemberSelfExit? @relation(fields: [organizationId, selfExitId], references: [organizationId, id], onDelete: NoAction)
+  @@index([selfExitId])
   amendmentOfId String? @map("amendment_of_id") @db.Uuid
   authorMemberId String? @map("author_member_id") @db.Uuid
   submissionKey String? @map("submission_key") @db.VarChar(100)
@@ -1840,4 +1851,25 @@ model VacationBalanceEvent {
   @@unique([organizationId, submissionKey])
   @@index([accountId, createdAt, id])
   @@map("vacation_balance_events")
+}
+
+model MemberSelfExit {
+  id String @id @default(uuid()) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  memberId String @map("member_id") @db.Uuid
+  employmentPeriodId String @unique @map("employment_period_id") @db.Uuid
+  memberName String @map("member_name") @db.VarChar(300)
+  locationIds String[] @map("location_ids") @db.Uuid
+  requestIds String[] @map("request_ids") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  member OrganizationMember @relation(fields: [organizationId, memberId], references: [organizationId, id], onDelete: NoAction)
+  employmentPeriod MemberEmploymentPeriod @relation(fields: [organizationId, memberId, employmentPeriodId], references: [organizationId, memberId, id], onDelete: NoAction)
+  shifts WorkShift[]
+  requests OrganizationRequest[]
+  @@unique([organizationId, memberId, employmentPeriodId])
+  @@unique([organizationId, memberId, id])
+  @@unique([organizationId, id])
+  @@index([organizationId, createdAt, id])
+  @@map("member_self_exits")
 }

@@ -31,7 +31,7 @@ function scopeWhere(organizationId: string, locations: Awaited<ReturnType<typeof
   return { organizationId, OR: locations.map(location => {
     const { start, end } = range(from, to, location.timezone)
     return { OR: [
-      { workShifts: { some: { organizationId, locationId: location.id, status: { not: 'CANCELLED' }, cancelledAt: null, scheduledStartAt: { gte: start, lt: end } } } },
+      { workShifts: { some: { organizationId, locationId: location.id, status: 'SCHEDULED', cancelledAt: null, scheduledStartAt: { gte: start, lt: end } } } },
       { locationMemberships: { some: { locationId: location.id, joinedAt: { lt: end }, OR: [{ leftAt: null }, { leftAt: { gt: start } }] } } },
       { locationTransfers: { some: { toLocationId: location.id, startAt: { lt: end }, AND: [{ OR: [{ revokedAt: null }, { revokedAt: { gt: start } }] }, { OR: [{ revokedAt: null }, { revokedAt: { gt: prisma.locationTransfer.fields.startAt } }] }], OR: [{ endAt: null }, { endAt: { gt: start } }] } } },
     ] }
@@ -85,7 +85,7 @@ export async function buildReport(userId: string, organizationId: string, input:
     if (input.memberIds.some(id => !members.some(member => member.id === id))) throw fail('Выбранный сотрудник вне организации, периода или управляемой области.')
     const selectedMembers = input.memberIds.length ? members.filter(member => input.memberIds.includes(member.id)) : members
     const memberMap = new Map(selectedMembers.map(member => [member.id, member]))
-    const shifts = await db.workShift.findMany({ where: { organizationId, memberId: { in: [...memberMap.keys()] }, status: { not: 'CANCELLED' }, cancelledAt: null, OR: locations.map(location => { const { start, end } = range(input.from, input.to, location.timezone); return { locationId: location.id, scheduledStartAt: { gte: start, lt: end } } }) }, orderBy: [{ scheduledStartAt: 'asc' }, { memberId: 'asc' }, { id: 'asc' }], take: MAX_ROWS + 1 })
+    const shifts = await db.workShift.findMany({ where: { organizationId, memberId: { in: [...memberMap.keys()] }, status: 'SCHEDULED', cancelledAt: null, OR: locations.map(location => { const { start, end } = range(input.from, input.to, location.timezone); return { locationId: location.id, scheduledStartAt: { gte: start, lt: end } } }) }, orderBy: [{ scheduledStartAt: 'asc' }, { memberId: 'asc' }, { id: 'asc' }], take: MAX_ROWS + 1 })
     const absences = await db.employeeAbsence.findMany({ where: { organizationId, memberId: { in: [...memberMap.keys()] }, cancelledAt: null, startDate: { lte: new Date(input.to) }, endDate: { gte: new Date(input.from) } }, orderBy: [{ startDate: 'asc' }, { memberId: 'asc' }, { id: 'asc' }], take: MAX_ROWS + 1 })
     if (shifts.length > MAX_ROWS || absences.length > MAX_ROWS) throw new ApiError(400, 'REPORT_LIMIT', `Не более ${MAX_ROWS} строк на лист. Уменьшите период или область.`)
     let templateName: string | null = null

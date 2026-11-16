@@ -1,3 +1,4 @@
+import { exitAttention } from '../organizations/self-exit-work.ts';
 import { z } from 'zod';
 import { prisma } from '../db.ts';
 import { getMembership } from '../organizations/access/permissions.ts';
@@ -22,7 +23,21 @@ export async function listAttention(userId: string, organizationId: string, opti
     const result = new AttentionCollector(options);
     const pointId = options.pointId === 'all' ? undefined : options.pointId;
     const base = `/app/organizations/${organizationId}`;
+    const exitRequests = new Set<string>();
+    for await (const exit of exitAttention(db, actor, pointId, context)) {
+      for (const task of exit.tasks) exitRequests.add(task.id);
+      const location = exit.shifts[0] ?? exit.tasks[0];
+      result.add({
+        id: `self-exit:${exit.id}`, sourceId: exit.id, kind: 'DEPARTURE', scope: 'control',
+        title: `${exit.memberName} покинул организацию`, subtitle: 'Смены и незавершённые задачи',
+        locationId: location?.locationId ?? null, locationName: location?.locationName ?? 'Организация',
+        timezone: actor.organization.timezone, dueAt: null, deadlineDay: null, overdue: false, blocked: true,
+        reason: [exit.shifts.length ? `Смены без замены: ${exit.shifts.length}` : '', exit.tasks.length ? `Назначения без исполнителя: ${exit.tasks.length}` : ''].filter(Boolean).join(' · '),
+        action: 'Разобрать', href: `${base}?selfExit=${exit.id}${pointId ? `&location=${pointId}` : ''}`,
+      });
+    }
     for await (const row of requestActions(db, organizationId, { actor, roles: context.roles, pointId })) {
+      if (exitRequests.has(row.id)) continue;
       const task = row.status === 'APPROVED' ? taskOutcome(row.outcome) : null;
       const assignees = task ? context.members.filter(m => task.assignees?.includes(m.id) && hasPermission(m, 'requests.own', row.locationId)) : [];
       const reviewers = task ? assignees : actionReviewers(context, row);

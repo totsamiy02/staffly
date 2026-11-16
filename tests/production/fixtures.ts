@@ -29,10 +29,10 @@ try {
     const role = (await databasePool.query('SELECT current_user AS name, rolsuper, rolcreatedb, rolcreaterole, rolbypassrls FROM pg_roles WHERE rolname=current_user')).rows[0]
     assert.equal(role.name, 'staffly_app')
     assert.equal(role.rolsuper || role.rolcreatedb || role.rolcreaterole || role.rolbypassrls, false)
-    for (const sql of ['CREATE TABLE public.audit_forbidden (id int)', 'ALTER TABLE public.users ADD COLUMN audit_forbidden int', 'CREATE ROLE audit_forbidden', 'SET ROLE staffly_migrator', 'DELETE FROM public._prisma_migrations', 'UPDATE public.security_events SET reason_code=NULL', 'UPDATE public.organization_resource_budgets SET storage_limit_bytes=1', 'UPDATE public.member_employment_periods SET started_at=now()']) {
+    for (const sql of ['CREATE TABLE public.audit_forbidden (id int)', 'ALTER TABLE public.users ADD COLUMN audit_forbidden int', 'CREATE ROLE audit_forbidden', 'SET ROLE staffly_migrator', 'DELETE FROM public._prisma_migrations', 'UPDATE public.security_events SET reason_code=NULL', 'UPDATE public.organization_resource_budgets SET storage_limit_bytes=1', 'UPDATE public.member_employment_periods SET started_at=now()', 'UPDATE public.member_self_exits SET member_name=member_name', 'DELETE FROM public.member_self_exits']) {
       await assert.rejects(databasePool.query(sql), { code: '42501' })
     }
-    console.log(JSON.stringify({ runtimeRole: role.name, deniedOperations: 8 }))
+    console.log(JSON.stringify({ runtimeRole: role.name, deniedOperations: 10 }))
   } else if (action === 'revoke') {
     const fixture = JSON.parse(process.env.AUDIT_FIXTURE!)
     await prisma.locationMember.updateMany({ where: { memberId: fixture.employeeId }, data: { leftAt: new Date() } })

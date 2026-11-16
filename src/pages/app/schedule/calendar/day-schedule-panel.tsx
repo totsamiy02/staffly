@@ -81,10 +81,11 @@ export default function DaySchedulePanel({ date, timezone, locationName, locatio
                   <span><time dateTime={shift.scheduledEndAt}>{formatTime(shift.scheduledEndAt, timezone)}</time><small>{dayLabel(shift.scheduledEndAt)}</small></span>
                 </span> : <span className="day-schedule-card__same-day">{formatTime(shift.scheduledStartAt, timezone)}–{formatTime(shift.scheduledEndAt, timezone)}</span>}
               </dd></div>
-              <div><dt>Предварительно</dt><dd>{shift.status === 'CANCELLED' ? '—' : formatDuration(accounting.estimatedMinutes)}</dd></div>
+              <div><dt>Предварительно</dt><dd>{shift.status !== 'SCHEDULED' ? '—' : formatDuration(accounting.estimatedMinutes)}</dd></div>
               <div><dt>Подтверждено</dt><dd>{accounting.confirmedMinutes === null ? '—' : formatDuration(accounting.confirmedMinutes)}</dd></div>
             </dl>
-            {shift.status !== 'CANCELLED' && <p className="day-schedule-card__accounting">{corrected ? `Учтено: ${accountedTimeLabel(shift, timezone)}` : 'Источник предварительного расчёта: расписание. Факт не подтверждён.'}</p>}
+            {shift.status === 'UNASSIGNED' && <p className="day-schedule-card__accounting">Сотрудник покинул организацию. Назначение ожидает замены и не входит в расчёт часов.</p>}
+            {shift.status === 'SCHEDULED' && <p className="day-schedule-card__accounting">{corrected ? `Учтено: ${accountedTimeLabel(shift, timezone)}` : 'Источник предварительного расчёта: расписание. Факт не подтверждён.'}</p>}
             {shift.replacementCutoffAt && <p className="day-schedule-card__accounting">Участие завершено для замены</p>}
             {shift.description && <p className="day-schedule-card__note">{shift.description}</p>}
             {shift.cancellationReason && <p className="day-schedule-card__note">Причина отмены: {shift.cancellationReason}</p>}

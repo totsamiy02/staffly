@@ -16,6 +16,7 @@ export type WorkTimeInput = {
   cancelledAt?: Date | string | null;
 };
 export type WorkTimeState =
+  | 'UNASSIGNED'
   | 'CANCELLED'
   | 'FUTURE'
   | 'IN_PROGRESS'
@@ -28,7 +29,7 @@ export type ShiftAccounting = {
   estimatedMinutes: number;
   confirmedMinutes: number | null;
   state: WorkTimeState;
-  source: 'SCHEDULE' | 'PARTIAL' | 'UNCONFIRMED_MARKS' | 'ACTUAL' | 'NO_SHOW' | 'CANCELLED';
+  source: 'UNASSIGNED' | 'SCHEDULE' | 'PARTIAL' | 'UNCONFIRMED_MARKS' | 'ACTUAL' | 'NO_SHOW' | 'CANCELLED';
   completed: boolean;
   pending: boolean;
 };
@@ -56,6 +57,7 @@ export function calculateWorkTime(shift: WorkTimeInput, asOf: Date | number = Da
     completed: false,
     pending: false,
   };
+  if (shift.status === 'UNASSIGNED') return { ...base, plannedMinutes: 0, state: 'UNASSIGNED', source: 'UNASSIGNED' };
   if (shift.status === 'CANCELLED' || shift.cancelledAt) {
     return { ...base, state: 'CANCELLED', source: 'CANCELLED' };
   }
@@ -107,6 +109,7 @@ export function calculateWorkTime(shift: WorkTimeInput, asOf: Date | number = Da
 }
 
 export const workTimeStateNames: Record<WorkTimeState, string> = {
+  UNASSIGNED: 'Нужна замена',
   CANCELLED: 'Отменена',
   FUTURE: 'Будущая смена',
   IN_PROGRESS: 'Смена идёт',
@@ -116,6 +119,7 @@ export const workTimeStateNames: Record<WorkTimeState, string> = {
   NO_SHOW: 'Неявка подтверждена',
 };
 export const workTimeSourceNames: Record<ShiftAccounting['source'], string> = {
+  UNASSIGNED: 'Нет исполнителя',
   SCHEDULE: 'Расписание',
   PARTIAL: 'Отметки и расписание',
   UNCONFIRMED_MARKS: 'Неподтверждённые отметки',

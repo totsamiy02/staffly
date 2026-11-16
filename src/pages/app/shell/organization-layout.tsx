@@ -1,3 +1,4 @@
+import SelfExitWorkspace from '../organizations/self-exit-work.tsx'
 import { writeTabValue } from '../../../app/workspace/tab-storage.ts'
 import { rememberModuleRoute, moduleRoute } from '../../../app/workspace/module-route.ts'
 import SubscriptionProvider from '../subscriptions/subscription-provider.tsx'
@@ -132,6 +133,6 @@ export default function OrganizationLayout() {
         <Route path="documents" element={module(<DocumentsPage organization={organization} />)} />
         <Route path="*" element={<ModuleNotFound organizationPath={organizationPath} />} />
       </Routes>}
-    </SubscriptionProvider></main>
+    <SelfExitWorkspace organization={organization} /></SubscriptionProvider></main>
   </div></div>{infoOrganizationId === organization.id && <AnimatedOverlay variant="modal" onClose={() => setInfoOrganizationId(null)}>{close => <OrganizationInfoDialog key={organization.id} organization={organization} onClose={close} />}</AnimatedOverlay>}</MemberProfileProvider></TimeCorrectionProvider>
 }

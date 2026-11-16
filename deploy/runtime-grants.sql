@@ -38,3 +38,6 @@ GRANT EXECUTE ON FUNCTION public.staffly_purge_deleted_timesheets(uuid) TO staff
 -- Vacation balance changes retain their author and immutable source history.
 REVOKE UPDATE, DELETE, TRUNCATE ON public.vacation_balance_events FROM staffly_app;
 REVOKE DELETE, TRUNCATE ON public.vacation_accounts FROM staffly_app;
+
+GRANT SELECT, INSERT ON public.member_self_exits TO staffly_app;
+REVOKE UPDATE, DELETE, TRUNCATE ON public.member_self_exits FROM staffly_app;

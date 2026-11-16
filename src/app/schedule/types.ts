@@ -3,6 +3,7 @@ import type { OrganizationRole } from '../organizations/types.ts'
 
 export type WorkShift = { updatedAt?: string; replacementOfId?: string|null; replacementCutoffAt?: string|null; attendance?:'UNCONFIRMED'|'WORKED'|'PARTIAL'|'NO_SHOW';attendanceReason?:string|null; positionId?: string | null; positionName?: string | null;
   activeOffer?: { id: string; kind: 'TRANSFER' | 'SWAP'; status: 'PENDING' | 'AWAITING_APPROVAL' } | null
+  selfExitId?: string | null
   id: string
   memberId: string
   memberName: string
@@ -16,7 +17,7 @@ export type WorkShift = { updatedAt?: string; replacementOfId?: string|null; rep
   accounting?: ShiftAccounting
   effectiveMinutes: number
   description: string | null
-  status: 'SCHEDULED' | 'CANCELLED'
+  status: 'SCHEDULED' | 'CANCELLED' | 'UNASSIGNED'
   cancelledAt: string | null
   cancellationReason: string | null
   adjusted: boolean
@@ -75,7 +76,7 @@ export type MemberWorkTime = {
   member: { avatarUrl: string | null; id: string; name: string; role: OrganizationRole; active: boolean }
   period: WorkTimeMember | null
   allTime: WorkTimeMember | null
-  history: Array<{ accounting: ShiftAccounting; timezone: string; locationId: string; attendance?: 'UNCONFIRMED' | 'WORKED' | 'PARTIAL' | 'NO_SHOW'; id: string; scheduledStartAt: string; scheduledEndAt: string; actualStartAt: string | null; actualEndAt: string | null; status: 'SCHEDULED' | 'CANCELLED'; minutes: number; plannedMinutes: number; actualMinutes: number | null; breakMinutes: number; actualBreakMinutes: number | null; cancellationReason: string | null; adjusted: boolean; description: string | null }>
+  history: Array<{ accounting: ShiftAccounting; timezone: string; locationId: string; attendance?: 'UNCONFIRMED' | 'WORKED' | 'PARTIAL' | 'NO_SHOW'; id: string; scheduledStartAt: string; scheduledEndAt: string; actualStartAt: string | null; actualEndAt: string | null; status: 'SCHEDULED' | 'CANCELLED' | 'UNASSIGNED'; minutes: number; plannedMinutes: number; actualMinutes: number | null; breakMinutes: number; actualBreakMinutes: number | null; cancellationReason: string | null; adjusted: boolean; description: string | null }>
   pagination: { page: number; limit: number; total: number; pages: number }
   timezone: string
 }

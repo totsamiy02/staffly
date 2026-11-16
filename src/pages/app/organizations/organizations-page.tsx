@@ -1,3 +1,5 @@
+import SelfExitDialog, { ExitIcon } from './self-exit-dialog.tsx'
+import DocumentActionsMenu from '../documents/document-actions-menu.tsx'
 import { PlanBadge, PlanIcon } from '../subscriptions/plan-ui.tsx'
 import { isPlanId, plans, money } from '../../../app/subscriptions/plans.ts'
 import AnimatedOverlay from '../../../component/ui/modal/animated-overlay.tsx'
@@ -15,17 +17,35 @@ import AppTopbar from '../topbar/app-topbar.tsx'
 import Avatar from '../../../component/ui/avatar/avatar.tsx'
 import '../app.scss'
 
-function OrganizationGrid({ title, organizations }: { title: string; organizations: OrganizationSummary[] }) {
+function OrganizationGrid({ title, organizations, onLeave }: {
+  title: string
+  organizations: OrganizationSummary[]
+  onLeave: (id: string) => void
+}) {
   if (!organizations.length) return null
   const plural = new Intl.PluralRules('ru-RU').select(organizations.length)
   return <section className="organizations-section">
     <header><div><h2>{title}</h2><p>{organizations.length} {plural === 'one' ? 'организация' : plural === 'few' ? 'организации' : 'организаций'}</p></div></header>
     <div className="organization-grid">
-      {organizations.map((organization) => <Link className="organization-card" to={`/app/organizations/${organization.id}`} key={organization.id}>
-        <Avatar url={organization.logoUrl} name={organization.name} className="organization-card__avatar" />
-        <span className="organization-card__body"><strong>{organization.name}</strong>{organization.industry&&<small>{organization.industry}</small>}{organization.service?.state==='SUSPENDED'&&<span className="role-badge">Работа приостановлена</span>}<span className="organization-card__participants">{organization.memberCount ?? 0} {participantLabel(organization.memberCount ?? 0)}</span><span className="organization-card__meta"><RoleBadge role={organization.role} />{organization.subscription && <PlanBadge plan={organization.subscription.effectivePlan} trial={organization.subscription.phase === 'trial'} />}</span>{organization.subscription?.validUntil && <small>До {new Date(organization.subscription.validUntil).toLocaleDateString('ru-RU')}</small>}</span>
-
-      </Link>)}
+      {organizations.map(organization => <article className="organization-card organization-card--actions" key={organization.id}>
+        <Link className="organization-card__link" to={`/app/organizations/${organization.id}`}>
+          <Avatar url={organization.logoUrl} name={organization.name} className="organization-card__avatar" />
+          <span className="organization-card__body">
+            <strong>{organization.name}</strong>
+            {organization.industry && <small>{organization.industry}</small>}
+            {organization.service?.state === 'SUSPENDED' && <span className="role-badge">Работа приостановлена</span>}
+            <span className="organization-card__participants">{organization.memberCount ?? 0} {participantLabel(organization.memberCount ?? 0)}</span>
+            <span className="organization-card__meta">
+              <RoleBadge role={organization.role} />
+              {organization.subscription && <PlanBadge plan={organization.subscription.effectivePlan} trial={organization.subscription.phase === 'trial'} />}
+            </span>
+            {organization.subscription?.validUntil && <small>До {new Date(organization.subscription.validUntil).toLocaleDateString('ru-RU')}</small>}
+          </span>
+        </Link>
+        <DocumentActionsMenu className="organization-exit-menu" label={`Действия организации: ${organization.name}`} closeOnMouseLeave={false}>
+          <button type="button" onClick={() => onLeave(organization.id)}><ExitIcon />Покинуть организацию</button>
+        </DocumentActionsMenu>
+      </article>)}
     </div>
   </section>
 }
@@ -39,6 +59,8 @@ export default function OrganizationsPage() {
   const refetchInvitations = invitations.refetch
   const [params, setParams] = useSearchParams()
   const location = useLocation()
+  const [leaving, setLeaving] = useState<string | null>(null)
+  const [leftOrganization, setLeftOrganization] = useState<string | null>(null)
   const [code, setCode] = useState('')
   const [preview, setPreview] = useState<{ organization: { id: string; name: string; logoUrl: string | null }; invitedBy: string; expiresAt: string } | null>(null)
   const [message, setMessage] = useState('')
@@ -92,6 +114,11 @@ export default function OrganizationsPage() {
     <AppTopbar showAdministration />
     <main className="organizations-page">
       <div className="organizations-page__heading"><div><p>Рабочее пространство</p><h1>Ваши организации</h1></div><Link className="app-primary" to="/app/organizations/new"><span>+</span> Создать организацию</Link></div>
+      {leftOrganization && <section className="exit-success" role="status">
+        <span aria-hidden="true">✓</span><div><strong>Вы покинули организацию {leftOrganization}</strong><p>Доступ закрыт. Остальные организации по-прежнему доступны.</p></div>
+        <button type="button" aria-label="Закрыть сообщение о выходе" onClick={() => setLeftOrganization(null)}>×</button>
+      </section>}
+      {leaving && <SelfExitDialog organizationId={leaving} onClose={() => setLeaving(null)} onCompleted={name => { setLeaving(null); setLeftOrganization(name) }} />}
       {error && <p className="app-alert app-alert--error" role="alert">{error}</p>}
       {message && <p className="app-alert" role="status">{message}</p>}
 
@@ -99,8 +126,8 @@ export default function OrganizationsPage() {
 
       {organizations.isLoading ? <div className="app-state"><span className="app-spinner" />Загружаем организации…</div> : organizations.isError ? <div className="app-state"><p>Не удалось загрузить организации.</p><button className="app-secondary" onClick={() => void organizations.refetch()}>Повторить</button></div> : <>
         {!owned.length && !joined.length && <div className="organizations-empty"><span className="organizations-empty__mark">S</span><h2>Создайте первое рабочее пространство</h2><p>Здесь появятся ваши организации и команды, к которым вас пригласили.</p></div>}
-        <OrganizationGrid title="Созданные вами" organizations={owned} />
-        <OrganizationGrid title="Вас пригласили" organizations={joined} />
+        <OrganizationGrid title="Созданные вами" organizations={owned} onLeave={setLeaving} />
+        <OrganizationGrid title="Вас пригласили" organizations={joined} onLeave={setLeaving} />
       </>}
 
       {isPlanId(params.get('plan')) && params.get('plan') !== 'FREE' && <AnimatedOverlay variant="modal" onClose={() => setParams(previous => { const next = new URLSearchParams(previous); next.delete('plan'); return next }, { replace: true })}>{close => <DocumentDialog title="Для какой организации?" eyebrow="Выбор тарифа" onClose={close}>

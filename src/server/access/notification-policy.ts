@@ -20,6 +20,32 @@ export async function notificationPolicy(userId: string, organizationId?: string
     const viewIds = locationsFor(actor,'events.view'), managerIds = [...new Set([...locationsFor(actor,'events.edit'), ...locationsFor(actor,'events.cancel')])]
     policies.push(Prisma.sql`(n.organization_id = ${actor.organizationId}::uuid AND CASE
       WHEN n.timesheet_period_id IS NOT NULL THEN tp.id IS NOT NULL AND ${permission('timesheets.view','tp.location_id')}
+      WHEN n.type = 'ORGANIZATION_MEMBER_LEFT' THEN (${actor.owner} OR EXISTS (
+        SELECT 1 FROM member_self_exits x WHERE x.organization_id=n.organization_id
+          AND x.id=(n.email_context->>'selfExitId')::uuid
+          AND (
+            EXISTS (SELECT 1 FROM unnest(x.location_ids) p(id) WHERE ${permission('members.view','p.id')})
+            OR EXISTS (
+              SELECT 1 FROM work_shifts vacancy
+              WHERE vacancy.self_exit_id=x.id AND vacancy.status='UNASSIGNED'
+                AND ${permission('schedule.view','vacancy.location_id')}
+                AND (${permission('schedule.edit','vacancy.location_id')} OR ${permission('schedule.cancel','vacancy.location_id')})
+            )
+            OR EXISTS (
+              SELECT 1 FROM requests r JOIN organization_locations point ON point.id=r.location_id
+              WHERE r.self_exit_id=x.id AND point.archived_at IS NULL
+                AND ${requestReadSql(actor,roles.filter(role => role.organizationId === actor.organizationId))}
+                AND (
+                  r.status='APPROVED' AND r.outcome->>'kind'='TASK' AND r.outcome->>'status'='OPEN'
+                    AND ${permission('requests.resolve','r.location_id')}
+                  OR r.status='PENDING' AND CASE r.system_code_snapshot
+                    WHEN 'VACATION' THEN ${permission('vacations.resolve','r.location_id')}
+                    WHEN 'STAFFING_RESPONSE' THEN ${permission('staffing.resolve','r.location_id')}
+                    ELSE ${permission('requests.resolve','r.location_id')} END
+                )
+            )
+          )
+      ))
       WHEN n.type = 'SUBSCRIPTION_STATUS' THEN ${actor.owner}
       WHEN n.vacation_campaign_id IS NOT NULL THEN vc.id IS NOT NULL AND ((${actor.id}::uuid = ANY(vc.member_ids) AND ${hasPermission(actor,'requests.own')}) OR ${permission('vacations.collect','vc.location_id')})
       WHEN n.schedule_draft_id IS NOT NULL THEN sd.id IS NOT NULL AND (${permission('drafts.view','sd.location_id')} OR sd.published_at IS NOT NULL AND EXISTS (SELECT 1 FROM draft_recipients dr WHERE dr.draft_id = sd.id AND dr.member_id = ${actor.id}::uuid))
