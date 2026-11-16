@@ -1,3 +1,5 @@
+import { vacationServiceModes } from '../../shared/vacation-balance.ts'
+import { requirePlanFeature, requireSubscriptionWritable } from '../subscriptions/access.ts'
 import { hasPermission, requirePermission, loadPermissionMembers, permissionRecipientsFromContext } from '../organizations/access/access.ts'
 import { locationMemberWhere, scopedLocationId } from '../organizations/location-context.ts'
 import { createRequest, listRequestTypes } from '../requests/service.ts'
@@ -12,7 +14,7 @@ import { addCalendarDays, startOfZonedDate } from './timezone.ts'
 
 export const absencePeriodBody = z.object({ startDate: date, endDate: date }).refine(value => value.endDate >= value.startDate, 'Окончание не может быть раньше начала.').refine(value => (Date.parse(value.endDate) - Date.parse(value.startDate)) / 86400000 <= 366, 'Период не должен превышать 367 дней.')
 export const absenceReportBody = absencePeriodBody.safeExtend({ reason: z.enum(['SICK', 'PERSONAL', 'OTHER']).default('SICK'), comment: z.string().trim().max(500).optional() })
-export const absenceEditBody = absencePeriodBody.safeExtend({ updatedAt: z.string().datetime(), changeReason:z.string().trim().min(3).max(500).optional(), employeeConsent:z.boolean().default(false), recallAllowed:z.boolean().default(false) })
+export const absenceEditBody = absencePeriodBody.safeExtend({ vacationService: z.enum(vacationServiceModes).optional(), updatedAt: z.string().datetime(), changeReason:z.string().trim().min(3).max(500).optional(), employeeConsent:z.boolean().default(false), recallAllowed:z.boolean().default(false) })
 export const absenceCancelBody = z.object({ updatedAt: z.string().datetime(), reason: z.string().trim().min(3).max(500), employeeConsent:z.boolean().default(false), recallAllowed:z.boolean().default(false) })
 export const absenceListQuery = z.object({ memberId: z.string().uuid().optional(), id: z.string().uuid().optional(), page: z.coerce.number().int().min(1).default(1), limit: z.coerce.number().int().min(1).max(50).default(20), todayOnly: z.enum(['true', 'false']).default('false'), history: z.enum(['true', 'false']).default('false') })
 export const dateText = (date: Date) => date.toISOString().slice(0, 10)
@@ -39,7 +41,7 @@ export async function listAbsences(userId: string, organizationId: string, optio
   const today = ['year', 'month', 'day'].map(type => parts.find(item => item.type === type)!.value).join('-')
   const where = { organizationId, member: !hasPermission(actor, 'absences.view') ? undefined : locationMemberWhere(organizationId), id: options.id, memberId: !hasPermission(actor, 'absences.view') ? actor.id : options.memberId, ...(options.id ? {} : options.todayOnly === 'true' ? { cancelledAt: null, startDate: { lte: new Date(today + 'T00:00:00Z') }, endDate: { gte: new Date(today + 'T00:00:00Z') } } : options.history === 'false' ? { cancelledAt: null, endDate: { gte: new Date(today + 'T00:00:00Z') } } : { OR: [{ cancelledAt: { not: null } }, { endDate: { lt: new Date(today + 'T00:00:00Z') } }] }) }
   const [total, rows] = await Promise.all([prisma.employeeAbsence.count({ where }), prisma.employeeAbsence.findMany({ where, orderBy: [{ startDate: 'desc' }, { id: 'desc' }], skip: (options.page - 1) * options.limit, take: options.limit, include: { member: { include: { user: true } } } })])
-  const absences = await Promise.all(rows.map(async item => ({ id: item.id, memberId: item.memberId, memberName: displayName(item.member.user), memberAvatarUrl: mediaUrl(item.member.user.avatarFileId), reason: item.memberId === actor.id || hasPermission(actor, 'absences.details') ? item.reason : null, comment: item.memberId === actor.id || hasPermission(actor, 'absences.details') ? item.comment : null, type: item.memberId === actor.id || hasPermission(actor, 'absences.details') ? item.type : 'ABSENCE', startDate: dateText(item.startDate), endDate: dateText(item.endDate), canEdit: item.type==='VACATION'?hasPermission(actor,'vacations.change'):(item.memberId===actor.id && item.reason!==null && hasPermission(actor,'absences.own')) || hasPermission(actor,'absences.edit'),canCancel:item.type==='VACATION'?hasPermission(actor,'vacations.change'):(item.memberId===actor.id && item.reason!==null && hasPermission(actor,'absences.own')) || hasPermission(actor,'absences.cancel'), sourceRequestId:item.memberId===actor.id || hasPermission(actor,'requests.view') ? item.sourceRequestId : null, updatedAt: item.updatedAt, cancelledAt: item.cancelledAt, cancellationReason: item.memberId===actor.id || hasPermission(actor,'absences.details') ? item.cancellationReason : null, formerMember: !!item.member.leftAt, conflicts: (item.memberId===actor.id && hasPermission(actor,'schedule.own') || hasPermission(actor,'schedule.view')) ? (await absenceShiftConflicts(prisma, organizationId, item.memberId, item.startDate, item.endDate, actor.organization.timezone)).filter(shift=>hasPermission(actor,item.memberId===actor.id?'schedule.own':'schedule.view',shift.locationId)) : [] })))
+  const absences = await Promise.all(rows.map(async item => ({ id: item.id, memberId: item.memberId, memberName: displayName(item.member.user), memberAvatarUrl: mediaUrl(item.member.user.avatarFileId), reason: item.memberId === actor.id || hasPermission(actor, 'absences.details') ? item.reason : null, comment: item.memberId === actor.id || hasPermission(actor, 'absences.details') ? item.comment : null, type: item.memberId === actor.id || hasPermission(actor, 'absences.details') ? item.type : 'ABSENCE', startDate: dateText(item.startDate), endDate: dateText(item.endDate), canEdit: item.type==='VACATION'?hasPermission(actor,'vacations.change'):(item.memberId===actor.id && item.reason!==null && hasPermission(actor,'absences.own')) || hasPermission(actor,'absences.edit'),canCancel:item.type==='VACATION'?hasPermission(actor,'vacations.change'):(item.memberId===actor.id && item.reason!==null && hasPermission(actor,'absences.own')) || hasPermission(actor,'absences.cancel'), sourceRequestId:item.memberId===actor.id || hasPermission(actor,'requests.view') ? item.sourceRequestId : null, updatedAt: item.updatedAt, vacationService: item.memberId === actor.id || hasPermission(actor, 'vacations.balances.view') ? item.vacationService : undefined, canManageVacationService: hasPermission(actor, 'vacations.balances.manage') && !['VACATION','SICK_LEAVE'].includes(item.type) && !(item.type === 'SICK' && item.reason === 'SICK'), cancelledAt: item.cancelledAt, cancellationReason: item.memberId===actor.id || hasPermission(actor,'absences.details') ? item.cancellationReason : null, formerMember: !!item.member.leftAt, conflicts: (item.memberId===actor.id && hasPermission(actor,'schedule.own') || hasPermission(actor,'schedule.view')) ? (await absenceShiftConflicts(prisma, organizationId, item.memberId, item.startDate, item.endDate, actor.organization.timezone)).filter(shift=>hasPermission(actor,item.memberId===actor.id?'schedule.own':'schedule.view',shift.locationId)) : [] })))
   return { absences, pagination: { page: options.page, pages: Math.max(1, Math.ceil(total / options.limit)), total } }
 }
 export async function notifyAbsence(tx: Prisma.TransactionClient, organizationId: string, memberId: string, absenceId: string, type: 'ABSENCE_REPORTED' | 'ABSENCE_CHANGED' | 'ABSENCE_CANCELLED', startDate: Date, endDate: Date) {
@@ -60,8 +62,9 @@ export async function reportSickness(userId: string, organizationId: string, inp
   return prisma.employeeAbsence.findUniqueOrThrow({ where: { sourceRequestId: request.id } })
 }
 export async function changeAbsence(userId: string, organizationId: string, absenceId: string, input: z.input<typeof absenceEditBody> | z.input<typeof absenceCancelBody>) {
-  const actor = await getMembership(userId, organizationId)
   return prisma.$transaction(async tx => {
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId},1))::text`
+    const actor = await getMembership(userId, organizationId, tx)
     const item = await tx.employeeAbsence.findFirst({ where: { id: absenceId, organizationId } })
     if (!item || (!hasPermission(actor, item.type==='VACATION'?'vacations.change':'reason' in input ? 'absences.cancel' : 'absences.edit') && item.memberId !== actor.id)) throw new ApiError(404, 'ABSENCE_NOT_FOUND', 'Отсутствие не найдено.')
     if (actor.role !== 'OWNER' && item.memberId !== actor.id && scopedLocationId(organizationId) && !await tx.organizationMember.findFirst({ where: { id: item.memberId, ...locationMemberWhere(organizationId) } })) throw new ApiError(404, 'ABSENCE_NOT_FOUND', 'Отсутствие не найдено.')
@@ -70,12 +73,30 @@ export async function changeAbsence(userId: string, organizationId: string, abse
     if(item.type==='VACATION'){requirePermission(actor,'vacations.change');if(!input.employeeConsent||!('reason' in input?input.reason:input.changeReason))throw new ApiError(400,'VACATION_CONSENT','Укажите причину изменения и подтверждение согласия сотрудника.');if(item.startDate<=new Date()&&!input.recallAllowed)throw new ApiError(409,'RECALL_RESTRICTIONS','Подтвердите проверку отсутствия запрета на отзыв для сотрудника.')}
     if (source && source.systemCodeSnapshot !== 'SICK'&&item.type!=='VACATION') requirePermission(actor, 'reason' in input ? 'absences.cancel' : 'absences.edit')
     if (item.cancelledAt || item.updatedAt.toISOString() !== input.updatedAt) throw new ApiError(409, 'ABSENCE_CHANGED', 'Отсутствие уже изменено или отменено. Обновите данные.')
+    const mode = 'vacationService' in input ? input.vacationService : undefined
+    if (mode !== undefined && mode !== item.vacationService) {
+      requirePermission(actor, 'vacations.balances.manage')
+      await requirePlanFeature(organizationId, 'vacationBalances', tx)
+      await requireSubscriptionWritable(tx, organizationId)
+      if (['VACATION', 'SICK_LEAVE'].includes(item.type) || item.type === 'SICK' && item.reason === 'SICK') {
+        throw new ApiError(400, 'VACATION_SERVICE_INCLUDED', 'Оплачиваемый отпуск и болезнь входят в отпускной стаж.')
+      }
+      if (!('changeReason' in input) || !input.changeReason) throw new ApiError(400, 'VACATION_SERVICE_REASON', 'Укажите причину изменения отпускного стажа.')
+    }
     const cancel = 'reason' in input
     const startDate = cancel ? item.startDate : new Date(input.startDate + 'T00:00:00Z'), endDate = cancel ? item.endDate : new Date(input.endDate + 'T00:00:00Z')
     if (!cancel) await assertAbsencePeriod(tx, organizationId, item.memberId, startDate, endDate, item.id)
     const correctionReason = 'reason' in input ? input.reason : input.changeReason
     if (correctionReason) await tx.$queryRaw`SELECT set_config('staffly.actor_user_id',${userId},true),set_config('staffly.correction_reason',${correctionReason},true)`
-    const updated = await tx.employeeAbsence.update({ where: { id: item.id }, data: cancel ? { cancelledAt: new Date(), cancelledByMemberId: actor.id, cancellationReason: input.reason, updatedByMemberId: actor.id } : { startDate, endDate, updatedByMemberId: actor.id } })
+    const updated = await tx.employeeAbsence.update({ where: { id: item.id }, data: cancel ? { cancelledAt: new Date(), cancelledByMemberId: actor.id, cancellationReason: input.reason, updatedByMemberId: actor.id } : { startDate, endDate, updatedByMemberId: actor.id, ...(mode !== undefined ? { vacationService: mode } : {}) } })
+    if (item.vacationService !== 'INCLUDED' || mode && mode !== item.vacationService) {
+      await tx.accessAudit.create({ data: {
+        organizationId, actorMemberId: actor.id, action: 'VACATION_SERVICE_CHANGED',
+        details: { memberId: item.memberId, absenceId: item.id, reason: correctionReason ?? 'Изменён период отсутствия',
+          before: { startDate: dateText(item.startDate), endDate: dateText(item.endDate), mode: item.vacationService },
+          after: { startDate: dateText(startDate), endDate: dateText(endDate), mode: mode ?? item.vacationService, cancelled: cancel } },
+      } })
+    }
     if(source&&source.systemCodeSnapshot!=='SICK')await tx.requestEvent.create({data:{requestId:source.id,actorMemberId:actor.id,type:'CHANGED',comment:'reason' in input?input.reason:input.changeReason??null,changes:{before:{startDate:dateText(item.startDate),endDate:dateText(item.endDate)},after:{startDate:dateText(startDate),endDate:dateText(endDate),cancelled:cancel},employeeConsent:!!input.employeeConsent,recallAllowed:!!input.recallAllowed}}})
     if (source?.systemCodeSnapshot === 'SICK') {
       await tx.organizationRequest.update({ where: { id: source.id }, data: cancel ? { status: 'CANCELLED', cancelledAt: new Date(), resolutionComment: input.reason } : { startDate, endDate } })

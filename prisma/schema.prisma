@@ -471,6 +471,8 @@ model AccountNotification {
 }
 
 model OrganizationMember {
+  vacationAccounts VacationAccount[]
+  vacationBalanceEvents VacationBalanceEvent[] @relation("VacationBalanceActor")
   timesheetClosures TimesheetVersion[] @relation("TimesheetCloser")
   timesheetEvents TimesheetEvent[] @relation("TimesheetActor")
   employmentPeriods MemberEmploymentPeriod[]
@@ -550,6 +552,8 @@ model MemberEmploymentPeriod {
   member OrganizationMember @relation(fields: [organizationId, memberId], references: [organizationId, id], onDelete: Cascade)
   @@index([organizationId, memberId, startedAt], map: "member_employment_periods_member_idx")
   @@index([organizationId, endedAt], map: "member_employment_periods_ended_idx")
+  vacationAccounts VacationAccount[]
+  @@unique([organizationId, memberId, id])
   @@map("member_employment_periods")
 }
 
@@ -757,6 +761,7 @@ model RequestEvent {
 }
 
 model EmployeeAbsence {
+  vacationService String @default("INCLUDED") @map("vacation_service") @db.VarChar(16)
   reason String? @db.VarChar(32)
   comment String? @db.VarChar(500)
   id              String            @id @default(uuid()) @db.Uuid
@@ -1796,4 +1801,43 @@ model TimesheetEvent {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   @@index([periodId, createdAt])
   @@map("timesheet_events")
+}
+
+model VacationAccount {
+  id String @id @default(uuid()) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  memberId String @map("member_id") @db.Uuid
+  employmentPeriodId String @map("employment_period_id") @db.Uuid
+  employmentStartDate DateTime @map("employment_start_date") @db.Date
+  annualDays Int @map("annual_days")
+  revision Int @default(1)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  member OrganizationMember @relation(fields: [organizationId, memberId], references: [organizationId, id], onDelete: Cascade)
+  employmentPeriod MemberEmploymentPeriod @relation(fields: [organizationId, memberId, employmentPeriodId], references: [organizationId, memberId, id], onDelete: NoAction)
+  events VacationBalanceEvent[]
+  @@unique([organizationId, id])
+  @@unique([employmentPeriodId])
+  @@index([organizationId, memberId])
+  @@map("vacation_accounts")
+}
+
+model VacationBalanceEvent {
+  id String @id @default(uuid()) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  accountId String @map("account_id") @db.Uuid
+  actorMemberId String @map("actor_member_id") @db.Uuid
+  kind String @db.VarChar(16)
+  effectiveDate DateTime @map("effective_date") @db.Date
+  amountHundredths Int? @map("amount_hundredths")
+  annualDays Int? @map("annual_days")
+  reason String @db.VarChar(1000)
+  submissionKey String @map("submission_key") @db.Uuid
+  inputHash String @map("input_hash") @db.VarChar(64)
+  snapshot Json
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  account VacationAccount @relation(fields: [organizationId, accountId], references: [organizationId, id], onDelete: Cascade)
+  actor OrganizationMember @relation("VacationBalanceActor", fields: [organizationId, actorMemberId], references: [organizationId, id], onDelete: NoAction)
+  @@unique([organizationId, submissionKey])
+  @@index([accountId, createdAt, id])
+  @@map("vacation_balance_events")
 }

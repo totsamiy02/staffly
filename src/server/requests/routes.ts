@@ -1,3 +1,5 @@
+import { balanceListQuery, getVacationBalance, listVacationBalances, setupVacationBalance, changeVacationBalance, vacationBalanceHistory } from './vacation-balances.ts'
+import { vacationBalanceSetup, vacationBalanceChange } from '../../shared/vacation-balance.ts'
 import { reviewTransferCandidates, transferReview, transferReviewBody } from './reviewer-transfer.ts'
 import { auditSensitiveAccess } from '../security/journal.ts'
 import express,{ Router,type Request } from 'express'
@@ -25,6 +27,30 @@ router.use(requireAuth)
 
 function auth(request: Request) { return (request as AuthenticatedRequest).auth! }
 function parse<T>(schema: z.ZodType<T>, value: unknown): T { const result = schema.safeParse(value); if (!result.success) throw new ApiError(400, 'VALIDATION_ERROR', 'Проверьте данные заявки.', z.flattenError(result.error).fieldErrors); return result.data }
+
+const balanceParams = z.object({ organizationId: z.uuid(), memberId: z.uuid() })
+router.get('/organizations/:organizationId/vacation-balance', async (request, response) => {
+  const { organizationId } = parse(organizationRequestParams, request.params)
+  const input = parse(z.object({ memberId: z.uuid().optional(), requestId: z.uuid().optional(), startDate: z.iso.date().optional(), endDate: z.iso.date().optional() }).refine(value => !value.startDate && !value.endDate || !!value.startDate && !!value.endDate && value.startDate <= value.endDate && Date.parse(value.endDate) - Date.parse(value.startDate) <= 366 * 86400000), request.query)
+  response.set('Cache-Control', 'private, no-store').json(await getVacationBalance(auth(request).userId, organizationId, input.memberId, input))
+})
+router.get('/organizations/:organizationId/vacation-balances', async (request, response) => {
+  const { organizationId } = parse(organizationRequestParams, request.params)
+  response.set('Cache-Control', 'private, no-store').json(await listVacationBalances(auth(request).userId, organizationId, parse(balanceListQuery, request.query)))
+})
+router.get('/organizations/:organizationId/vacation-balances/:memberId/history', async (request, response) => {
+  const { organizationId, memberId } = parse(balanceParams, request.params)
+  const { page } = parse(z.object({ page: z.coerce.number().int().min(1).max(10000).default(1) }), request.query)
+  response.set('Cache-Control', 'private, no-store').json(await vacationBalanceHistory(auth(request).userId, organizationId, memberId, page))
+})
+router.post('/organizations/:organizationId/vacation-balances/:memberId', mutationLimiter, async (request, response) => {
+  const { organizationId, memberId } = parse(balanceParams, request.params)
+  response.status(201).json(await setupVacationBalance(auth(request).userId, organizationId, memberId, parse(vacationBalanceSetup, request.body)))
+})
+router.post('/organizations/:organizationId/vacation-balances/:memberId/changes', mutationLimiter, async (request, response) => {
+  const { organizationId, memberId } = parse(balanceParams, request.params)
+  response.json(await changeVacationBalance(auth(request).userId, organizationId, memberId, parse(vacationBalanceChange, request.body)))
+})
 
 router.get('/organizations/:organizationId/vacation-settings',async(q,s)=>{const {organizationId}=parse(organizationRequestParams,q.params);s.json(await vacationSettings(auth(q).userId,organizationId))})
 router.put('/organizations/:organizationId/vacation-settings',mutationLimiter,async(q,s)=>{const {organizationId}=parse(organizationRequestParams,q.params);s.json(await vacationSettings(auth(q).userId,organizationId,parse(vacationSettingsBody,q.body)))})

@@ -303,6 +303,9 @@ try {
   } else if (options.profile === 'shift-batch') {
     const { runShiftBatch } = await import('../interface/shift-batch.mjs')
     results.shiftBatch = await runShiftBatch({ prisma, env, root, temporary, output, options, startApi })
+  } else if (options.profile === 'vacation-balances') {
+    const { runVacationBalances } = await import('../interface/vacation-balances.mjs')
+    results.vacationBalances = await runVacationBalances({ prisma, env, root, temporary, output, options, startApi })
   } else if (options.profile === 'timesheet') {
     const { runTimesheet } = await import('../interface/timesheet.mjs')
     results.timesheet = await runTimesheet({ prisma, env, root, temporary, output, options, startApi })

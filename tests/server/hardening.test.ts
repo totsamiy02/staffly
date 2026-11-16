@@ -142,6 +142,22 @@ it('runs real migrations as a schema owner, grants runtime CRUD and denies DDL, 
     for (const sql of ['CREATE TABLE public.forbidden (id int)', 'ALTER TABLE public.users ADD COLUMN forbidden int', 'DROP TABLE public.users CASCADE', 'TRUNCATE public.users CASCADE', 'DELETE FROM public._prisma_migrations', 'CREATE ROLE forbidden', 'SET ROLE staffly_migrator', 'UPDATE organization_resource_budgets SET storage_limit_bytes=999999999999', 'UPDATE organization_resource_budgets SET storage_bytes=0', 'UPDATE organization_resource_budgets SET email_queue_limit=100000', 'DELETE FROM organization_resource_budgets', 'DELETE FROM platform_operation_events', 'UPDATE platform_lifetime_metrics SET users_created=0', "INSERT INTO platform_creation_events(metric) VALUES('users')"]) await assert.rejects(app.query(sql), { code: '42501' })
     // Exercise quota triggers with the actual restricted runtime role as well.
     const org = await client.organization.create({ data: { name: 'Runtime quotas', timezone: 'Europe/Moscow', createdByUserId: id } })
+    const vacationMember = await client.organizationMember.create({ data: { organizationId: org.id, userId: id, role: 'OWNER' } })
+    const employment = await client.memberEmploymentPeriod.findFirstOrThrow({ where: { memberId: vacationMember.id, endedAt: null } })
+    const vacationAccount = await client.vacationAccount.create({ data: {
+      organizationId: org.id, memberId: vacationMember.id, employmentPeriodId: employment.id,
+      employmentStartDate: new Date('2025-01-01'), annualDays: 28,
+    } })
+    await client.vacationBalanceEvent.create({ data: {
+      organizationId: org.id, accountId: vacationAccount.id, actorMemberId: vacationMember.id,
+      kind: 'START', annualDays: 28, effectiveDate: new Date('2025-01-01'), reason: 'Начат учёт отпуска',
+      submissionKey: randomUUID(), inputHash: '0'.repeat(64), snapshot: { annualDays: 28 },
+    } })
+    for (const statement of [
+      'UPDATE vacation_balance_events SET reason=\'Перезапись истории\'',
+      'DELETE FROM vacation_balance_events', 'TRUNCATE vacation_balance_events',
+      'DELETE FROM vacation_accounts', 'TRUNCATE vacation_accounts',
+    ]) await assert.rejects(app.query(statement), { code: '42501' })
     await client.$transaction(async tx => {
       await tx.organizationSubscription.update({ where: { organizationId: org.id }, data: { plan: 'BUSINESS', periodStart: new Date(), periodEnd: new Date(Date.now()+86400000) } })
       await syncSubscriptionStorageLimit(tx,org.id)

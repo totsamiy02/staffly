@@ -1,0 +1,408 @@
+.vacation-balance-card, .vacation-balance-preview {
+  padding: 20px 24px;
+  border: 1px solid var(--theme-border, #e1dfe6);
+  border-radius: 14px;
+  background: var(--theme-surface, #fff);
+  margin-bottom: 20px;
+  >header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+  }
+  h3 {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin: 0;
+    font-size: 16px;
+  }
+  header p, >p:not(.vacation-balance-warning) {
+    color: var(--theme-muted, #64616c);
+    font-size: 12px;
+    line-height: 1.6;
+    margin: 6px 0;
+  }
+  >small {
+    display: block;
+    color: var(--theme-muted, #64616c);
+    line-height: 1.6;
+    font-size: 12px;
+  }
+}
+.vacation-balance-preview {
+  margin: 0;
+  background: var(--theme-surface-muted, #f6f5f8);
+  padding: 18px;
+}
+.vacation-balance-numbers {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+  margin: 20px 0;
+  >div {
+    min-width: 0;
+    padding-left: 18px;
+    border-left: 1px solid var(--theme-border, #e1dfe6);
+    &:first-child {
+      padding-left: 0;
+      border-left: 0;
+    }
+  }
+  dt {
+    color: var(--theme-muted, #64616c);
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  dd {
+    margin: 6px 0 0;
+    font-size: 26px;
+    font-weight: 650;
+    line-height: 1.3;
+    font-variant-numeric: tabular-nums;
+    small {
+      font-size: 13px;
+      font-weight: 400;
+    }
+  }
+}
+.vacation-balance-caption {
+  color: var(--theme-muted, #64616c);
+  font-size: 12px;
+  line-height: 1.7;
+  margin: 8px 0;
+}
+.vacation-balance-unconfigured {
+  display: block;
+  color: var(--theme-muted, #64616c);
+  font-size: 13px;
+  line-height: 1.6;
+  padding: 14px 0;
+}
+.vacation-balance-warning {
+  color: var(--theme-warning, #805c25);
+  background: var(--theme-warning-bg, #fcf5e8);
+  border: 1px solid var(--theme-warning-border, #ead5b2);
+  border-radius: 9px;
+  font-size: 13px;
+  line-height: 1.6;
+  padding: 12px;
+}
+.is-negative {
+  color: var(--theme-warning, #805c25);
+}
+.vacation-balances-dialog.request-modal.document-dialog {
+  width: min(1120px, 100%);
+  .document-dialog__body {
+    padding: 0 24px 20px;
+  }
+  footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 20px;
+    padding-top: 18px;
+    border-top: 1px solid var(--theme-border, #e1dfe6);
+  }
+  &.vacation-balances-dialog--history {
+    width: min(780px, 100%);
+  }
+}
+.vacation-balance-editor.request-modal.document-dialog {
+  width: min(650px, 100%);
+  form {
+    display: grid;
+    gap: 18px;
+  }
+  .document-dialog__body {
+    padding: 0 24px 20px;
+  }
+  .vacation-balance-numbers {
+    margin: 0;
+    padding: 16px 0;
+  }
+  footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding-top: 18px;
+    border-top: 1px solid var(--theme-border, #e1dfe6);
+  }
+  label {
+    display: grid;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    small {
+      color: var(--theme-muted, #64616c);
+      font-size: 12px;
+      line-height: 1.6;
+      font-weight: 400;
+    }
+  }
+  input:not([type=checkbox]), textarea {
+    width: 100%;
+    min-width: 0;
+  }
+}
+.vacation-balance-person {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  >.app-avatar {
+    width: 42px;
+    height: 42px;
+    flex: 0 0 42px;
+  }
+  >div {
+    display: grid;
+    gap: 5px;
+    min-width: 0;
+    flex: 1;
+  }
+  strong {
+    font-size: 13px;
+    overflow-wrap: anywhere;
+  }
+  small {
+    color: var(--theme-muted, #64616c);
+    font-size: 11px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+  }
+}
+.vacation-balance-filters {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 20px;
+  label {
+    display: grid;
+    gap: 7px;
+    font-size: 12px;
+    color: var(--theme-muted, #64616c);
+  }
+  input {
+    min-width: 0;
+    width: 100%;
+  }
+}
+.vacation-balance-table {
+  overflow-x: auto;
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 12px;
+  }
+  th {
+    color: var(--theme-muted, #64616c);
+    background: var(--theme-surface-muted, #f6f5f8);
+    font-size: 11px;
+    font-weight: 500;
+    text-align: left;
+  }
+  th, td {
+    padding: 14px 10px;
+    border-bottom: 1px solid var(--theme-border, #e1dfe6);
+    vertical-align: middle;
+  }
+  th:first-child, td:first-child {
+    padding-left: 0;
+    min-width: 210px;
+  }
+  td:not(:first-child) {
+    font-variant-numeric: tabular-nums;
+  }
+}
+.vacation-balance-row-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  .app-secondary {
+    padding: 8px 10px;
+    min-height: 34px;
+    font-size: 11px;
+  }
+}
+.vacation-balance-chip {
+  display: inline-flex;
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: var(--theme-surface-muted, #f6f5f8);
+  color: var(--theme-muted, #64616c);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.vacation-balance-history {
+  display: grid;
+  gap: 12px;
+  margin-top: 20px;
+  article {
+    padding: 18px;
+    border: 1px solid var(--theme-border, #e1dfe6);
+    background: var(--theme-surface, #fff);
+    border-radius: 12px;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    strong {
+      font-size: 14px;
+    }
+  }
+  p {
+    line-height: 1.65;
+    overflow-wrap: anywhere;
+  }
+  article >p:not(.vacation-balance-caption) {
+    font-size: 13px;
+    margin: 8px 0;
+  }
+  article >small {
+    display: block;
+    color: var(--theme-muted, #64616c);
+    font-size: 12px;
+  }
+  .app-secondary {
+    display: inline-flex;
+    text-decoration: none;
+    margin-top: 12px;
+    font-size: 12px;
+  }
+}
+.vacation-balance-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.vacation-balance-editor label.vacation-balance-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  line-height: 1.6;
+  input {
+    margin-top: 2px;
+    flex: 0 0 auto;
+  }
+}
+.vacation-balance-import, .vacation-balance-result {
+  padding: 16px;
+  background: var(--theme-surface-muted, #f6f5f8);
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.7;
+  margin: 0;
+}
+.vacation-balance-import >p {
+  margin: 0 0 16px;
+  color: var(--theme-muted, #64616c);
+}
+@media (max-width: 767px) {
+  .vacation-balance-card, .vacation-balance-preview {
+    padding: 16px;
+    >header {
+      align-items: flex-start;
+      flex-wrap: wrap;
+    }
+  }
+  .vacation-balance-numbers {
+    gap: 10px;
+    >div {
+      padding-left: 10px;
+    }
+    dd {
+      font-size: 21px;
+    }
+    dt {
+      font-size: 11px;
+    }
+  }
+  .vacation-balance-filters {
+    grid-template-columns: 1fr;
+  }
+  .vacation-balance-table {
+    table, tbody, tr, td {
+      display: block;
+    }
+    thead {
+      display: none;
+    }
+    tr {
+      padding: 16px;
+      border: 1px solid var(--theme-border, #e1dfe6);
+      border-radius: 12px;
+      margin-bottom: 12px;
+    }
+    th, td {
+      border: 0;
+      padding: 6px 0;
+    }
+    td:first-child {
+      min-width: 0;
+      margin-bottom: 8px;
+    }
+    td[data-label]:not(:first-child) {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      &::before {
+        content: attr(data-label);
+        color: var(--theme-muted, #64616c);
+      }
+    }
+  }
+  .vacation-balance-person {
+    flex-wrap: wrap;
+    >button {
+      margin-left: 54px;
+    }
+  }
+  .vacation-balance-row-actions {
+    justify-content: stretch;
+    margin-top: 8px;
+    >button {
+      flex: 1;
+    }
+  }
+  .vacation-balances-dialog.request-modal.document-dialog .document-dialog__body, .vacation-balance-editor.request-modal.document-dialog .document-dialog__body {
+    padding: 0 16px 16px;
+  }
+}
+@media (max-width: 380px) {
+  .vacation-balance-fields {
+    grid-template-columns: 1fr;
+  }
+  .vacation-balance-numbers {
+    gap: 7px;
+    >div {
+      padding-left: 7px;
+    }
+    dd {
+      font-size: 19px;
+    }
+  }
+}
+.vacation-balances-dialog.request-modal.document-dialog >footer,
+.vacation-balance-editor.request-modal.document-dialog >footer {
+  margin: 0;
+  padding: 16px 24px;
+  border-top: 1px solid var(--theme-border, #e1dfe6);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  background: var(--theme-surface, #fff);
+}
+@media (max-width: 767px) {
+  .vacation-balances-dialog.request-modal.document-dialog >footer,
+  .vacation-balance-editor.request-modal.document-dialog >footer {
+    padding: 14px 16px;
+    flex-wrap: wrap;
+    >button {
+      flex: 1;
+    }
+  }
+}

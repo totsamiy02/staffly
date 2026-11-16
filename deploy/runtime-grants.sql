@@ -34,3 +34,7 @@ REVOKE UPDATE,DELETE,TRUNCATE ON public.timesheet_versions,public.timesheet_even
 REVOKE DELETE,TRUNCATE ON public.timesheet_periods FROM staffly_app;
 REVOKE ALL ON public.timesheet_write_locks FROM staffly_app;
 GRANT EXECUTE ON FUNCTION public.staffly_purge_deleted_timesheets(uuid) TO staffly_app;
+
+-- Vacation balance changes retain their author and immutable source history.
+REVOKE UPDATE, DELETE, TRUNCATE ON public.vacation_balance_events FROM staffly_app;
+REVOKE DELETE, TRUNCATE ON public.vacation_accounts FROM staffly_app;

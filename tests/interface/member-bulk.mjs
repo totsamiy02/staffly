@@ -135,6 +135,29 @@ export async function runMemberBulk({ prisma, env, root, temporary, output, opti
         await screenshot('locations-page')
         await page.locator('.location-settings-item').filter({ hasText: 'Северная' }).getByRole('button', { name: 'Добавить сотрудников', exact: true }).click()
         const location = page.getByRole('dialog', { name: 'Добавить сотрудников', exact: true })
+        await check('enabled action immediately restores readable opacity with and without reduced motion', async () => {
+          const submit = location.locator('footer .app-primary')
+          const employee = location.getByRole('checkbox', { name: 'Выбрать: Соколов Михаил', exact: true })
+          for (const reducedMotion of ['no-preference', 'reduce']) {
+            await page.emulateMedia({ reducedMotion })
+            await expect(submit).toBeDisabled()
+            await submit.evaluate(button => {
+              // Resolve the disabled appearance before observing the activation frame.
+              void getComputedStyle(button).opacity
+              button.removeAttribute('data-activation-opacity')
+              const observer = new MutationObserver(() => {
+                if (button.disabled) return
+                button.setAttribute('data-activation-opacity', getComputedStyle(button).opacity)
+                observer.disconnect()
+              })
+              observer.observe(button, { attributes: true, attributeFilter: ['disabled'] })
+            })
+            await employee.check()
+            await expect(submit).toBeEnabled()
+            assert.equal(await submit.getAttribute('data-activation-opacity'), '1', reducedMotion)
+            await employee.uncheck()
+          }
+        })
         await check('location assignment preserves positions, roles and previous location', async () => {
           await expect(location.getByRole('checkbox', { name: 'Выбрать: Лебедева Ольга', exact: true })).toBeDisabled()
           await location.getByRole('checkbox', { name: 'Выбрать: Соколов Михаил', exact: true }).check()

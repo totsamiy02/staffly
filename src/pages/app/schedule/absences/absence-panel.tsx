@@ -1,10 +1,13 @@
+import { vacationServiceLabels, type VacationServiceMode } from '../../../../shared/vacation-balance.ts'
+import { useSubscription } from '../../../../app/subscriptions/context.ts'
+import Select from '../../../../component/ui/select/select.tsx'
 import AsyncPanel from '../../../../component/ui/async-panel.tsx'
 import MemberProfileLink from '../../../../component/ui/member-profile-link.tsx'
 import MemberAvatar from '../../../../component/ui/member-avatar.tsx'
 import { canAccess } from '../../../../app/access/catalog.ts'
 import { useToastFeedback } from '../../../../component/ui/toast/toast-context.ts'
 import { absenceNames, absenceDays } from '../../../../app/schedule/absence-format.ts'
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../../../../app/auth/auth-context.tsx'
@@ -17,11 +20,14 @@ import DocumentDialog from '../../../../component/ui/modal/document-dialog.tsx'
 import '../schedule.scss'
 import type { EmployeeAbsence } from '../../../../app/schedule/types.ts'
 
-type Absence = EmployeeAbsence & {canEdit:boolean;canCancel:boolean; sourceRequestId: string | null; updatedAt: string; cancelledAt: string | null; cancellationReason: string | null; formerMember: boolean; conflicts: Array<{ locationId?: string; id: string; scheduledStartAt: string; scheduledEndAt: string }> }
+type Absence = EmployeeAbsence & { vacationService?: VacationServiceMode; canManageVacationService?: boolean;canEdit:boolean;canCancel:boolean; sourceRequestId: string | null; updatedAt: string; cancelledAt: string | null; cancellationReason: string | null; formerMember: boolean; conflicts: Array<{ locationId?: string; id: string; scheduledStartAt: string; scheduledEndAt: string }> }
 
 export default function AbsencePanel({ organization, focusId, onClose }: { organization: OrganizationSummary; focusId?: string | null; onClose: () => void }) {
   const { locationId, apiRequest } = useAuth()
   const client = useQueryClient()
+  const reasonHelpId = useId()
+  const subscription = useSubscription()
+  const [serviceMode, setServiceMode] = useState<VacationServiceMode>('INCLUDED')
   const [history, setHistory] = useState(false)
   const [selectedAbsenceId, setSelectedAbsenceId] = useState(focusId)
   useEffect(() => { setSelectedAbsenceId(focusId) }, [focusId])
@@ -40,18 +46,19 @@ export default function AbsencePanel({ organization, focusId, onClose }: { organ
   }, [list.data, selectedAbsenceId, today])
   const mutation = useMutation({ mutationFn: async () => {
     if (cancelling) return apiRequest(`/organizations/${organization.id}/absences/${cancelling.id}/cancel`, { method: 'POST', body: { updatedAt: cancelling.updatedAt, reason } })
-    if (editing) return apiRequest(`/organizations/${organization.id}/absences/${editing.id}`, { method: 'PATCH', body: { startDate: start, endDate: end, updatedAt: editing.updatedAt, changeReason: reason.trim() || undefined } })
+    if (editing) return apiRequest(`/organizations/${organization.id}/absences/${editing.id}`, { method: 'PATCH', body: { startDate: start, endDate: end, updatedAt: editing.updatedAt, changeReason: reason.trim() || undefined, ...(editing.canManageVacationService && subscription.available('vacationBalances') ? { vacationService: serviceMode } : {}) } })
     throw new Error('Выберите отсутствие для изменения.')
   }, onSuccess: async () => { setMessage(cancelling ? 'Отсутствие отменено. Смены не изменены.' : editing ? 'Период изменён. Проверьте смены в нём.' : ''); setEditing(null); setCancelling(null); await invalidateOrganizationWork(client, organization.id) } })
   useToastFeedback(message, mutation.error instanceof Error ? mutation.error.message : undefined)
-  function edit(item: Absence) { mutation.reset(); setMessage(''); setEditing(item); setReason(''); setStart(item.startDate); setEnd(item.endDate) }
+  function edit(item: Absence) { mutation.reset(); setMessage(''); setEditing(item); setServiceMode(item.vacationService ?? 'INCLUDED'); setReason(''); setStart(item.startDate); setEnd(item.endDate) }
   const form = editing || cancelling
   const content = (close: () => void) => <DocumentDialog className="absence-panel" scrollBody title={cancelling ? 'Отменить отсутствие' : editing ? 'Изменить период' : manager ? 'Отсутствия команды' : 'Мои отсутствия'} eyebrow="Доступность сотрудников" description={form && !cancelling ? 'Даты включительно, в часовом поясе организации.' : 'Отпуск, отгул и сообщения об отсутствии.'} busy={mutation.isPending} onClose={close}>
 
     {form ? <form onSubmit={event => { event.preventDefault(); mutation.mutate() }} className="absence-form">
       {(editing || cancelling) && <strong>{(editing ?? cancelling)?.memberName}</strong>}
       {cancelling ? <><p>История сохранится. Назначенные смены не изменятся.</p><label><span>Причина отмены</span><textarea required minLength={3} maxLength={500} value={reason} onChange={event => setReason(event.target.value)} rows={3} /></label></> : <><><div className="planning-time"><label><span>Первый день</span><DatePicker value={start} required onChange={event => { setStart(event.target.value); if (end < event.target.value) setEnd(event.target.value) }} /></label><label><span>Последний день</span><DatePicker value={end} min={start} required onChange={event => setEnd(event.target.value)} /></label></div><p>Календарных дней: <strong>{absenceDays(start, end)}</strong></p>{editing?.type === 'SICK' && start <= today && end > today && <button type="button" className="app-secondary" onClick={() => setEnd(today)}>Последний день болезни — сегодня</button>}</></>}
-      {editing && <label><span>Причина изменения</span><textarea minLength={3} maxLength={500} value={reason} onChange={event => setReason(event.target.value)} rows={3} /><small>Обязательно, если отсутствие относится к ранее закрытому табелю.</small></label>}
+      {editing?.canManageVacationService && subscription.available('vacationBalances') && <label><span>Учёт в отпускном стаже</span><Select value={serviceMode} onChange={event => setServiceMode(event.target.value as VacationServiceMode)}>{Object.entries(vacationServiceLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</Select><small>Дни без сохранения зарплаты сверх 14 за рабочий год и исключённые периоды сдвигают начисления отпуска.</small></label>}
+      {editing && <label><span>Причина изменения</span><textarea aria-label="Причина изменения" aria-describedby={reasonHelpId} required={serviceMode !== (editing.vacationService ?? 'INCLUDED')} minLength={3} maxLength={500} value={reason} onChange={event => setReason(event.target.value)} rows={3} /><small id={reasonHelpId}>Обязательно при изменении отпускного стажа или ранее закрытого табеля.</small></label>}
       {mutation.error && <p className="form-inline-error" role="alert">{mutation.error.message}</p>}
       <footer><button type="button" className="app-secondary" disabled={mutation.isPending} onClick={() => { setEditing(null); setCancelling(null); mutation.reset() }}>Назад</button><button className={cancelling ? 'app-danger' : 'app-primary'} disabled={mutation.isPending || (!cancelling && (end < start || absenceDays(start, end) > 367))}>{mutation.isPending ? 'Сохраняем…' : cancelling ? 'Подтвердить отмену' : editing ? 'Сохранить период' : ''}</button></footer>
     </form> : <>

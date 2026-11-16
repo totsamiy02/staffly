@@ -1,7 +1,7 @@
 export const planIds = ['FREE', 'TEAM', 'BUSINESS'] as const
 export type PlanId = typeof planIds[number]
 export type PaidPlanId = Exclude<PlanId, 'FREE'>
-export type PlanFeature = 'reports' | 'customRoles' | 'planning' | 'timesheets'
+export type PlanFeature = 'reports' | 'customRoles' | 'planning' | 'timesheets' | 'vacationBalances'
 export const PLAN_VERSION = '2026-10-v1'
 export const GRACE_DAYS = 7
 export const TRIAL_DAYS = 14
@@ -9,10 +9,10 @@ const MB = 1024 ** 2
 export const plans = {
   FREE: { id: 'FREE', name: 'Бесплатный', description: 'Для небольшой команды', priceMinor: 0, members: 5, locations: 1, storageBytes: 250 * MB, storageLabel: '250 МБ', features: [] as PlanFeature[] },
   TEAM: { id: 'TEAM', name: 'Команда', description: 'Для ежедневной работы', priceMinor: 99000, members: 25, locations: 3, storageBytes: 2 * 1024 * MB, storageLabel: '2 ГБ', features: ['reports'] as PlanFeature[] },
-  BUSINESS: { id: 'BUSINESS', name: 'Бизнес', description: 'Для сложных процессов и роста', priceMinor: 299000, members: 100, locations: 10, storageBytes: 10 * 1024 * MB, storageLabel: '10 ГБ', features: ['reports', 'customRoles', 'planning', 'timesheets'] as PlanFeature[] },
+  BUSINESS: { id: 'BUSINESS', name: 'Бизнес', description: 'Для сложных процессов и роста', priceMinor: 299000, members: 100, locations: 10, storageBytes: 10 * 1024 * MB, storageLabel: '10 ГБ', features: ['reports', 'customRoles', 'planning', 'timesheets', 'vacationBalances'] as PlanFeature[] },
 } satisfies Record<PlanId, { id: PlanId; name: string; description: string; priceMinor: number; members: number; locations: number; storageBytes: number; storageLabel: string; features: PlanFeature[] }>
-export const featurePlans: Record<PlanFeature, PaidPlanId> = { reports: 'TEAM', customRoles: 'BUSINESS', planning: 'BUSINESS', timesheets: 'BUSINESS' }
-export const featureLabels: Record<PlanFeature, string> = { reports: 'Отчёты и выгрузка в Excel', customRoles: 'Свои роли и разрешения', planning: 'Потребность, черновики и обсуждение графиков', timesheets: 'Сверка и фиксация табеля' }
+export const featurePlans: Record<PlanFeature, PaidPlanId> = { reports: 'TEAM', customRoles: 'BUSINESS', planning: 'BUSINESS', timesheets: 'BUSINESS', vacationBalances: 'BUSINESS' }
+export const featureLabels: Record<PlanFeature, string> = { reports: 'Отчёты и выгрузка в Excel', customRoles: 'Свои роли и разрешения', planning: 'Потребность, черновики и обсуждение графиков', timesheets: 'Сверка и фиксация табеля', vacationBalances: 'Остатки отпусков' }
 export const money = (minor: number) => new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: minor % 100 ? 2 : 0 }).format(minor / 100)
 export const isPlanId = (value: unknown): value is PlanId => typeof value === 'string' && (planIds as readonly string[]).includes(value)
 export type SubscriptionSnapshot = {
