@@ -1,3 +1,7 @@
+import { useSubscription } from '../../../../app/subscriptions/context.ts'
+import { availabilityWarningFrom, type AvailabilityWarning, type AvailabilityIssue } from '../../../../shared/availability.ts'
+import { AvailabilityWarningPanel } from '../availability/availability-elements.tsx'
+import { RequestErrorState } from '../../../../component/ui/request-error-message.tsx'
 import { openingHoursConfirmationFrom } from '../../../../shared/organization-profile.ts'
 import OpeningHoursWarning from '../../organizations/opening-hours-warning.tsx'
 import { OpeningHoursSummary } from '../../organizations/opening-hours.tsx'
@@ -14,7 +18,7 @@ import { invalidateOrganizationWork } from '../../../../app/live-query.ts'
 import EmployeePicker from '../../shared/employee-picker.tsx'
 import DatePicker, { TimeInput } from '../../../../component/ui/date-picker/date-picker.tsx'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '../../../../app/auth/auth-context.tsx'
 import type { RequestFailure } from '../../../../app/auth/request-errors.ts'
 import type { OrganizationMember, OrganizationSummary } from '../../../../app/organizations/types.ts'
@@ -42,6 +46,7 @@ type Props = {
 }
 
 export default function ShiftFormModal({ organization, members, date, shift, actual = false, onClose, draft }: Props) {
+  const subscription = useSubscription()
   const toast = useToast()
   const { apiRequest } = useAuth()
   const queryClient = useQueryClient()
@@ -98,6 +103,51 @@ export default function ShiftFormModal({ organization, members, date, shift, act
     setWorkloadWarning(false)
     setAcknowledgeWorkload(false)
   }, [memberId, startDate, endDate, startTime, endTime, dates, overrides, batch, positionId])
+  const [availabilityServerWarning, setAvailabilityServerWarning] = useState<AvailabilityWarning | null>(null)
+  const [availabilityAgreement, setAvailabilityAgreement] = useState<{ token: string; reason: string } | null>(null)
+  const availabilityPeriods: Array<{ start: string; end: string }> = []
+  try {
+    const inputs = batch && !shift ? dates.map(day => {
+      const times = overrides[day] ?? commonTime
+      if (batchTimeError(times)) throw new Error('Invalid time')
+      return { day, start: times.startTime, endDay: addDays(day, times.overnight ? 1 : 0), end: times.endTime }
+    }) : [{ day: startDate, start: startTime, endDay: endDate, end: endTime }]
+    for (const item of inputs) {
+      const start = localDateTimeIso(item.day, item.start, organization.timezone)
+      const end = localDateTimeIso(item.endDay, item.end, organization.timezone)
+      if (end <= start) throw new Error('Invalid time')
+      availabilityPeriods.push({ start, end })
+    }
+  } catch {
+    availabilityPeriods.length = 0
+  }
+  const assignmentUnchanged = !!shift && memberId === shift.memberId && availabilityPeriods.length === 1
+    && availabilityPeriods[0].start === shift.scheduledStartAt && availabilityPeriods[0].end === shift.scheduledEndAt
+  const preservesAgreement = assignmentUnchanged && !!shift?.availabilityOverride
+  const previewEnabled = !actual && !draft && !preservesAgreement && !!memberId && availabilityPeriods.length > 0 && subscription.available('availability')
+  const availabilityPreview = useQuery({
+    queryKey: ['availability-preview', organization.id, organization.locationId, memberId, availabilityPeriods],
+    queryFn: ({ signal }) => apiRequest<{ issues: AvailabilityIssue[]; warning: AvailabilityWarning | null }>(`/organizations/${organization.id}/availability/${memberId}/preview`, {
+      method: 'POST', body: { periods: availabilityPeriods }, signal, notifySubscription: false,
+    }),
+    enabled: previewEnabled,
+    retry: false,
+    staleTime: 15000,
+    refetchOnWindowFocus: 'always',
+  })
+  const availabilityWarning = availabilityServerWarning ?? (previewEnabled && availabilityPreview.isSuccess ? availabilityPreview.data.warning : null)
+  const availabilityAgreed = !!availabilityWarning && availabilityAgreement?.token === availabilityWarning.availabilityConfirmation
+  const availabilityReason = availabilityAgreed ? availabilityAgreement?.reason ?? '' : ''
+  const availabilityConfirmation = availabilityAgreed ? availabilityAgreement?.token : undefined
+  const availabilityByDate: Record<string, string> = {}
+  for (const issue of availabilityWarning?.availabilityConflicts ?? []) {
+    const day = zonedDateAndTime(issue.start, organization.timezone).date
+    availabilityByDate[day] = `${issue.message} · ${issue.timezone}`
+  }
+  useEffect(() => {
+    setAvailabilityServerWarning(null)
+    setAvailabilityAgreement(null)
+  }, [memberId, startDate, endDate, startTime, endTime, dates, overrides, batch])
   const safety = useFormSafety({
     scope: 'shift:' + organization.id + ':' + organization.locationId + ':' + (shift?.id ?? 'new'),
     value: { memberId, startDate, startTime, endDate, endTime, description, reason, attendance, extendWindow, deadlineDate, deadlineTime, positionId, templateId, batch, batchMonth, dates, overrides },
@@ -228,12 +278,12 @@ export default function ShiftFormModal({ organization, members, date, shift, act
       } else if (batch && !shift) {
         await apiRequest(`/organizations/${organization.id}/shifts/batch`, {
           method: 'POST',
-          body: { timesheetReason: reason, openingHoursConfirmation, acknowledgeAbsence, acknowledgeWorkload, shifts: batchInputs },
+          body: { availabilityConfirmation, availabilityReason, timesheetReason: reason, openingHoursConfirmation, acknowledgeAbsence, acknowledgeWorkload, shifts: batchInputs },
         })
       } else {
         await apiRequest(`/organizations/${organization.id}/shifts${shift ? `/${shift.id}` : ''}`, {
           method: shift ? 'PATCH' : 'POST',
-          body: { timesheetReason: reason, openingHoursConfirmation, acknowledgeAbsence, acknowledgeWorkload, positionId: positionId || null, memberId, startDate, startTime, endDate, endTime, breakMinutes: 0, description },
+          body: { availabilityConfirmation, availabilityReason, timesheetReason: reason, openingHoursConfirmation, acknowledgeAbsence, acknowledgeWorkload, positionId: positionId || null, memberId, startDate, startTime, endDate, endTime, breakMinutes: 0, description },
         })
       }
       await invalidateOrganizationWork(queryClient, organization.id)
@@ -241,6 +291,8 @@ export default function ShiftFormModal({ organization, members, date, shift, act
       safety.markSaved()
       close()
     } catch (failure) {
+      const availability = availabilityWarningFrom(failure)
+      if (availability) { setAvailabilityServerWarning(availability); setAvailabilityAgreement(null) }
       const token = openingHoursConfirmationFrom(failure)
       if (token) {
         setOpeningWarning(token)
@@ -262,11 +314,13 @@ export default function ShiftFormModal({ organization, members, date, shift, act
   const title = actual ? 'Изменить отработанное время' : shift ? 'Редактировать смену' : batch ? 'Создать смены' : 'Создать смену'
   const submitDisabled = busy || (!!openingWarning && !outsideAccepted) || (!!draft?.published && !confirmWindow)
     || (!actual && !memberId) || (batch && !dates.length) || (workloadWarning && !acknowledgeWorkload) || (absenceWarning && !acknowledgeAbsence)
+    || (previewEnabled && (availabilityPreview.isPending || availabilityPreview.isError))
+    || (!!availabilityWarning && (!availabilityAgreed || availabilityReason.trim().length < 3))
 
   return <AnimatedOverlay variant="modal" dismissible={!busy} onClose={onClose} beforeClose={safety.confirmClose}>
     {close => <DocumentDialog className={`schedule-shift-dialog${batch && !shift ? ' schedule-shift-dialog--batch' : ''}`} title={title} headerContent={<></>} busy={busy} onClose={close}>
       <form className="shift-form" onChangeCapture={event => {
-        if (event.target instanceof HTMLInputElement && ['ackWorkload', 'ackAbsence', 'ackOpeningHours'].includes(event.target.name)) return
+        if ((event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) && ['ackWorkload', 'ackAbsence', 'ackOpeningHours', 'availabilityReason'].includes(event.target.name)) return
         setInvalidDate(undefined)
         setAcknowledgeWorkload(false)
         if (workloadWarning) { setWorkloadWarning(false); setError('') }
@@ -303,8 +357,12 @@ export default function ShiftFormModal({ organization, members, date, shift, act
                 </div>
                 <p>Применяется ко всем датам без индивидуальных изменений.</p>
               </section>
-              <BatchShiftEditor month={batchMonth} onMonth={setBatchMonth} dates={dates} onDates={changeDates} common={commonTime} overrides={overrides} onOverride={changeOverride} invalidDate={invalidDate} />
+              <BatchShiftEditor month={batchMonth} onMonth={setBatchMonth} dates={dates} onDates={changeDates} common={commonTime} overrides={overrides} onOverride={changeOverride} invalidDate={invalidDate} availability={availabilityByDate} />
             </>}
+            {previewEnabled && availabilityPreview.isError && <RequestErrorState error={availabilityPreview.error} onRetry={() => void availabilityPreview.refetch()} />}
+            {availabilityWarning && <AvailabilityWarningPanel warning={availabilityWarning} agreed={availabilityAgreed} reason={availabilityReason}
+              onAgree={() => setAvailabilityAgreement({ token: availabilityWarning.availabilityConfirmation, reason: '' })}
+              onReason={value => setAvailabilityAgreement({ token: availabilityWarning.availabilityConfirmation, reason: value })} />}
             {actual
               ? <label className="shift-form__wide"><span>Почему меняется отработанное время</span><textarea value={reason} onChange={event => setReason(event.target.value)} maxLength={500} rows={3} placeholder="Например: сотрудник закончил смену раньше" required /></label>
               : <label className="shift-form__wide"><span>{batch ? 'Комментарий ко всем сменам' : 'Комментарий к смене'}</span><textarea value={description} onChange={event => setDescription(event.target.value)} maxLength={500} rows={2} placeholder="Например: работа в основном зале" /></label>}

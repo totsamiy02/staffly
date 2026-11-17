@@ -1,3 +1,6 @@
+import ReplacementDialog from '../availability/replacement-dialog.tsx'
+import { useSubscription } from '../../../../app/subscriptions/context.ts'
+import { AvailabilityIcon } from '../availability/availability-elements.tsx'
 import UnassignedShiftsNotice from '../../organizations/unassigned-shifts-notice.tsx'
 import { calculateWorkTime, workTimeStateNames } from '../../../../shared/work-time.ts'
 import SegmentedNav from '../../../../component/ui/segmented-nav/segmented-nav.tsx'
@@ -45,6 +48,7 @@ const shiftPlural = new Intl.PluralRules('ru')
 const shiftWords = { one: 'смена', few: 'смены', many: 'смен', other: 'смен', zero: 'смен', two: 'смены' }
 
 export default function SchedulePage({ organization, historyMode = false }: { organization: OrganizationSummary; historyMode?: boolean }) {
+  const subscription = useSubscription()
   const [previewTab,setPreviewTab] = useState<'staff'|'demand'>('staff')
   const teamSettings = useTeamSettings(organization.id)
   const [showCoverage, setShowCoverage] = useState(true)
@@ -76,6 +80,7 @@ export default function SchedulePage({ organization, historyMode = false }: { or
   const [shiftView, setShiftView] = useState<'all' | 'mine'>(searchParams.get('view') === 'mine' ? 'mine' : 'all')
   const [selectedDate, setSelectedDate] = useState<string | null>(searchParams.get('day'))
   const [focusedShiftId, setFocusedShiftId] = useState<string | null>(null)
+  const [replacementShiftId, setReplacementShiftId] = useState<string | null>(null)
   const [editing, setEditing] = useState<WorkShift | null>(null)
   const [dayOffShift, setDayOffShift] = useState<WorkShift | null>(null)
   const [adding, setAdding] = useState(false)
@@ -198,6 +203,10 @@ export default function SchedulePage({ organization, historyMode = false }: { or
     {linkedDetails.isError && <p className="app-alert app-alert--error" role="alert">Не удалось открыть смену. Возможно, она больше недоступна.</p>}
     {historyMode ? <ScheduleHistory organization={organization} onShift={shift => { const day = zonedDateAndTime(shift.scheduledStartAt, organization.timezone).date; setSelectedDate(day); setLinkedShift(shift); setFocusedShiftId(shift.id); setActionError('') }} /> : <>
     <div className="schedule-controls"><div className="schedule-toolbar"><button type="button" className="schedule-today" onClick={() => { setMonth(currentMonth); setPreviewDate(todayDate) }}>Сегодня</button><button className="schedule-toolbar__arrow" type="button" aria-label="Предыдущий период" onClick={() => movePeriod(-1)}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="m15 5-7 7 7 7" /></svg></button><button className="schedule-toolbar__arrow" type="button" aria-label="Следующий период" onClick={() => movePeriod(1)}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="m9 5 7 7-7 7" /></svg></button><h2>{calendarView === 'day' ? displayDate(previewDate) : formatMonth(month)}</h2></div><SegmentedNav className="schedule-mode-switch" label="Вид расписания">{([['month', 'Месяц'], ['week', 'Неделя'], ['day', 'День'], ['list', 'Список']] as const).map(([view, label]) => <button key={view} aria-pressed={calendarView === view} onClick={() => setCalendarView(view)}>{label}</button>)}</SegmentedNav><label className="schedule-point-filter"><span>Точка</span><Select value={organization.locationId ?? ''} onChange={event => { setSearchParams(current => { const next = new URLSearchParams(current); next.set('location', event.target.value); return next }) }}>{points.data?.locations.filter(point => !point.archivedAt).map(point => <option key={point.id} value={point.id}>{point.name}</option>)}</Select></label><DocumentActionsMenu label="Ещё: настройки календаря" trigger={<><span>Ещё</span><i className={`schedule-display-active${shiftView === 'mine' ? ' is-active' : ''}`} aria-hidden="true" /><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg></>} className="schedule-display-options" closeOnSelect={false} closeOnMouseLeave={false}>
+        {(canAccess(organization, 'availability.view') || canAccess(organization, 'availability.own')) && <button className="schedule-availability-shortcut" onClick={() => {
+          if (!subscription.available('availability')) { subscription.request({ feature: 'availability' }); return }
+          setSearchParams(current => { const next = new URLSearchParams(current); next.set('availability', canAccess(organization, 'availability.view') ? 'select' : 'own'); return next })
+        }}><AvailabilityIcon /><span><strong>{canAccess(organization, 'availability.view') ? 'Доступность сотрудников' : 'Моя доступность'}</strong><small>Ограничения по дням и времени</small></span></button>}
         <div className="schedule-display-heading"><strong>Настройки календаря</strong><span>Выберите, что показывать</span></div>
         <label className="schedule-display-row"><span><strong>Только мои смены</strong><small>Скрыть смены остальных сотрудников</small></span><button type="button" className="planning-toggle" role="switch" aria-checked={shiftView === 'mine'} aria-label="Только мои смены" disabled={!ownMemberId} onClick={() => changeView(shiftView === 'mine' ? 'all' : 'mine')}><i /></button></label>
         {coverageEnabled && <section className="schedule-display-coverage"><label className="schedule-display-row"><span><strong>Показывать потребность</strong><small>Отметки покрытия на календаре</small></span><button type="button" className="planning-toggle" role="switch" aria-checked={showCoverage} aria-label="Показывать потребность" onClick={() => setShowCoverage(value => !value)}><i /></button></label><div className="schedule-display-key"><span><i className="demand-dot is-short" />Не хватает сотрудников</span><span><i className="demand-dot is-covered" />Потребность закрыта</span><span><i className="demand-dot is-extra" />Работают сверх потребности</span></div><p>Нажмите дату и откройте «Потребность», чтобы посмотреть должности и время.</p>{canAccess(organization, 'coverage.manage') && <Link to={`/app/organizations/${organization.id}/schedule/demand?location=${organization.locationId}`}>Изменить потребность</Link>}</section>}
@@ -271,6 +280,7 @@ export default function SchedulePage({ organization, historyMode = false }: { or
           {mine && (canAccess(organization,'offers.transfer') || canAccess(organization,'offers.swap')) && state.key === 'future' && !shift.activeOffer && <button type="button" className="app-secondary" disabled={!offersEnabled || !!shift.actualStartAt || !!shift.actualEndAt || shift.actualBreakMinutes !== null} title={!offersEnabled ? 'Передача и обмен выключены владельцем' : undefined} onClick={() => { setSelectedDate(null); setOfferingShift(shift) }}>Передать или обменять</button>}
           {mine && canAccess(organization,'requests.create') && state.key === 'future' && <button type="button" className="app-secondary" onClick={() => { setSelectedDate(null); setDayOffShift(shift) }}>Взять отгул</button>}
           {mine && canAccess(organization,'requests.create') && !canManage && state.key === 'future' && <Link className="app-secondary" to={'/app/organizations/' + organization.id + '/requests?tab=mine&changeShift=' + shift.id}>Попросить изменить смену</Link>}
+          {canAccess(organization, 'schedule.edit') && subscription.available('availability') && state.key === 'future' && !shift.activeOffer && !shift.actualStartAt && !shift.actualEndAt && shift.actualBreakMinutes === null && <button className="app-secondary" onClick={() => setReplacementShiftId(shift.id)}>Подобрать замену</button>}
           {canManage && shift.status !== 'CANCELLED' && <>
             <TimeCorrectionAction shift={shift} locationId={organization.locationId} icon />
             {canAccess(organization,'schedule.edit') && state.key !== 'completed' && <button type="button" className="app-secondary day-schedule-card__edit" onClick={() => setEditing(shift)}>Изменить расписание</button>}
@@ -281,6 +291,7 @@ export default function SchedulePage({ organization, historyMode = false }: { or
       }}
     />}</AnimatedOverlay>}
 
+    {replacementShiftId && <ReplacementDialog organization={organization} shiftId={replacementShiftId} onClose={() => setReplacementShiftId(null)} onSaved={async () => { setReplacementShiftId(null); await invalidateOrganizationWork(queryClient, organization.id) }} />}
     {(adding || editing) && selectedDate && <ShiftFormModal organization={organization} members={members.data?.members ?? []} date={selectedDate} shift={editing} onClose={() => { setAdding(false); setEditing(null); setSelectedDate(null); if (returnToRequest) navigate(returnToRequest, { replace: true }) }} />}
     {cancelling && <AnimatedOverlay variant="modal" onClose={() => { setCancelling(null); setCancelReason('') }}>{(close) => <div className="cancel-shift-modal"><p className="app-eyebrow">Отмена смены</p><h2>Отменить смену {cancelling.memberName}?</h2><p>Смена останется в истории и перестанет учитываться в рабочем времени.</p><label><span>Причина отмены</span><textarea value={cancelReason} onChange={(event) => setCancelReason(event.target.value)} maxLength={500} rows={3} autoFocus /></label>{actionError && <p className="form-inline-error">{actionError}</p>}<footer><button className="app-secondary" disabled={busy} onClick={close}>Назад</button><button className="app-danger" disabled={busy || cancelReason.trim().length < 3} onClick={() => void cancel(close)}>{busy ? 'Отменяем…' : 'Отменить смену'}</button></footer></div>}</AnimatedOverlay>}
 

@@ -12,6 +12,7 @@ type Props = {
   common: BatchShiftTime
   overrides: BatchShiftOverrides
   onOverride: (day: string, value: BatchShiftTime | null) => void
+  availability?: Record<string, string>
   invalidDate?: string
 }
 
@@ -20,7 +21,7 @@ const weekdays = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
 const shortDate = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', timeZone: 'UTC' })
 const weekdayDate = new Intl.DateTimeFormat('ru-RU', { weekday: 'short', timeZone: 'UTC' })
 
-export default function BatchShiftEditor({ month, onMonth, dates, onDates, common, overrides, onOverride, invalidDate }: Props) {
+export default function BatchShiftEditor({ month, onMonth, dates, onDates, common, overrides, onOverride, invalidDate, availability }: Props) {
   const id = useId()
   const [mode, setMode] = useState<typeof modes[number][0]>('manual')
   const [from, setFrom] = useState(dates[0] ?? `${month}-01`)
@@ -115,7 +116,7 @@ export default function BatchShiftEditor({ month, onMonth, dates, onDates, commo
           const times = overrides[day] ?? common
           const open = expanded === day
           const change = (value: Partial<BatchShiftTime>) => onOverride(day, { ...times, ...value })
-          return <article key={day} id={`${id}-${day}`} className={`batch-shift${open ? ' is-expanded' : ''}${invalidDate === day ? ' has-error' : ''}`} aria-label={displayDate(day)}>
+          return <article key={day} id={`${id}-${day}`} className={`batch-shift${open ? ' is-expanded' : ''}${invalidDate === day ? ' has-error' : ''}${availability?.[day] ? ' has-availability-warning' : ''}`} aria-label={displayDate(day)}>
             <div className="batch-shift__summary">
               <div className="batch-shift__date">
                 <strong>{shortDate.format(date)}</strong><span>{weekdayDate.format(date)}</span>
@@ -132,6 +133,7 @@ export default function BatchShiftEditor({ month, onMonth, dates, onDates, commo
                 <span>{open ? 'Свернуть' : 'Изменить'}</span>
               </button>
             </div>
+            {availability?.[day] && <div className="batch-availability-note">{availability[day]}</div>}
             {open && <div id={`${id}-${day}-fields`} className="batch-shift__fields">
               <div className="planning-time">
                 <label><span>Начало</span><TimeInput value={times.startTime} required onChange={event => change({ startTime: event.target.value })} /></label>

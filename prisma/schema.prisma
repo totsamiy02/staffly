@@ -234,6 +234,7 @@ enum WorkShiftStatus {
 }
 
 enum AccountNotificationType {
+  SHIFT_AVAILABILITY_CHANGED
   ORGANIZATION_MEMBER_LEFT
   TIMESHEET_REVIEW
   SUBSCRIPTION_STATUS
@@ -311,6 +312,8 @@ enum RequestEventType {
 }
 
 model Organization {
+  availabilityAccounts MemberAvailability[]
+  availabilityEvents MemberAvailabilityEvent[]
   selfExits MemberSelfExit[]
   timesheetPeriods TimesheetPeriod[]
   industry String? @db.VarChar(120)
@@ -474,6 +477,8 @@ model AccountNotification {
 }
 
 model OrganizationMember {
+  availabilityAccounts MemberAvailability[] @relation("AvailabilityMember")
+  availabilityChanges MemberAvailabilityEvent[] @relation("AvailabilityActor")
   selfExits MemberSelfExit[]
   vacationAccounts VacationAccount[]
   vacationBalanceEvents VacationBalanceEvent[] @relation("VacationBalanceActor")
@@ -547,6 +552,7 @@ model OrganizationMember {
 }
 
 model MemberEmploymentPeriod {
+  availability MemberAvailability?
   selfExit MemberSelfExit?
   id String @id @default(uuid()) @db.Uuid
   organizationId String @map("organization_id") @db.Uuid
@@ -584,6 +590,7 @@ enum ShiftAttendance {
 }
 
 model WorkShift {
+  availabilityOverride Json? @map("availability_override")
   selfExitId String? @map("self_exit_id") @db.Uuid
   selfExit MemberSelfExit? @relation(fields: [organizationId, memberId, selfExitId], references: [organizationId, memberId, id], onDelete: NoAction)
   @@index([selfExitId, status])
@@ -1872,4 +1879,44 @@ model MemberSelfExit {
   @@unique([organizationId, id])
   @@index([organizationId, createdAt, id])
   @@map("member_self_exits")
+}
+
+model MemberAvailability {
+  id String @id @default(uuid()) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  memberId String @map("member_id") @db.Uuid
+  employmentPeriodId String @unique @map("employment_period_id") @db.Uuid
+  timezone String @db.VarChar(64)
+  revision Int @default(1)
+  config Json
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  member OrganizationMember @relation("AvailabilityMember", fields: [organizationId, memberId], references: [organizationId, id], onDelete: NoAction)
+  employmentPeriod MemberEmploymentPeriod @relation(fields: [organizationId, memberId, employmentPeriodId], references: [organizationId, memberId, id], onDelete: NoAction)
+  events MemberAvailabilityEvent[]
+  @@unique([organizationId, memberId, employmentPeriodId])
+  @@unique([organizationId, id])
+  @@index([organizationId, memberId])
+  @@map("member_availability")
+}
+
+model MemberAvailabilityEvent {
+  actorName String @map("actor_name") @db.VarChar(300)
+  id String @id @default(uuid()) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  accountId String @map("account_id") @db.Uuid
+  actorMemberId String @map("actor_member_id") @db.Uuid
+  operationId String @map("operation_id") @db.Uuid
+  inputHash String @map("input_hash") @db.VarChar(64)
+  revision Int
+  before Json?
+  after Json
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  account MemberAvailability @relation(fields: [organizationId, accountId], references: [organizationId, id], onDelete: Cascade)
+  actor OrganizationMember @relation("AvailabilityActor", fields: [organizationId, actorMemberId], references: [organizationId, id], onDelete: NoAction)
+  @@unique([organizationId, actorMemberId, operationId])
+  @@unique([accountId, revision])
+  @@index([accountId, createdAt])
+  @@map("member_availability_events")
 }

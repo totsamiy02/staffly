@@ -1,3 +1,4 @@
+import { requireCandidateAvailability } from '../schedule/availability/checks.ts'
 import { Prisma } from '../../generated/prisma/client.ts'
 import { publishRequestNotices } from './request-notifications.ts'
 
@@ -31,6 +32,7 @@ export async function respondToStaffing(userId: string, organizationId: string, 
     const memberships = await tx.locationMember.findMany({ where: { memberId: actor.id, organizationId, leftAt: null, location: { archivedAt: null }, member: { leftAt: null, user: { deletedAt: null } } } })
     if (!memberships.some(item => item.locationId !== offer.locationId) || memberships.some(item => item.locationId === offer.locationId)) throw new ApiError(403, 'STAFFING_OTHER_LOCATION', 'Эта заявка предназначена для сотрудников других точек.')
     await assertNoApprovedAbsence(organizationId, actor.id, offer.proposedStartAt, offer.proposedEndAt, offer.location.timezone, tx)
+    await requireCandidateAvailability(tx, organizationId, { memberId: actor.id, locationId: offer.locationId, start: offer.proposedStartAt, end: offer.proposedEndAt })
     if (await tx.workShift.findFirst({ where: { organizationId, memberId: actor.id, status: 'SCHEDULED', scheduledStartAt: { lt: offer.proposedEndAt }, scheduledEndAt: { gt: offer.proposedStartAt } } })) throw new ApiError(409, 'SHIFT_OVERLAP', 'В это время у вас уже есть смена.')
     if(await tx.organizationRequest.findFirst({where:{staffingRequestId:requestId,createdByMemberId:actor.id,status:{in:['PENDING','APPROVED']}}}))throw new ApiError(409,'ALREADY_RESPONDED','У вас уже есть активный отклик.')
     const type = await tx.requestType.findFirstOrThrow({ where: { organizationId, systemCode: 'STAFFING_RESPONSE' } })

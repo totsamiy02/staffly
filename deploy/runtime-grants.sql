@@ -41,3 +41,9 @@ REVOKE DELETE, TRUNCATE ON public.vacation_accounts FROM staffly_app;
 
 GRANT SELECT, INSERT ON public.member_self_exits TO staffly_app;
 REVOKE UPDATE, DELETE, TRUNCATE ON public.member_self_exits FROM staffly_app;
+
+-- Availability changes retain immutable authorship and retry keys.
+GRANT SELECT, INSERT, UPDATE ON public.member_availability TO staffly_app;
+REVOKE DELETE, TRUNCATE ON public.member_availability FROM staffly_app;
+GRANT SELECT, INSERT ON public.member_availability_events TO staffly_app;
+REVOKE UPDATE, DELETE, TRUNCATE ON public.member_availability_events FROM staffly_app;

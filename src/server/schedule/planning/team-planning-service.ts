@@ -1,3 +1,5 @@
+import { checkAvailabilityAssignments, availabilityPeriodKey } from '../availability/checks.ts'
+import type { AvailabilityWarning } from '../../../shared/availability.ts'
 import {checkOpeningHours} from '../opening-hours.ts'
 import { requirePlanFeature, subscriptionSnapshot } from '../../subscriptions/access.ts'
 import { randomUUID } from 'node:crypto'
@@ -337,7 +339,18 @@ async function validateDraftIn(tx:DB,actor:Actor,d:ScheduleDraft):Promise<DraftV
     const gaps=coverage.flatMap(day=>day.segments.filter(segment=>segment.shortage>0).map(segment=>`${displayDate(day.date)} · ${segment.positionName} · ${formatTime(segment.startAt,d.timezone)}–${formatTime(segment.endAt,d.timezone)}: назначено ${segment.assigned} из ${segment.needed}`))
     warnings.push({code:'COVERAGE_WARNING',message:shortage?`Не хватает сотрудников: ${gaps.slice(0,3).join('; ')}.${gaps.length>3?' Остальные даты смотрите в потребности.':''} Можно применить график и закрыть оставшиеся места позже.`:'Есть работа сверх заданной потребности. Посмотрите должности и часы в блоке потребности. Такие назначения можно сохранить.'})
   }
-  return {errors,warnings,coverage}
+  let availabilityWarning: AvailabilityWarning | undefined
+  try {
+    await checkAvailabilityAssignments(tx, actor, additions.map(item => ({
+      memberId: item.proposed.memberId, locationId: d.locationId,
+      start: new Date(item.proposed.scheduledStartAt), end: new Date(item.proposed.scheduledEndAt),
+    })))
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.code !== 'AVAILABILITY_WARNING') throw error
+    availabilityWarning = error.details as AvailabilityWarning
+    warnings.push({ code: error.code, message: error.message })
+  }
+  return { errors, warnings, coverage, availabilityWarning }
 }
 export async function validateDraft(userId:string,organizationId:string,id:string) {
   return withDraft(userId,organizationId,id,undefined,async(tx,actor,d)=> {requirePermission(actor,'drafts.view');await requirePlanFeature(organizationId, 'planning', tx);return validateDraftIn(tx,actor,d)})
@@ -402,6 +415,10 @@ export async function actOnDraft(userId:string,organizationId:string,id:string,i
       if(validation.errors.length)throw new ApiError(409,'DRAFT_CONFLICTS',validation.errors.map(e=>e.message).join(' '),validation)
       if(validation.warnings.some(w=>w.code==='WORKLOAD_WARNING')&&!input.acknowledgeWorkload)throw new ApiError(409,'WORKLOAD_WARNING','Подтвердите применение с превышением месячной нормы.',validation)
       await checkOpeningHours(tx,d.organizationId,d.locationId,changes.filter(p=>p.kind!=='CANCEL').map(p=>({start:new Date(p.proposed.scheduledStartAt),end:new Date(p.proposed.scheduledEndAt)})),input.openingHoursConfirmation)
+      const availability = await checkAvailabilityAssignments(tx, actor, changes.filter(item => item.kind !== 'CANCEL').map(item => ({
+        memberId: item.proposed.memberId, locationId: d.locationId,
+        start: new Date(item.proposed.scheduledStartAt), end: new Date(item.proposed.scheduledEndAt),
+      })), input)
       const openComments=await tx.draftComment.count({where:{draftId:id,status:'OPEN'}})
       if(openComments && (!input.confirm||input.explanation.length<3))throw new ApiError(400,'OPEN_COMMENTS','Есть открытые замечания. Подтвердите применение и укажите объяснение руководителя.')
       snapshot=await workPicture(tx,actor,d,proposals)
@@ -409,7 +426,8 @@ export async function actOnDraft(userId:string,organizationId:string,id:string,i
       for(const p of changes) {
         const current=p.sourceShiftId?await tx.workShift.findUniqueOrThrow({where:{id:p.sourceShiftId}}):undefined
         const s=p.proposed
-        const effect=await mutatePlannedShift(tx,actor,p.kind==='CANCEL'?{current,reason:'Отмена по предварительному графику «'+d.title.slice(0,160)+'»'}:{current,openingHoursValidated:true,input:{memberId:s.memberId,positionId:s.positionId,breakMinutes:s.breakMinutes,description:s.description,startDate:'',endDate:'',startTime:'',endTime:''},startAt:new Date(s.scheduledStartAt),endAt:new Date(s.scheduledEndAt)})
+        const effect=await mutatePlannedShift(tx,actor,p.kind==='CANCEL'?{current,reason:'Отмена по предварительному графику «'+d.title.slice(0,160)+'»'}:{current, openingHoursValidated: true, availabilityChecked: true,
+          availabilityOverride: availability.get(availabilityPeriodKey({ memberId: s.memberId, locationId: d.locationId, start: new Date(s.scheduledStartAt), end: new Date(s.scheduledEndAt) })), input:{memberId:s.memberId,positionId:s.positionId,breakMinutes:s.breakMinutes,description:s.description,startDate:'',endDate:'',startTime:'',endTime:''},startAt:new Date(s.scheduledStartAt),endAt:new Date(s.scheduledEndAt)})
         effects.push(effect)
         await tx.draftShift.update({where:{id:p.id},data:{appliedShiftId:effect.changed.id}})
         if(p.kind!=='CANCEL')snapshot=snapshot.map(shift=>shift.id===s.id?{...s,id:effect.changed.id}:shift)

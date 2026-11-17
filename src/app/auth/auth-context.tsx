@@ -16,7 +16,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, us
 export type AuthUser = { id: string; publicId?:number; email: string; displayName: string; firstName: string | null; lastName: string | null; middleName: string | null; phone: string | null; bio: string | null; avatarUrl: string | null }
 type VerifyEmailBody = { email: string; code: string; password: string; confirmPassword: string; consentData: boolean; consentTerms: boolean }
 type AuthResult = { user: AuthUser; accessToken: string }
-type ApiOptions = { method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'; body?: unknown; signal?: AbortSignal }
+type ApiOptions = { method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'; body?: unknown; signal?: AbortSignal; notifySubscription?: boolean }
 type AuthContextValue = {
   user: AuthUser | null
   loading: boolean
@@ -142,7 +142,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       headers: { ...(options.body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}),
     })
-    return guardRequest(async () => readJson<T>(await requestWithSession(execute, () => tokenRef.current, refresh), { notifySubscription: (options.method ?? 'GET') !== 'GET' }), { mutation: (options.method ?? 'GET') !== 'GET', signal: options.signal })
+    return guardRequest(async () => readJson<T>(await requestWithSession(execute, () => tokenRef.current, refresh), { notifySubscription: options.notifySubscription ?? (options.method ?? 'GET') !== 'GET' }), { mutation: (options.method ?? 'GET') !== 'GET', signal: options.signal })
   }, [refresh])
 
   const uploadImage = useCallback(async <T,>(path: string, file: File): Promise<T> => {

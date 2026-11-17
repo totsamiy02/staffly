@@ -14,6 +14,7 @@ import { recordFeature } from './admin/collection.ts'
 import { randomUUID } from 'node:crypto'
 import { safeError, safeApiError } from './security/safe-error.ts'
 import { securityContext } from './security/journal.ts'
+import availabilityRouter from './schedule/availability/routes.ts'
 import selfExitRouter from './organizations/self-exit-routes.ts'
 import selfExitWorkRouter from './organizations/self-exit-work-routes.ts'
 import subscriptionRouter, { subscriptionWritePolicy } from './subscriptions/routes.ts'
@@ -72,6 +73,7 @@ app.use((request, _response, next) => {
 // HTML is now served through API as well as edge; keep the existing viewer
 // permissions from nginx (Wasm and local blob workers/media) in both policies.
 app.use(helmet({ contentSecurityPolicy: { directives: { scriptSrc: ["'self'", "'wasm-unsafe-eval'"], workerSrc: ["'self'", 'blob:'], mediaSrc: ["'self'", 'blob:'], imgSrc: ["'self'", 'data:', 'blob:'], frameSrc: ["'self'", 'blob:'] } } }))
+app.use('/api/organizations/:organizationId/availability', express.json({ limit: '384kb' }))
 app.use('/api/organizations/:organizationId/shifts/batch', express.json({ limit: '64kb' }))
 app.use('/api/organizations/:organizationId/documents/:documentId/assign', express.json({ limit: '64kb' }))
 app.use('/api/organizations/:organizationId/events', express.json({ limit: '64kb' }))
@@ -151,6 +153,7 @@ app.use('/api/organizations/:organizationId', (request, response, next) => {
 app.use('/api', (_q,s,next)=>{s.set('Cache-Control','no-store');next()}, accessRouter)
 app.use('/api', subscriptionRouter)
 app.use('/api', selfExitWorkRouter)
+app.use('/api', availabilityRouter)
 app.use('/api', storageRouter)
 app.use('/api/auth', (_request, response, next) => { response.set('Cache-Control', 'no-store'); next() }, authRouter)
 app.use('/api', (_request, response, next) => { response.set('Cache-Control', 'no-store'); next() }, profileRouter)

@@ -20,7 +20,7 @@ export function PlanCards({ current, onChoose, busy=false }: { current?: PlanId;
     <div className="subscription-plan__title"><div><h3>{plan.name}</h3><p>{plan.description}</p></div><PlanIcon plan={id} /></div>
     <p className="subscription-plan__price">Без оплаты</p>
     <ul><li>{plan.members} участников, включая владельца</li><li>{plan.locations} {plan.locations === 1 ? 'точка' : plan.locations === 3 ? 'точки' : 'точек'}</li><li>{plan.storageLabel} хранилища</li></ul>
-    <ul className="subscription-plan__features"><li>Расписание, заявки и события</li><li>Документы и ознакомления</li>{id !== 'FREE' && <li>Отчёты и выгрузка Excel</li>}{id === 'BUSINESS' && <><li>Свои роли и разрешения</li><li>Расширенное планирование</li></>}</ul>
+    <ul className="subscription-plan__features"><li>Расписание, заявки и события</li><li>Документы и ознакомления</li>{id !== 'FREE' && <><li>Отчёты и выгрузка Excel</li><li>Доступность сотрудников и подбор замен</li></>}{id === 'BUSINESS' && <><li>Свои роли и разрешения</li><li>Расширенное планирование</li></>}</ul>
     <div className="subscription-plan__actions">{onChoose?<button className={id==='TEAM'?'app-primary':'app-secondary'} disabled={busy||current===id&&id==='FREE'} onClick={()=>onChoose(id)}>{current===id?id==='FREE'?'Текущий тариф':'Продлить без оплаты':id==='FREE'?'Выбрать Бесплатный':`Подключить ${plan.name==='Команда'?'Команду':'Бизнес'}`}</button>:<small>Выбрать тариф может владелец организации в настройках</small>}</div>
   </article> })}</div>
 }

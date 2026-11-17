@@ -8,7 +8,7 @@ import ReminderSettings from './reminder-settings.tsx';
 import './attention-panel.scss';
 
 export function AttentionIcon({ kind }: { kind: AttentionItem['kind'] | 'bell' | 'clock' }) {
-  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{kind === 'DEPARTURE' ? <path d="M10 5H5v14h5M14 8l4 4-4 4M9 12h9" /> : kind === 'bell' ? <><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" /></> : kind === 'clock' ? <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></> : kind === 'DOCUMENT' ? <><path d="M6 3h8l4 4v14H6zM14 3v5h4M9 12h6m-6 4h6" /></> : kind === 'TASK' ? <><rect x="4" y="4" width="16" height="16" rx="3" /><path d="m8 12 3 3 5-6" /></> : <><path d="M5 4h14v13H9l-4 4zM9 8h6m-6 4h4" /></>}</svg>;
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{kind === 'DEPARTURE' ? <path d="M10 5H5v14h5M14 8l4 4-4 4M9 12h9" /> : kind === 'bell' ? <><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" /></> : kind === 'clock' || kind === 'AVAILABILITY' ? <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></> : kind === 'DOCUMENT' ? <><path d="M6 3h8l4 4v14H6zM14 3v5h4M9 12h6m-6 4h6" /></> : kind === 'TASK' ? <><rect x="4" y="4" width="16" height="16" rx="3" /><path d="m8 12 3 3 5-6" /></> : <><path d="M5 4h14v13H9l-4 4zM9 8h6m-6 4h4" /></>}</svg>;
 }
 function deadline(item: AttentionItem) {
   if (!item.dueAt) return 'Без срока';

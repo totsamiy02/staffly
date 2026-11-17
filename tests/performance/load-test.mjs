@@ -21,6 +21,7 @@ const options = Object.fromEntries(process.argv.slice(2).map(arg => arg.replace(
 if (options.profile === 'attention' && !options.output) options.output = await mkdtemp(path.join(os.tmpdir(), 'staffly-attention-'))
 if (options.profile === 'member-bulk' && !options.output) options.output = await mkdtemp(path.join(os.tmpdir(), 'staffly-member-bulk-'))
 if (options.profile === 'shift-batch' && !options.output) options.output = await mkdtemp(path.join(os.tmpdir(), 'staffly-shift-batch-'))
+if (options.profile === 'availability' && !options.output) options.output = await mkdtemp(path.join(os.tmpdir(), 'staffly-availability-'))
 if (options.profile === 'self-exit' && !options.output) options.output = await mkdtemp(path.join(os.tmpdir(), 'staffly-self-exit-'))
 if (options.profile === 'admin') options['admin-suite'] = resolveAdminSuite(options)
 const databaseTimezone = options['db-timezone'] ?? 'UTC'
@@ -304,6 +305,9 @@ try {
   } else if (options.profile === 'shift-batch') {
     const { runShiftBatch } = await import('../interface/shift-batch.mjs')
     results.shiftBatch = await runShiftBatch({ prisma, env, root, temporary, output, options, startApi })
+  } else if (options.profile === 'availability') {
+    const { runAvailability } = await import('../interface/availability.mjs')
+    results.availability = await runAvailability({ prisma, env, root, temporary, output, options, startApi })
   } else if (options.profile === 'self-exit') {
     const { runSelfExit } = await import('../interface/self-exit.mjs')
     results.selfExit = await runSelfExit({ prisma, env, root, temporary, output, options, startApi })

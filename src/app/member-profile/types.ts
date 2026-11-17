@@ -7,7 +7,7 @@ export type ProfileOptions = { month: string; locationId: string; section: Profi
 export type MemberProfileData = {
   member: Omit<OrganizationMember, 'locations'> & { employmentPeriods?:Array<{id:string;startedAt:string|null;endedAt:string|null;incomplete:boolean}>; leftAt: string | null; roleName: string | null; locations: Array<{ id: string; name: string; timezone: string }> }
   own: boolean; month: string; location: { id: string; name: string; timezone: string }
-  capabilities: { time: boolean; schedule: boolean; documents: boolean; personalDocuments: boolean; acknowledgements: boolean; requests: boolean; absences: boolean; correctTime: boolean; managePositions: boolean; manageAccess: boolean }
+  capabilities: { availability: boolean; time: boolean; schedule: boolean; documents: boolean; personalDocuments: boolean; acknowledgements: boolean; requests: boolean; absences: boolean; correctTime: boolean; managePositions: boolean; manageAccess: boolean }
   overview?: { period: WorkTimeMember | null; corrections: number | null; upcoming: Array<{ id: string; scheduledStartAt: string; scheduledEndAt: string; positionNameSnapshot: string | null }> | null; nextAbsence: { startDate: string; endDate: string; type: string } | null; pendingDocuments: number | null; pendingRequests: number | null }
   time?: MemberWorkTime
   documents?: { documents: Array<DocumentItem & { profileAcknowledgement: { openedAt: string | null; acknowledgedAt: string | null; deadline: string | null } | null }>; pagination: { page: number; total: number; pages: number } }

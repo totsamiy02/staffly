@@ -1,3 +1,4 @@
+import { requireCandidateAvailability } from './availability/checks.ts'
 import { partialData, offeredShift, validatePartial, completePartial } from './partial-shifts.ts'
 import { checkMonthlyWorkload } from './workload.ts'
 import { locationContext } from '../organizations/location-context.ts'
@@ -57,7 +58,7 @@ async function memberAccess(tx: Prisma.TransactionClient, shift: WorkShift, memb
   if (!point) fail('LOCATION_UNAVAILABLE', 'Точка закрыта или недоступна.')
   if (member.role !== 'OWNER') {
     const permanent = await tx.locationMember.findFirst({ where: { locationId: point.id, memberId, leftAt: null } })
-    const temporary = await tx.locationTransfer.findFirst({ where: { organizationId: shift.organizationId, memberId, toLocationId: point.id, temporary: true, revokedAt: null, startAt: { lte: new Date() }, endAt: { gt: new Date(), gte: shift.scheduledEndAt } } })
+    const temporary = await tx.locationTransfer.findFirst({ where: { organizationId: shift.organizationId, memberId, toLocationId: point.id, temporary: true, revokedAt: null, startAt: { lte: shift.scheduledStartAt }, endAt: { gt: new Date(), gte: shift.scheduledEndAt } } })
     if (!permanent && !temporary) fail('MEMBER_NOT_IN_LOCATION', 'Сотрудник не имеет действующего доступа к этой точке на период смены.')
   }
   return { member, point }
@@ -67,6 +68,7 @@ export async function eligible(tx: Prisma.TransactionClient, shift: WorkShift, m
   if (shift.positionId && !await tx.memberPosition.findFirst({ where: { memberId, positionId: shift.positionId, position: { organizationId: shift.organizationId, isActive: true } } })) fail('POSITION_NOT_ASSIGNED', 'Сотруднику не назначена активная должность этой смены.')
   await assertNoApprovedAbsence(shift.organizationId, memberId, shift.scheduledStartAt, shift.scheduledEndAt, point.timezone, tx)
   if (await tx.workShift.findFirst({ where: { organizationId: shift.organizationId, memberId, id: { notIn: excluded }, status: 'SCHEDULED', scheduledStartAt: { lt: shift.scheduledEndAt }, scheduledEndAt: { gt: shift.scheduledStartAt } } })) fail('SHIFT_OVERLAP', 'У сотрудника уже есть пересекающаяся смена.')
+  await requireCandidateAvailability(tx, shift.organizationId, { memberId, locationId: shift.locationId, start: shift.scheduledStartAt, end: shift.scheduledEndAt })
   return member
 }
 function mode(organization: { shiftTransferMode: ShiftOffer['mode']; shiftSwapMode: ShiftOffer['mode'] }, kind: ShiftOffer['kind']) { return kind === 'TRANSFER' ? organization.shiftTransferMode : organization.shiftSwapMode }

@@ -141,6 +141,10 @@ it('runs real migrations as a schema owner, grants runtime CRUD and denies DDL, 
     assert.equal((await app.query('SELECT first_name FROM users WHERE id = $1', [id])).rows[0].first_name, 'Limited')
     for (const sql of ['CREATE TABLE public.forbidden (id int)', 'ALTER TABLE public.users ADD COLUMN forbidden int', 'DROP TABLE public.users CASCADE', 'TRUNCATE public.users CASCADE', 'DELETE FROM public._prisma_migrations', 'CREATE ROLE forbidden', 'SET ROLE staffly_migrator', 'UPDATE organization_resource_budgets SET storage_limit_bytes=999999999999', 'UPDATE organization_resource_budgets SET storage_bytes=0', 'UPDATE organization_resource_budgets SET email_queue_limit=100000', 'DELETE FROM organization_resource_budgets', 'DELETE FROM platform_operation_events', 'UPDATE platform_lifetime_metrics SET users_created=0', "INSERT INTO platform_creation_events(metric) VALUES('users')"]) await assert.rejects(app.query(sql), { code: '42501' })
     for (const sql of [
+      'UPDATE member_availability_events SET revision=revision',
+      'DELETE FROM member_availability_events',
+      'TRUNCATE member_availability_events CASCADE',
+      'DELETE FROM member_availability',
       'UPDATE member_self_exits SET member_name=member_name',
       'DELETE FROM member_self_exits',
       'TRUNCATE member_self_exits CASCADE',

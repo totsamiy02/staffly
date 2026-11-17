@@ -1,8 +1,10 @@
+import { Prisma } from '../../generated/prisma/client.ts'
+import { requireCandidateAvailability } from '../schedule/availability/checks.ts'
 import { localDay } from '../attention/policy.ts'
 import { addCalendarDays } from '../schedule/timezone.ts'
 import {requireLocationInPlan} from '../subscriptions/access.ts'
 import {checkOpeningHours} from '../schedule/opening-hours.ts'
-import type { Prisma,RequestSystemCode } from '../../generated/prisma/client.ts'
+import type { RequestSystemCode } from '../../generated/prisma/client.ts'
 import { publishRequestNotices } from './request-notifications.ts'
 
 import { requirePermission } from '../organizations/access/access.ts'
@@ -40,6 +42,7 @@ if (decision === 'APPROVED' && current.systemCodeSnapshot === 'STAFFING_RESPONSE
       await checkMonthlyWorkload(tx, organizationId, current.createdByMemberId, actor.organization.timezone, actor.organization.monthlyWorkMinutes, [{ start: offer.proposedStartAt, end: offer.proposedEndAt }], [], acknowledgeWorkload)
       if (await tx.workShift.findFirst({ where: { organizationId, memberId: current.createdByMemberId, status: 'SCHEDULED', scheduledStartAt: { lt: offer.proposedEndAt }, scheduledEndAt: { gt: offer.proposedStartAt } } })) throw new ApiError(409, 'SHIFT_OVERLAP', 'В это время у сотрудника уже есть смена в одной из точек.')
       await requireLocationInPlan(tx,organizationId,current.locationId)
+      await requireCandidateAvailability(tx, organizationId, { memberId: current.createdByMemberId, locationId: current.locationId, start: offer.proposedStartAt, end: offer.proposedEndAt })
       const shift = await tx.workShift.create({ data: { organizationId, locationId: current.locationId, memberId: current.createdByMemberId, createdByMemberId: actor.id, scheduledStartAt: offer.proposedStartAt, scheduledEndAt: offer.proposedEndAt, positionId: offer.staffingPositionId, positionNameSnapshot: offer.staffingPositionName, description: offer.comment?.slice(0, 500) }, include: { member: true } })
       await tx.organizationRequest.update({ where: { id: current.id }, data: { relatedShiftId: shift.id } })
       await tx.organizationRequest.update({ where: { id: offer.id }, data: { status: 'APPROVED', resolvedAt: new Date(), resolvedByMemberId: actor.id, relatedShiftId: shift.id } })
@@ -62,6 +65,7 @@ if (decision === 'APPROVED' && current.systemCodeSnapshot === 'SHIFT_PROPOSAL') 
       await assertNoApprovedAbsence(organizationId, current.createdByMemberId, current.proposedStartAt!, current.proposedEndAt!, actor.organization.timezone, tx, acknowledgeAbsence)
       if (await tx.workShift.findFirst({ where: { organizationId, memberId: current.createdByMemberId, status: 'SCHEDULED', scheduledStartAt: { lt: current.proposedEndAt! }, scheduledEndAt: { gt: current.proposedStartAt! } } })) throw new ApiError(409, 'SHIFT_OVERLAP', 'В предложенное время уже есть смена.')
       await requireLocationInPlan(tx,organizationId,current.locationId)
+      await requireCandidateAvailability(tx, organizationId, { memberId: current.createdByMemberId, locationId: current.locationId, start: current.proposedStartAt!, end: current.proposedEndAt! })
       const createdShift = await tx.workShift.create({ data: { organizationId, locationId: current.locationId, memberId: current.createdByMemberId, createdByMemberId: actor.id, scheduledStartAt: current.proposedStartAt!, scheduledEndAt: current.proposedEndAt!, description: current.comment?.slice(0, 500) }, include: { member: true } })
       await tx.organizationRequest.update({ where: { id: requestId }, data: { relatedShiftId: createdShift.id } })
       await recordShiftNotification(tx, createdShift, 'SHIFT_ASSIGNED', actor.organization.timezone)
@@ -86,7 +90,8 @@ if (decision === 'APPROVED' && current.systemCodeSnapshot === 'SHIFT_CHANGE') {
       await assertNoApprovedAbsence(organizationId, shift.memberId, current.proposedStartAt, current.proposedEndAt, actor.organization.timezone, tx, acknowledgeAbsence)
       const overlap = await tx.workShift.findFirst({ where: { id: { not: shift.id }, organizationId, memberId: shift.memberId, status: 'SCHEDULED', scheduledStartAt: { lt: current.proposedEndAt }, scheduledEndAt: { gt: current.proposedStartAt } }, select: { id: true } })
       if (overlap) throw new ApiError(409, 'SHIFT_OVERLAP', 'В предложенное время у сотрудника уже есть смена.')
-      const changedShift = await tx.workShift.update({ where: { id: shift.id }, data: { scheduledStartAt: current.proposedStartAt, scheduledEndAt: current.proposedEndAt, assignmentReadAt: null }, include: { member: true } })
+      await requireCandidateAvailability(tx, organizationId, { memberId: shift.memberId, locationId: current.locationId, start: current.proposedStartAt!, end: current.proposedEndAt! })
+      const changedShift = await tx.workShift.update({ where: { id: shift.id }, data: { scheduledStartAt: current.proposedStartAt, scheduledEndAt: current.proposedEndAt, availabilityOverride: Prisma.DbNull, assignmentReadAt: null }, include: { member: true } })
       await recordShiftNotification(tx, changedShift, 'SHIFT_CHANGED', actor.organization.timezone)
       await cancelShiftRequests(tx, organizationId, [shift.id], actor.id, 'Исходная смена перенесена по другой заявке.', requestId)
     }

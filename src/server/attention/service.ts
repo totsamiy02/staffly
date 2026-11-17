@@ -1,3 +1,4 @@
+import { availabilityAttention } from '../schedule/availability/attention.ts';
 import { exitAttention } from '../organizations/self-exit-work.ts';
 import { z } from 'zod';
 import { prisma } from '../db.ts';
@@ -23,6 +24,7 @@ export async function listAttention(userId: string, organizationId: string, opti
     const result = new AttentionCollector(options);
     const pointId = options.pointId === 'all' ? undefined : options.pointId;
     const base = `/app/organizations/${organizationId}`;
+    for (const item of await availabilityAttention(db, actor, pointId)) result.add(item);
     const exitRequests = new Set<string>();
     for await (const exit of exitAttention(db, actor, pointId, context)) {
       for (const task of exit.tasks) exitRequests.add(task.id);

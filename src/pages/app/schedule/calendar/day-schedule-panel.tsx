@@ -87,6 +87,7 @@ export default function DaySchedulePanel({ date, timezone, locationName, locatio
             {shift.status === 'UNASSIGNED' && <p className="day-schedule-card__accounting">Сотрудник покинул организацию. Назначение ожидает замены и не входит в расчёт часов.</p>}
             {shift.status === 'SCHEDULED' && <p className="day-schedule-card__accounting">{corrected ? `Учтено: ${accountedTimeLabel(shift, timezone)}` : 'Источник предварительного расчёта: расписание. Факт не подтверждён.'}</p>}
             {shift.replacementCutoffAt && <p className="day-schedule-card__accounting">Участие завершено для замены</p>}
+            {shift.availabilityOverride && <p className="day-schedule-card__note"><strong>По договорённости</strong> · {shift.availabilityOverride.reason}<br />{shift.availabilityOverride.actorName} · {new Date(shift.availabilityOverride.createdAt).toLocaleString('ru-RU', { timeZone: timezone })}</p>}
             {shift.description && <p className="day-schedule-card__note">{shift.description}</p>}
             {shift.cancellationReason && <p className="day-schedule-card__note">Причина отмены: {shift.cancellationReason}</p>}
             <div className="day-schedule-card__actions">{renderShiftActions(shift)}</div>

@@ -29,6 +29,7 @@ export async function memberProfile(userId: string, organizationId: string, memb
   const workingInPoint = target.locationMemberships.some(item => item.locationId === actor.locationId) || target.locationTransfers.length > 0
   const targetInPoint = target.role === 'OWNER' || !!target.accessRoleId || workingInPoint || target.accessAssignments.some(item => item.locationId === actor.locationId)
   const capabilities = {
+    availability: !target.leftAt && hasPermission(actor, own ? 'availability.own' : 'availability.view'),
     time: hasPermission(actor, own ? 'statistics.own' : 'statistics.view'),
     schedule: hasPermission(actor, own ? 'schedule.own' : 'schedule.view'),
     documents: hasPermission(actor, 'documents.view') && (own || hasPermission(actor, 'documents.personal.view') || hasPermission(actor, 'documents.control')),

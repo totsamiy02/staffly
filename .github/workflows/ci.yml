@@ -224,6 +224,12 @@ jobs:
           PERSONNEL_THEME: ${{ matrix.theme }}
           PLAYWRIGHT_BROWSERS_PATH: artifacts/browser-binaries
 
+      - name: Verify employee availability and replacement selection
+        run: node --import tsx tests/performance/load-test.mjs --profile=availability --theme="$PERSONNEL_THEME" --viewports=desktop,mobile,narrow --pg-bin=/usr/lib/postgresql/18/bin --output=artifacts/tests/personnel/availability
+        env:
+          PERSONNEL_THEME: ${{ matrix.theme }}
+          PLAYWRIGHT_BROWSERS_PATH: artifacts/browser-binaries
+
       - name: Save personnel diagnostics
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9

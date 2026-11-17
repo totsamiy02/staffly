@@ -1,6 +1,6 @@
 export type AttentionScope = 'mine' | 'control';
 export type AttentionFilter = 'all' | 'overdue' | 'blocked';
-export type AttentionKind = 'REQUEST' | 'TASK' | 'DOCUMENT' | 'DEPARTURE';
+export type AttentionKind = 'REQUEST' | 'TASK' | 'DOCUMENT' | 'DEPARTURE' | 'AVAILABILITY';
 
 export type AttentionItem = {
   id: string;

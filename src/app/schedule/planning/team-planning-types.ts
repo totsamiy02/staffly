@@ -1,3 +1,4 @@
+import type { AvailabilityWarning } from '../../../shared/availability.ts'
 import type { WorkShift } from '../types.ts'
 export type DemandInterval = { positionId: string; startTime: string; endTime: string; endDayOffset: number; needed: number }
 export type DemandDay = DemandInterval[] | null
@@ -16,4 +17,4 @@ export type DraftDetail = DraftSummary & {
   comments: DraftComment[]; history: Array<{ id: string; action: string; revision: number; createdAt: string; actorName: string; details: Record<string, unknown> }>;
   counts: { noObjections: number; objections: number; unanswered: number; participants: number; openComments: number; create: number; update: number; cancel: number; affected: number };
 }
-export type DraftValidation = { errors: Array<{ code: string; message: string; proposalId?: string }>; warnings: Array<{ code: string; message: string }>; coverage: CoverageDay[] }
+export type DraftValidation = { availabilityWarning?: AvailabilityWarning; errors: Array<{ code: string; message: string; proposalId?: string }>; warnings: Array<{ code: string; message: string }>; coverage: CoverageDay[] }

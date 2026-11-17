@@ -20,6 +20,16 @@ export async function notificationPolicy(userId: string, organizationId?: string
     const viewIds = locationsFor(actor,'events.view'), managerIds = [...new Set([...locationsFor(actor,'events.edit'), ...locationsFor(actor,'events.cancel')])]
     policies.push(Prisma.sql`(n.organization_id = ${actor.organizationId}::uuid AND CASE
       WHEN n.timesheet_period_id IS NOT NULL THEN tp.id IS NOT NULL AND ${permission('timesheets.view','tp.location_id')}
+      WHEN n.type = 'SHIFT_AVAILABILITY_CHANGED' THEN EXISTS (
+        SELECT 1 FROM member_availability av
+          JOIN member_employment_periods ap ON ap.id=av.employment_period_id AND ap.ended_at IS NULL
+          JOIN organization_members am ON am.id=av.member_id AND am.left_at IS NULL
+        WHERE av.organization_id=n.organization_id AND av.id=(n.email_context->>'availabilityAccountId')::uuid
+          AND (${actor.owner} OR EXISTS (
+            SELECT 1 FROM jsonb_array_elements_text(n.email_context->'locationIds') p(id)
+            WHERE ${permission('availability.view', 'p.id::uuid')} AND ${permission('schedule.edit', 'p.id::uuid')}
+          ))
+      )
       WHEN n.type = 'ORGANIZATION_MEMBER_LEFT' THEN (${actor.owner} OR EXISTS (
         SELECT 1 FROM member_self_exits x WHERE x.organization_id=n.organization_id
           AND x.id=(n.email_context->>'selfExitId')::uuid

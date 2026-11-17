@@ -1,3 +1,4 @@
+import { availabilityAgreementSchema } from '../../shared/availability.ts'
 import { isCalendarDate } from '../../shared/date-time.ts'
 import { z } from 'zod'
 
@@ -18,6 +19,7 @@ export const scheduleRangeQuery = z.object({ from: date, to: date, mode: z.enum(
 })
 
 export const shiftBody = z.object({
+  ...availabilityAgreementSchema.shape,
   memberId: uuid,
   positionId: uuid.nullish(),
   acknowledgeAbsence: z.boolean().optional().default(false),
@@ -65,4 +67,4 @@ export const statisticsQuery = z.object({
   if (value.from && value.to && value.from >= value.to) context.addIssue({ code: 'custom', message: 'Конец периода должен быть позже начала.' })
 })
 
-export const batchShiftBody = z.object({ openingHoursConfirmation:z.string().regex(/^[a-f0-9]{64}$/).optional(), shifts: z.array(shiftBody).min(1).max(62), acknowledgeWorkload: z.boolean().default(false), acknowledgeAbsence: z.boolean().default(false) })
+export const batchShiftBody = z.object({ ...availabilityAgreementSchema.shape, openingHoursConfirmation:z.string().regex(/^[a-f0-9]{64}$/).optional(), shifts: z.array(shiftBody).min(1).max(62), acknowledgeWorkload: z.boolean().default(false), acknowledgeAbsence: z.boolean().default(false) })

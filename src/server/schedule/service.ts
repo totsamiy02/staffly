@@ -1,3 +1,5 @@
+import { checkAvailabilityAssignments, availabilityPeriodKey, validAvailabilityOverride } from './availability/checks.ts'
+import type { AvailabilityAgreement, AvailabilityOverride } from '../../shared/availability.ts'
 import { calculateWorkTime, intervalMinutes } from '../../shared/work-time.ts'
 import { assertPartialShiftBounds } from './partial-shift-bounds.ts'
 import {requireLocationInPlan} from '../subscriptions/access.ts'
@@ -10,7 +12,7 @@ import { mediaUrl } from '../storage/image-service.ts'
 import { absenceLabels } from './absence-service.ts'
 import { checkMonthlyWorkload } from './workload.ts'
 import { cancelShiftRequests, lockShift } from '../requests/shift-conflicts.ts'
-import type { Prisma, WorkShift, ShiftOfferKind, ShiftOfferStatus } from '../../generated/prisma/client.ts'
+import { Prisma, type WorkShift, type ShiftOfferKind, type ShiftOfferStatus } from '../../generated/prisma/client.ts'
 import { prisma } from '../db.ts'
 import { cachedRead } from '../read-cache.ts'
 import { ApiError } from '../api-error.ts'
@@ -24,7 +26,7 @@ export function shiftConflictMessage(shift: {scheduledStartAt:Date|string;schedu
   return `Уже назначена смена ${displayDate(zonedDateAndTime(start,timezone).date)}, ${shiftTimeRange(start,end,timezone)}. Две смены одного сотрудника не могут совпадать по времени. Измените время или выберите другого сотрудника.`
 }
 
-export type ShiftInput = { memberId: string; startDate: string; startTime: string; endDate: string; endTime: string; breakMinutes: number; description: string | null; positionId?: string | null; acknowledgeWorkload?: boolean; acknowledgeAbsence?: boolean; openingHoursConfirmation?:string }
+export type ShiftInput = AvailabilityAgreement & { memberId: string; startDate: string; startTime: string; endDate: string; endTime: string; breakMinutes: number; description: string | null; positionId?: string | null; acknowledgeWorkload?: boolean; acknowledgeAbsence?: boolean; openingHoursConfirmation?:string }
 export type ActualInput = Omit<ShiftInput, 'memberId' | 'description'> & { reason: string }
 
 function isOverlapError(error: unknown) {
@@ -79,6 +81,7 @@ export function publicShift(shift: WorkShift & { member: { user: { email: string
   return {
     id: shift.id,
     selfExitId: shift.selfExitId,
+    availabilityOverride: validAvailabilityOverride(shift.availabilityOverride, shift.memberId, shift.scheduledStartAt, shift.scheduledEndAt) ? shift.availabilityOverride : null,
     updatedAt: shift.updatedAt,
     replacementOfId: shift.replacementOfId,
     replacementCutoffAt: shift.replacementCutoffAt,
@@ -173,10 +176,10 @@ export async function listMyUpcomingShifts(userId: string, organizationId: strin
 }
 
 export async function createShift(userId: string, organizationId: string, input: ShiftInput) {
-  return (await createShiftBatch(userId, organizationId, [input], input.acknowledgeWorkload,input.openingHoursConfirmation)).shifts[0]
+  return (await createShiftBatch(userId, organizationId, [input], input.acknowledgeWorkload,input.openingHoursConfirmation, input)).shifts[0]
 }
 
-export async function createShiftBatch(userId: string, organizationId: string, inputs: ShiftInput[], acknowledgeWorkload = false,openingHoursConfirmation?:string) {
+export async function createShiftBatch(userId: string, organizationId: string, inputs: ShiftInput[], acknowledgeWorkload = false,openingHoursConfirmation?:string, availabilityAgreement: AvailabilityAgreement = {}) {
   const actor = await getMembership(userId, organizationId)
   requirePermission(actor, 'schedule.create')
   if (!inputs.length || inputs.length > 62) throw new ApiError(400, 'BATCH_SIZE', 'Выберите от 1 до 62 смен.')
@@ -196,6 +199,9 @@ export async function createShiftBatch(userId: string, organizationId: string, i
         await activeTarget(tx, organizationId, memberId)
         await checkMonthlyWorkload(tx, organizationId, memberId, actor.organization.timezone, actor.organization.monthlyWorkMinutes, prepared.filter(item => item.input.memberId === memberId), [], acknowledgeWorkload)
       }
+      const availability = await checkAvailabilityAssignments(tx, actor, prepared.map(item => ({
+        memberId: item.input.memberId, locationId: actor.locationId, start: item.start, end: item.end,
+      })), availabilityAgreement)
       for (const { input, start, end } of prepared) {
         try {
           await activeTarget(tx, organizationId, input.memberId, start, end)
@@ -203,7 +209,13 @@ export async function createShiftBatch(userId: string, organizationId: string, i
           const conflict = await tx.workShift.findFirst({ where: { organizationId, memberId: input.memberId, status: 'SCHEDULED', scheduledStartAt: { lt: end }, scheduledEndAt: { gt: start } } }); if (conflict) throw new ApiError(409, 'SHIFT_OVERLAP', shiftConflictMessage(conflict,actor.organization.timezone))
           const position = input.positionId ? await tx.organizationPosition.findFirst({ where: { id: input.positionId, organizationId, isActive: true, members: { some: { memberId: input.memberId } } } }) : null
           if (input.positionId && !position) throw new ApiError(400, 'POSITION_NOT_ASSIGNED', 'Должность не назначена сотруднику или неактивна.')
-          const mutation = await mutatePlannedShift(tx, actor, { input, startAt: start, endAt: end,openingHoursValidated:true })
+          const period = { memberId: input.memberId, locationId: actor.locationId, start, end }
+          const mutation = await mutatePlannedShift(tx, actor, {
+            input, startAt: start, endAt: end,
+            openingHoursValidated: true,
+            availabilityChecked: true,
+            availabilityOverride: availability.get(availabilityPeriodKey(period)),
+          })
           records.push({ created: mutation.changed, notification: mutation.notification! })
         } catch (error) {
           if (error instanceof ApiError) throw new ApiError(error.status, error.code, input.startDate + ': ' + error.message + ' Пакет не сохранён.', { ...(error.details&&typeof error.details==='object'?error.details:{}),date: input.startDate })
@@ -329,7 +341,18 @@ export async function correctActualTime(userId: string, organizationId: string, 
 
 // The transaction-level operation is shared by ordinary assignment and draft application.
 // Callers validate the complete final set and workload before invoking it.
-export async function mutatePlannedShift(tx: Prisma.TransactionClient, actor: Awaited<ReturnType<typeof getMembership>>, change: { current?: WorkShift; input?: ShiftInput; startAt?: Date; endAt?: Date; reason?: string;openingHoursValidated?:boolean; restoreAssignment?: boolean }) {
+type PlannedShiftMutation = {
+  current?: WorkShift
+  input?: ShiftInput
+  startAt?: Date
+  endAt?: Date
+  reason?: string
+  openingHoursValidated?: boolean
+  restoreAssignment?: boolean
+  availabilityChecked?: boolean
+  availabilityOverride?: AvailabilityOverride
+}
+export async function mutatePlannedShift(tx: Prisma.TransactionClient, actor: Awaited<ReturnType<typeof getMembership>>, change: PlannedShiftMutation) {
   const { current, input, startAt, endAt } = change
   let previousAssignment = null
   if (!input) {
@@ -353,9 +376,35 @@ export async function mutatePlannedShift(tx: Prisma.TransactionClient, actor: Aw
   if (input.positionId && !position) throw new ApiError(400, 'POSITION_NOT_ASSIGNED', 'Должность не назначена сотруднику или неактивна.')
   if(!current)await requireLocationInPlan(tx,actor.organizationId,actor.locationId)
   if(!change.openingHoursValidated&&(!current||+current.scheduledStartAt!==+startAt||+current.scheduledEndAt!==+endAt))await checkOpeningHours(tx,actor.organizationId,current?.locationId??actor.locationId,[{start:startAt,end:endAt}],input.openingHoursConfirmation)
+  const availabilityChanged = !!change.restoreAssignment || !current || current.memberId !== input.memberId
+    || +current.scheduledStartAt !== +startAt || +current.scheduledEndAt !== +endAt
+  const period = { memberId: input.memberId, locationId: current?.locationId ?? actor.locationId, start: startAt, end: endAt }
+  let availabilityOverride = change.availabilityOverride
+  if ((availabilityChanged || input.availabilityConfirmation) && !change.availabilityChecked) {
+    const agreements = await checkAvailabilityAssignments(tx, actor, [period], input)
+    availabilityOverride = agreements.get(availabilityPeriodKey(period))
+  }
   const assignmentChanged = !!change.restoreAssignment || !current || current.memberId !== input.memberId || +current.scheduledStartAt !== +startAt || +current.scheduledEndAt !== +endAt || current.positionId !== (input.positionId ?? null)
-  const data = { ...(change.restoreAssignment ? { status: 'SCHEDULED' as const, selfExitId: null } : {}), memberId: input.memberId, positionId: position?.id ?? null, positionNameSnapshot: position?.name ?? null, scheduledStartAt: startAt, scheduledEndAt: endAt, breakMinutes: input.breakMinutes, description: input.description, ...(assignmentChanged ? { assignmentReadAt: null } : {}) }
+  const availabilityUpdated = availabilityChanged || !!availabilityOverride
+  const data = {
+    ...(availabilityUpdated ? { availabilityOverride: availabilityOverride ?? Prisma.DbNull } : {}),
+    ...(change.restoreAssignment ? { status: 'SCHEDULED' as const, selfExitId: null } : {}),
+    memberId: input.memberId,
+    positionId: position?.id ?? null,
+    positionNameSnapshot: position?.name ?? null,
+    scheduledStartAt: startAt,
+    scheduledEndAt: endAt,
+    breakMinutes: input.breakMinutes,
+    description: input.description,
+    ...(assignmentChanged ? { assignmentReadAt: null } : {}),
+  }
   const changed = current ? await tx.workShift.update({ where: { id: current.id }, data, include: shiftInclude }) : await tx.workShift.create({ data: { ...data, organizationId: actor.organizationId, locationId: actor.locationId, createdByMemberId: actor.id }, include: shiftInclude })
+  if (availabilityUpdated && availabilityOverride) {
+    await tx.accessAudit.create({ data: {
+      organizationId: actor.organizationId, actorMemberId: actor.id, action: 'SHIFT_AVAILABILITY_OVERRIDE',
+      details: { shiftId: changed.id, ...availabilityOverride },
+    } })
+  }
   if (current && assignmentChanged) {
     await cancelShiftRequests(tx, actor.organizationId, [current.id], actor.id, 'Исходная смена изменена. Создайте новую заявку при необходимости.')
     if (current.memberId !== input.memberId) {

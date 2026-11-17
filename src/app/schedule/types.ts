@@ -1,7 +1,8 @@
+import type { AvailabilityOverride } from '../../shared/availability.ts'
 import type { ShiftAccounting } from '../../shared/work-time.ts'
 import type { OrganizationRole } from '../organizations/types.ts'
 
-export type WorkShift = { updatedAt?: string; replacementOfId?: string|null; replacementCutoffAt?: string|null; attendance?:'UNCONFIRMED'|'WORKED'|'PARTIAL'|'NO_SHOW';attendanceReason?:string|null; positionId?: string | null; positionName?: string | null;
+export type WorkShift = { availabilityOverride?: AvailabilityOverride | null;  updatedAt?: string; replacementOfId?: string|null; replacementCutoffAt?: string|null; attendance?:'UNCONFIRMED'|'WORKED'|'PARTIAL'|'NO_SHOW';attendanceReason?:string|null; positionId?: string | null; positionName?: string | null;
   activeOffer?: { id: string; kind: 'TRANSFER' | 'SWAP'; status: 'PENDING' | 'AWAITING_APPROVAL' } | null
   selfExitId?: string | null
   id: string

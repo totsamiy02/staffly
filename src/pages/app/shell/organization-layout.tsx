@@ -1,3 +1,4 @@
+import AvailabilityWorkspace from '../schedule/availability/availability-workspace.tsx'
 import SelfExitWorkspace from '../organizations/self-exit-work.tsx'
 import { writeTabValue } from '../../../app/workspace/tab-storage.ts'
 import { rememberModuleRoute, moduleRoute } from '../../../app/workspace/module-route.ts'
@@ -107,7 +108,7 @@ export default function OrganizationLayout() {
       return !value
     })
   }
-  return <TimeCorrectionProvider key={organization.id + organization.locationId} organization={organization}><MemberProfileProvider organization={organization}><div className="app-page"><AppTopbar key={organization.locationId} organization={organization} /><div className={`workspace-shell${sidebarCollapsed ? ' workspace-shell--collapsed' : ''}`}>
+  return <SubscriptionProvider key={organization.id} organization={organization}><TimeCorrectionProvider key={organization.id + organization.locationId} organization={organization}><MemberProfileProvider organization={organization}><div className="app-page"><AppTopbar key={organization.locationId} organization={organization} /><div className={`workspace-shell${sidebarCollapsed ? ' workspace-shell--collapsed' : ''}`}>
     <aside className="workspace-sidebar" aria-label="Навигация организации">
       <button className="workspace-sidebar__organization workspace-organization-card" type="button" onClick={() => setInfoOrganizationId(organization.id)} aria-label={`Об организации: ${organization.name}`} aria-haspopup="dialog" aria-expanded={infoOrganizationId === organization.id}><Avatar url={organization.logoUrl} name={organization.name} className="workspace-sidebar__organization-avatar" eager /><span className="workspace-organization-card__body"><strong>{organization.name}</strong>{organization.subscription && <PlanBadge plan={organization.subscription.effectivePlan} trial={organization.subscription.phase === 'trial'} />}</span></button>
       <LocationSwitcher compact={compactPoints} onOpen={() => { if (sidebarCollapsed) toggleSidebar() }} points={points} value={requestedLocationId ?? organization.locationId ?? ''} onChange={pointId => { const next = new URLSearchParams(sectionParams); next.set('location', pointId); for (const key of ['request', 'event', 'document', 'changeShift', 'dayOffShift', 'reportAbsence', 'proposeShift', 'staffing']) next.delete(key); navigate({ pathname: location.pathname, search: `?${next}` }) }} />
@@ -115,7 +116,7 @@ export default function OrganizationLayout() {
       <nav aria-label="Разделы организации">{navigation.filter(([path]) => !path || path === 'settings' && organization.owner || (modulePermissions[path] ?? []).some(p => canAccess(organization,p))).map(([path, label]) => <NavLink end title={sidebarCollapsed ? label : undefined} to={moduleRoute(user?.id ?? '', organization.id, path, organization.locationId)} key={label}><NavigationIcon section={path} /><span>{label}</span>{path === 'documents' && <DocumentNavBadge organizationId={organization.id} />}</NavLink>)}</nav>
       <div className="workspace-sidebar__footer"><NavLink className="workspace-sidebar__back" title={sidebarCollapsed ? 'Все организации' : undefined} to="/app"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m10 6-6 6 6 6M4 12h16" /></svg><span>Все организации</span></NavLink><Link className="workspace-sidebar__guide" to="/guide" title="Справочник" aria-label="Справочник"><GuideIcon name="book" /><span>Справочник</span></Link></div>
     </aside>
-    <main className="workspace-content" key={currentSegment ? organization.locationId : organization.id}><SubscriptionProvider key={organization.id} organization={organization}>{currentSegment && <div className="workspace-location-banner" data-tone={locationTone(organization.locationId ?? '')}><span className="workspace-location-banner__organization" title={organization.name}>{organization.name}</span><NavigationIcon section="location" /><span>Рабочая точка:</span><strong title={organization.location?.name}>{organization.location?.name}</strong>{locationAddress && <span title={locationAddress}>{locationAddress}</span>}</div>}
+    <main className="workspace-content" key={currentSegment ? organization.locationId : organization.id}>{currentSegment && <div className="workspace-location-banner" data-tone={locationTone(organization.locationId ?? '')}><span className="workspace-location-banner__organization" title={organization.name}>{organization.name}</span><NavigationIcon section="location" /><span>Рабочая точка:</span><strong title={organization.location?.name}>{organization.location?.name}</strong>{locationAddress && <span title={locationAddress}>{locationAddress}</span>}</div>}
       {query.isPlaceholderData ? <section className="route-loading" role="status">Переключаем точку…</section> : <Routes>
         <Route index element={module(<OrganizationDashboard organization={organization} />)} />
         <Route path="employees" element={module(<OrganizationMembers organization={organization} />)} />
@@ -133,6 +134,6 @@ export default function OrganizationLayout() {
         <Route path="documents" element={module(<DocumentsPage organization={organization} />)} />
         <Route path="*" element={<ModuleNotFound organizationPath={organizationPath} />} />
       </Routes>}
-    <SelfExitWorkspace organization={organization} /></SubscriptionProvider></main>
-  </div></div>{infoOrganizationId === organization.id && <AnimatedOverlay variant="modal" onClose={() => setInfoOrganizationId(null)}>{close => <OrganizationInfoDialog key={organization.id} organization={organization} onClose={close} />}</AnimatedOverlay>}</MemberProfileProvider></TimeCorrectionProvider>
+    <AvailabilityWorkspace organization={organization} /><SelfExitWorkspace organization={organization} /></main>
+  </div></div>{infoOrganizationId === organization.id && <AnimatedOverlay variant="modal" onClose={() => setInfoOrganizationId(null)}>{close => <OrganizationInfoDialog key={organization.id} organization={organization} onClose={close} />}</AnimatedOverlay>}</MemberProfileProvider></TimeCorrectionProvider></SubscriptionProvider>
 }
