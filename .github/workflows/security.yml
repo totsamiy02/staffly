@@ -29,6 +29,8 @@ jobs:
         run: |
           npm run ci:secrets:verify
           npm run ci:secrets
+      - name: Install locked dependencies and apply the source patch
+        run: npm ci
       - name: Audit locked dependencies
         if: ${{ !cancelled() }}
         run: npm run ci:dependencies

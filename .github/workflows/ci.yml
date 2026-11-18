@@ -115,7 +115,7 @@ jobs:
   layout:
     name: Admin layout / ${{ matrix.browser }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: ${{ matrix.engine == 'webkit' && 35 || 25 }}
     strategy:
       fail-fast: false
       matrix:
@@ -135,6 +135,11 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci
+      - name: Use the Ubuntu archive for WebKit system packages
+        if: matrix.engine == 'webkit'
+        run: |
+          sudo find /etc/apt -maxdepth 2 -type f \( -name '*.list' -o -name '*.sources' \) \
+            -exec sed -Ei 's|https?://[a-z0-9.-]+\.ec2\.archive\.ubuntu\.com/ubuntu/?|https://archive.ubuntu.com/ubuntu|g' {} +
       - run: bash scripts/ci/install-postgres.sh
       - run: npx prisma generate
       - run: npx playwright install --with-deps "$PLAYWRIGHT_ENGINE"

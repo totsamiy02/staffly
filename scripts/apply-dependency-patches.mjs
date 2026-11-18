@@ -4,7 +4,7 @@ import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { patchPicomatch, patchedHash, version } from './patches/picomatch-4.0.7.mjs'
 
-export async function applyDependencyPatches(root, { check = false } = {}) {
+export async function applyDependencyPatches(root, { check = false, requireAll = false } = {}) {
   const lock = JSON.parse(await readFile(path.join(root, 'package-lock.json'), 'utf8'))
   const packages = Object.keys(lock.packages ?? {}).filter(key => /(?:^|\/)node_modules\/picomatch$/.test(key))
   let installed = 0
@@ -16,7 +16,7 @@ export async function applyDependencyPatches(root, { check = false } = {}) {
       manifest = JSON.parse(await readFile(path.join(target, 'package.json'), 'utf8'))
     } catch (error) {
       // Omitted dev dependencies are absent in a production-only installation.
-      if (error.code === 'ENOENT') continue
+      if (error.code === 'ENOENT' && !requireAll) continue
       throw error
     }
     if (manifest.name !== 'picomatch' || manifest.version !== version) {
