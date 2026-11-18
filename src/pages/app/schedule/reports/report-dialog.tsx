@@ -9,7 +9,6 @@ import SpreadsheetSurface from '../../../../component/ui/file-preview/spreadshee
 import { columnLabel } from '../../../../app/file-preview/types.ts'
 import AsyncPanel from '../../../../component/ui/async-panel.tsx'
 import { canAccess } from '../../../../app/access/catalog.ts'
-import { useNavigate } from 'react-router-dom'
 import { useSubscription } from '../../../../app/subscriptions/context.ts'
 import { LockBadge } from '../../subscriptions/plan-ui.tsx'
 import { useEffect, useState } from 'react'
@@ -28,7 +27,6 @@ import './reporting.scss'
 import { ReportIcon, ReportRules, ReportSheets, ReportMetrics, ReportChecks, ReportCell, ReportLocationMenu } from './report-ui.tsx'
 export default function ReportDialog({ organization, month, onClose, onBusy }: { organization: OrganizationSummary; month: string; onClose: () => void; onBusy: (busy: boolean) => void }) {
   const showToast = useToast(), exporting = useReportExport(organization.id)
-  const navigate = useNavigate()
   const subscription = useSubscription()
   const options = useReportOptions(organization.id)
   const [deletingTemplate, setDeletingTemplate] = useState<{ id: string; name: string } | null>(null)
@@ -59,10 +57,7 @@ export default function ReportDialog({ organization, month, onClose, onBusy }: {
       subscription.request({ feature: 'timesheets' })
       return
     }
-    const point = locationIds.length === 1 ? locationIds[0] : organization.locationId
-    const query = new URLSearchParams({ month: from.slice(0, 7) || month })
-    if (point) query.set('location', point)
-    navigate(`/app/organizations/${organization.id}/schedule/timesheet?${query}`)
+    onClose()
   }
   const sheet = config.sheets.find(sheet => sheet.key === editorSheet)!
   const result = settled && !error && !preview.isError ? preview.data : undefined
@@ -92,7 +87,7 @@ export default function ReportDialog({ organization, month, onClose, onBusy }: {
     <FormDraftNotice form={safety} /><div className="report-body">
       {canAccess(organization, 'timesheets.view') && <section className="report-timesheet-entry" aria-label="Табель для бухгалтерии">
         <div><h3>Табель для бухгалтерии</h3><p>Сверьте месяц по одной точке и скачайте зафиксированную версию с часами и отсутствиями.</p></div>
-        <button type="button" className="app-secondary" disabled={busy || exporting.active || subscription.pending} onClick={openTimesheet}>Сверить табель{!subscription.available('timesheets') && <LockBadge plan="BUSINESS" />}</button>
+        <button type="button" className="app-secondary" disabled={busy || exporting.active || subscription.pending} onClick={openTimesheet}>{subscription.available('timesheets') ? 'Вернуться к табелю' : 'Сверить табель'}{!subscription.available('timesheets') && <LockBadge plan="BUSINESS" />}</button>
       </section>}
       <fieldset ref={safety.ref} className="report-controls" disabled={busy}>
       {mode === 'standard' ? <div className="report-standard-layout"><aside className="report-sidebar"><h3>Параметры отчёта</h3>{period}{employees}{former}<section className="report-location-list"><h3>Точки</h3>{optionsStatus ?? points}</section><ReportRules /></aside><section className="report-preview"><div className="report-preview-heading"><h3>Предпросмотр файла</h3><ReportMetrics result={result} /></div><div><p className="report-hint report-sheet-hint">Отметьте листы для выгрузки. Сводка разделена по заведениям.</p><ReportSheets config={config} selected={editorSheet} onSelect={setEditorSheet} onToggle={toggleSheet} /></div>{previewContent}</section></div> : <div className="report-custom-layout"><div className="report-custom-filters">{period}<ReportLocationMenu label={locationsLabel} disabled={busy || !options.data} >{points}</ReportLocationMenu>{employees}{former}</div>{optionsStatus}<div className="report-templates"><label><span>Сохранённая настройка</span><Select value={templateId} onChange={event => chooseTemplate(event.target.value)}><option value="">Новая настройка</option>{options.data?.templates.map(template => <option key={template.id} value={template.id}>{template.name}</option>)}</Select></label><label><span>Название настройки</span><input autoComplete="off" maxLength={80} value={templateName} onChange={event => setTemplateName(event.target.value)} /></label><button type="button" className="app-secondary" disabled={!canAccess(organization,'reports.templates') || !!error || !templateName.trim() || (!!currentTemplate && !currentTemplate.canManage)} onClick={() => void save(false)}>{templateId ? 'Обновить' : 'Сохранить'}</button>{templateId && <><button type="button" className="app-secondary" disabled={!canAccess(organization,'reports.templates') || !!error || !templateName.trim()} onClick={() => void save(true)}>Сохранить копию</button>{currentTemplate?.canManage && <button type="button" className="report-link" onClick={() => { mutation.reset(); setDeletingTemplate({ id: currentTemplate.id, name: currentTemplate.name }) }}>Удалить</button>}</>}</div>{mutation.isError && <p className="form-inline-error" role="alert">{mutation.error.message}</p>}<ReportRules compact /><div className="report-custom-sheets"><span className="report-label">Листы в файле:</span><ReportSheets config={config} selected={editorSheet} onSelect={setEditorSheet} onToggle={toggleSheet} /></div><div className="report-workspace">{editor}<section className="report-preview"><div className="report-preview-heading"><h3>Предпросмотр файла</h3><ReportMetrics result={result} /></div>{previewContent}</section></div></div>}

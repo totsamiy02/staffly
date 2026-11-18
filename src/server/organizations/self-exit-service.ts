@@ -14,6 +14,7 @@ import { cancelShiftRequests } from '../requests/shift-conflicts.ts'
 import { recordSecurityEvent } from '../security/journal.ts'
 import { timesheetMutationContext } from '../schedule/timesheets/mutation-context.ts'
 import { exitWorkFor } from './self-exit-work.ts'
+import { detachOpenTasks } from '../requests/task-assignment.ts'
 
 type DB = Prisma.TransactionClient
 
@@ -134,28 +135,11 @@ export async function leaveOrganization(userId: string, organizationId: string, 
         await db.workShift.updateMany({ where: { id: { in: ids } }, data: { status: 'UNASSIGNED', selfExitId: exit.id } })
         await cancelShiftRequests(db, organizationId, ids, member.id, 'Сотрудник покинул организацию. Исходное назначение недоступно.')
       }
-      for (const requestId of remaining.tasks.sort()) {
-        await db.$queryRaw`SELECT id FROM requests WHERE id=${requestId}::uuid FOR UPDATE`
-        const current = await db.organizationRequest.findUniqueOrThrow({ where: { id: requestId } })
-        const task = taskOutcome(current.outcome)
-        if (!task || !task.assignees.includes(member.id)) continue
-        await db.organizationRequest.update({
-          where: { id: requestId },
-          data: {
-            selfExitId: exit.id,
-            outcome: { ...task, assignees: task.assignees.filter(id => id !== member.id) },
-          }
-        })
-        await db.requestEvent.create({
-          data: {
-            requestId,
-            actorMemberId: member.id,
-            type: 'CHANGED',
-            comment: 'Исполнитель покинул организацию. Назначение снято; результат задачи сохранён.',
-            changes: { selfExitId: exit.id, previousAssignees: task.assignees },
-          }
-        })
-      }
+      await detachOpenTasks(db, {
+        organizationId, memberId: member.id, actorMemberId: member.id,
+        comment: 'Исполнитель покинул организацию. Назначение снято; результат задачи сохранён.',
+        selfExit: { id: exit.id, requestIds: remaining.tasks },
+      })
       if (remaining.reviews.length) await db.organizationRequest.updateMany({
         where: { id: { in: remaining.reviews }, status: 'PENDING' }, data: { selfExitId: exit.id },
       })

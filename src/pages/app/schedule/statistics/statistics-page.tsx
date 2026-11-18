@@ -1,37 +1,38 @@
-import { WorkTimeTotals, WorkTimeRulesButton } from '../time/work-time-totals.tsx'
-import { useTimeCorrection } from '../../../../app/schedule/time/time-correction-context.tsx'
-import { useSubscription } from '../../../../app/subscriptions/context.ts'
-import { LockBadge } from '../../subscriptions/plan-ui.tsx'
-import { useSearchParams } from 'react-router-dom'
-import AsyncPanel from '../../../../component/ui/async-panel.tsx'
-import ShiftDetailsDialog from '../time/shift-details-dialog.tsx'
-import MemberProfileLink from '../../../../component/ui/member-profile-link.tsx'
-import MemberAvatar from '../../../../component/ui/member-avatar.tsx'
-import ActionSurface from '../../../../component/ui/action-surface.tsx'
-import { canAccess } from '../../../../app/access/catalog.ts'
-import EmployeePicker from '../../shared/employee-picker.tsx'
-import Select from '../../../../component/ui/select/select.tsx'
 import { useEffect, useState } from 'react'
+import { Navigate, useSearchParams } from 'react-router-dom'
+import { canAccess } from '../../../../app/access/catalog.ts'
 import type { OrganizationSummary } from '../../../../app/organizations/types.ts'
 import { formatDuration, confirmedDuration, monthKeyInZone, moveMonth } from '../../../../app/schedule/date-utils.ts'
 import { useMemberWorkTime, useShiftDetails, useWorkTimeStatistics } from '../../../../app/schedule/queries.ts'
-import type { WorkTimeMember } from '../../../../app/schedule/types.ts'
-import ScheduleSectionHeader from '../shared/schedule-section-header.tsx'
-import WorkTimePanel from '../time/work-time-panel.tsx'
+import { useTimeCorrection } from '../../../../app/schedule/time/time-correction-context.tsx'
+import AsyncPanel from '../../../../component/ui/async-panel.tsx'
+import ActionSurface from '../../../../component/ui/action-surface.tsx'
+import MemberAvatar from '../../../../component/ui/member-avatar.tsx'
+import MemberProfileLink from '../../../../component/ui/member-profile-link.tsx'
 import AnimatedOverlay from '../../../../component/ui/modal/animated-overlay.tsx'
 import DocumentDialog from '../../../../component/ui/modal/document-dialog.tsx'
-import { useOrganizationMembers } from '../../../../app/organizations/queries.ts'
-import ReportDialog from '../reports/report-dialog.tsx'
+import Select from '../../../../component/ui/select/select.tsx'
+import SegmentedNav from '../../../../component/ui/segmented-nav/segmented-nav.tsx'
+import ScheduleSectionHeader from '../shared/schedule-section-header.tsx'
+import ShiftDetailsDialog from '../time/shift-details-dialog.tsx'
+import WorkTimePanel from '../time/work-time-panel.tsx'
+import { WorkTimeTotals, WorkTimeRulesButton } from '../time/work-time-totals.tsx'
+import './statistics.scss'
 
 const months = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь']
-const columns: Array<{ key: 'name' | 'workedMinutes' | 'workedShifts' | 'averageMinutes' | 'plannedMinutes' | 'plannedShifts' | 'estimatedMinutes' | 'pendingShifts'; label: string }> = [
-  { key: 'name', label: 'Сотрудник' }, { key: 'plannedMinutes', label: 'План' }, { key: 'estimatedMinutes', label: 'Предварительно' }, { key: 'workedMinutes', label: 'Подтверждено' }, { key: 'pendingShifts', label: 'Без подтверждения' },
-]
+const columns = [
+  { key: 'name', label: 'Сотрудник' },
+  { key: 'plannedMinutes', label: 'План' },
+  { key: 'estimatedMinutes', label: 'Предварительно' },
+  { key: 'workedMinutes', label: 'Подтверждено' },
+  { key: 'pendingShifts', label: 'Без подтверждения' },
+] as const
+
+type SortKey = typeof columns[number]['key']
 
 export default function StatisticsPage({ organization }: { organization: OrganizationSummary }) {
   const correction = useTimeCorrection()
-  const subscription = useSubscription(), [searchParams, setSearchParams] = useSearchParams()
-  function openReport() { if (subscription.available('reports')) setReportOpen(true); else subscription.request({ feature: 'reports' }) }
+  const [searchParams] = useSearchParams()
   const initialMonth = monthKeyInZone(new Date(), organization.timezone)
   const [month, setMonth] = useState(() => {
     const selected = searchParams.get('month')
@@ -39,73 +40,164 @@ export default function StatisticsPage({ organization }: { organization: Organiz
   })
   const [allTime, setAllTime] = useState(false)
   const [memberState, setMemberState] = useState<'active' | 'all' | 'former'>('active')
-  const [sort, setSort] = useState<typeof columns[number]['key']>('name')
+  const [sort, setSort] = useState<SortKey>('name')
   const [direction, setDirection] = useState<'asc' | 'desc'>('asc')
+  const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+  const [page, setPage] = useState(1)
   const [selectedMember, setSelectedMember] = useState<string | null>(null)
   const [selectedShift, setSelectedShift] = useState<string | null>(null)
   const [historyPage, setHistoryPage] = useState(1)
   const [auditPage, setAuditPage] = useState(1)
-  const [reportOpen, setReportOpen] = useState(false)
-  const [reportBusy, setReportBusy] = useState(false)
-  useEffect(() => { if (searchParams.get('report') === '1') { if (subscription.available('reports')) setReportOpen(true); else subscription.request({ feature: 'reports' }); setSearchParams(previous => { const next = new URLSearchParams(previous); next.delete('report'); return next }, { replace: true }) } }, [searchParams, setSearchParams, subscription])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(search.trim()), 250)
+    return () => window.clearTimeout(timer)
+  }, [search])
+
   const from = allTime ? undefined : `${month}-01`
   const to = allTime ? undefined : `${moveMonth(month, 1)}-01`
-  const params = { from, to, memberState, sort, direction }
-  const statistics = useWorkTimeStatistics(organization.id, params, canAccess(organization, 'statistics.view'))
-  const organizationMembers = useOrganizationMembers(organization.id)
-  const pickerMembers = [...(organizationMembers.data?.members ?? []), ...(statistics.data?.members ?? []).filter(item => !organizationMembers.data?.members.some(member => member.id === item.memberId)).map(item => ({ id: item.memberId, displayName: item.name, email: '', avatarUrl: item.avatarUrl }))]
-  const detail = useMemberWorkTime(organization.id, selectedMember, { ...params, page: historyPage })
+  const period = { from, to, memberState, sort, direction }
+  const permitted = canAccess(organization, 'statistics.view')
+  const statistics = useWorkTimeStatistics(organization.id, {
+    ...period, search: debouncedSearch || undefined, page, limit: 25,
+  }, permitted)
+  const detail = useMemberWorkTime(organization.id, selectedMember, { ...period, page: historyPage })
   const shiftDetail = useShiftDetails(organization.id, selectedShift, auditPage)
   const [year, monthNumber] = month.split('-').map(Number)
   const years = Array.from({ length: 8 }, (_, index) => Number(initialMonth.slice(0, 4)) - 4 + index)
+  const pagination = statistics.data?.pagination
 
-  function changeSort(key: typeof sort) {
-    if (sort === key) setDirection((value) => value === 'asc' ? 'desc' : 'asc')
-    else { setSort(key); setDirection(key === 'name' ? 'asc' : 'desc') }
+  function changeSort(key: SortKey) {
+    if (sort === key) setDirection(value => value === 'asc' ? 'desc' : 'asc')
+    else {
+      setSort(key)
+      setDirection(key === 'name' ? 'asc' : 'desc')
+    }
+    setPage(1)
   }
 
-  if (!canAccess(organization,'statistics.view') && (canAccess(organization,'reports.preview') || canAccess(organization,'reports.export'))) return <section className="schedule-page"><ScheduleSectionHeader organization={organization} title="Отчёты" description="Рабочие часы и смены для выгрузки"><button className="app-primary" onClick={openReport}>Сформировать отчёт</button></ScheduleSectionHeader>{reportOpen && subscription.available('reports') && <AnimatedOverlay variant="modal" dismissible={!reportBusy} onClose={()=>setReportOpen(false)}>{close=><ReportDialog organization={organization} month={month} onClose={close} onBusy={setReportBusy}/>}</AnimatedOverlay>}</section>
-  if (!canAccess(organization, 'statistics.view')) return <div className="schedule-state">Общая статистика доступна владельцу и администраторам.</div>
-  return <section className="schedule-page schedule-redesign time-accounting-page"><ScheduleSectionHeader organization={organization} title="Статистика смен" description="План, предварительный расчёт и подтверждённые часы">{(canAccess(organization, 'reports.preview') || canAccess(organization, 'reports.export')) && <button type="button" className="app-primary" onClick={openReport}>Выгрузить Excel{!subscription.available('reports') && <LockBadge plan="TEAM" />}</button>}</ScheduleSectionHeader>
-    {reportOpen && subscription.available('reports') && <AnimatedOverlay variant="modal" dismissible={!reportBusy} onClose={() => setReportOpen(false)}>{close => <ReportDialog organization={organization} month={allTime ? initialMonth : month} onClose={close} onBusy={setReportBusy} />}</AnimatedOverlay>}
-    <div className="statistics-member-picker"><EmployeePicker label="Найти сотрудника" members={pickerMembers} value="" onChange={(id) => { setSelectedMember(id || null); setHistoryPage(1) }} emptyLabel="Поиск по имени или почте" required={false} disabled={organizationMembers.isLoading} /><small>Выберите сотрудника или нажмите его строку для просмотра часов и источника расчёта.</small></div>
-    <div className="statistics-filters"><div className="statistics-period"><button className={allTime ? '' : 'active'} onClick={() => setAllTime(false)}>Месяц</button><button className={allTime ? 'active' : ''} onClick={() => setAllTime(true)}>За всё время</button></div>{!allTime && <><Select aria-label="Месяц" value={monthNumber} onChange={(event) => setMonth(`${year}-${String(event.target.value).padStart(2, '0')}`)}>{months.map((label, index) => <option value={index + 1} key={label}>{label}</option>)}</Select><Select aria-label="Год" value={year} onChange={(event) => setMonth(`${event.target.value}-${String(monthNumber).padStart(2, '0')}`)}>{years.map((value) => <option value={value} key={value}>{value}</option>)}</Select></>}<Select aria-label="Состав сотрудников" value={memberState} onChange={(event) => setMemberState(event.target.value as typeof memberState)}><option value="active">Активные</option><option value="all">Все</option><option value="former">Бывшие</option></Select><WorkTimeRulesButton /></div>
-    <AsyncPanel pending={statistics.isLoading} identity={`${month}:${allTime}:${memberState}:${sort}:${direction}`} minHeight={350}>{statistics.isLoading ? <div className="schedule-state"><span className="app-spinner" />Считаем рабочее время…</div> : statistics.isError ? <div className="schedule-state"><strong>Не удалось загрузить статистику</strong><button className="app-secondary" onClick={() => void statistics.refetch()}>Повторить</button></div> : <>
-      <WorkTimeTotals metrics={statistics.data?.summary} />
-      {!!statistics.data?.summary.pendingShifts && <div className="work-time-attention"><span>Без подтверждения после окончания: {statistics.data.summary.pendingShifts} смен.</span><button type="button" className="app-secondary" onClick={() => { setSort('pendingShifts'); setDirection('desc') }}>Показать сотрудников</button></div>}
-      {!!statistics.data?.summary.plannedShifts && <p className="work-time-footnote">Будущие и незавершённые смены: {statistics.data.summary.plannedShifts} · {formatDuration(statistics.data.summary.futureMinutes)} по плану. Они входят в предварительный прогноз.</p>}
+  function changeMonth(value: string) {
+    setMonth(value)
+    setPage(1)
+  }
 
-      {statistics.data?.members.length ? <div className="statistics-table">
-        <div className="statistics-table__head">{columns.map(column => <button onClick={() => changeSort(column.key)} key={column.key}>
-          {column.label}{sort === column.key && <span>{direction === 'asc' ? '↑' : '↓'}</span>}
-        </button>)}</div>
-        {statistics.data.members.map((member: WorkTimeMember) => <ActionSurface
-          aria-label={`Рабочее время: ${member.name}`}
-          className="statistics-table__row"
-          type="button"
-          onClick={() => { setSelectedMember(member.memberId); setHistoryPage(1); }}
-          key={member.memberId}
-        >
-          <span className="statistics-employee">
-            <MemberAvatar memberId={member.memberId} url={member.avatarUrl} name={member.name} className="statistics-avatar" />
-            <span><MemberProfileLink memberId={member.memberId}><strong>{member.name}</strong></MemberProfileLink><small>{member.active ? 'Активный' : 'Бывший'}</small></span>
-          </span>
-          <span data-label="План">{formatDuration(member.plannedMinutes)}</span>
-          <span data-label="Предварительно">{formatDuration(member.estimatedMinutes)}</span>
-          <span data-label="Подтверждено">{confirmedDuration(member.workedMinutes, member.confirmedShifts)}</span>
-          <span data-label="Без подтверждения">
-            {member.pendingShifts}
-            {member.firstPendingShiftId && correction?.canOpen(organization.locationId ?? undefined) && <button
-              type="button"
-              className="app-secondary statistics-review-button"
-              onClick={event => { event.stopPropagation(); correction.open(member.firstPendingShiftId!, organization.locationId ?? undefined); }}
-            >Разобрать</button>}
-          </span>
-        </ActionSurface>)}
-      </div> : <div className="schedule-empty"><h3>За выбранный период нет данных</h3><p>Попробуйте выбрать другой период или состав сотрудников.</p></div>}
+  // Keep saved report links useful after moving all exports to the timesheet.
+  if (searchParams.get('report') === '1' || !permitted && canAccess(organization, 'reports.preview')) {
+    const params = new URLSearchParams({ month })
+    if (organization.locationId) params.set('location', organization.locationId)
+    return <Navigate replace to={`/app/organizations/${organization.id}/schedule/timesheet?${params}`} />
+  }
+  if (!permitted) return <div className="schedule-state">Для просмотра общей статистики требуется разрешение.</div>
 
-    </>}</AsyncPanel>
-    {selectedMember && <AnimatedOverlay variant="modal" onClose={() => setSelectedMember(null)}>{(close) => <DocumentDialog title="Рабочее время сотрудника" eyebrow="Статистика" scrollBody className="statistics-member-dialog" onClose={close}>{detail.isLoading ? <div className="schedule-state"><span className="app-spinner" /></div> : detail.isError ? <div className="schedule-state">Не удалось загрузить данные сотрудника.</div> : detail.data && <WorkTimePanel historyPending={detail.isPlaceholderData} data={detail.data} onShift={(id) => { setSelectedShift(id); setAuditPage(1) }} onPage={setHistoryPage} />}</DocumentDialog>}</AnimatedOverlay>}
-    {selectedShift && <AnimatedOverlay variant="modal" className="schedule-modal--front" onClose={() => setSelectedShift(null)}>{close => <ShiftDetailsDialog shift={shiftDetail.data?.shift} pending={shiftDetail.isLoading} error={shiftDetail.error?.message} onRetry={() => void shiftDetail.refetch()} timezone={organization.timezone} locationId={organization.locationId ?? undefined} page={auditPage} onPage={setAuditPage} onClose={close} />}</AnimatedOverlay>}
-  </section>
+  return (
+    <section className="schedule-page statistics-page time-accounting-page">
+      <ScheduleSectionHeader organization={organization} title="Статистика смен" description="План, предварительный расчёт и подтверждённые часы" />
+      <div className="statistics-toolbar">
+        <SegmentedNav className="statistics-range" label="Период статистики">
+          <button type="button" aria-pressed={!allTime} onClick={() => { setAllTime(false); setPage(1) }}>Месяц</button>
+          <button type="button" aria-pressed={allTime} onClick={() => { setAllTime(true); setPage(1) }}>За всё время</button>
+        </SegmentedNav>
+        {!allTime && (
+          <div className="statistics-month">
+            <Select aria-label="Месяц" value={monthNumber} onChange={event => changeMonth(`${year}-${String(event.target.value).padStart(2, '0')}`)}>
+              {months.map((label, index) => <option value={index + 1} key={label}>{label}</option>)}
+            </Select>
+            <Select aria-label="Год" value={year} onChange={event => changeMonth(`${event.target.value}-${String(monthNumber).padStart(2, '0')}`)}>
+              {years.map(value => <option value={value} key={value}>{value}</option>)}
+            </Select>
+          </div>
+        )}
+        <Select aria-label="Состав сотрудников" value={memberState} onChange={event => { setMemberState(event.target.value as typeof memberState); setPage(1) }}>
+          <option value="active">Активные</option>
+          <option value="all">Все сотрудники</option>
+          <option value="former">Бывшие</option>
+        </Select>
+        <WorkTimeRulesButton />
+      </div>
+      <div className="statistics-list-toolbar">
+        <label className="statistics-search">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 5 5" /></svg>
+          <input type="search" aria-label="Поиск сотрудника" placeholder="Имя, фамилия или почта" autoComplete="off" maxLength={200} value={search} onChange={event => { setSearch(event.target.value); setPage(1) }} />
+        </label>
+        <span aria-live="polite">Сотрудников: {pagination?.total ?? '—'}</span>
+      </div>
+      <AsyncPanel pending={statistics.isLoading} identity={`${month}:${allTime}:${memberState}:${sort}:${direction}:${page}:${debouncedSearch}`} minHeight={350}>
+        {statistics.isLoading ? (
+          <div className="schedule-state"><span className="app-spinner" />Считаем рабочее время…</div>
+        ) : statistics.isError ? (
+          <div className="schedule-state"><strong>Не удалось загрузить статистику</strong><button className="app-secondary" onClick={() => void statistics.refetch()}>Повторить</button></div>
+        ) : (
+          <>
+            <WorkTimeTotals metrics={statistics.data?.summary} />
+            {!!statistics.data?.summary.pendingShifts && (
+              <div className="work-time-attention">
+                <span>Без подтверждения после окончания: {statistics.data.summary.pendingShifts} смен.</span>
+                <button type="button" className="app-secondary" onClick={() => { setSort('pendingShifts'); setDirection('desc'); setPage(1) }}>Показать сотрудников</button>
+              </div>
+            )}
+            {!!statistics.data?.summary.plannedShifts && (
+              <p className="work-time-footnote">Будущие и незавершённые смены: {statistics.data.summary.plannedShifts} · {formatDuration(statistics.data.summary.futureMinutes)} по плану. Они входят в предварительный прогноз.</p>
+            )}
+            {statistics.data?.members.length ? (
+              <div className="statistics-table">
+                <div className="statistics-table__head">
+                  {columns.map(column => (
+                    <button type="button" onClick={() => changeSort(column.key)} key={column.key}>
+                      {column.label}{sort === column.key && <span>{direction === 'asc' ? '↑' : '↓'}</span>}
+                    </button>
+                  ))}
+                </div>
+                {statistics.data.members.map(member => (
+                  <ActionSurface type="button" aria-label={`Рабочее время: ${member.name}`} className="statistics-table__row" key={member.memberId} onClick={() => { setSelectedMember(member.memberId); setHistoryPage(1) }}>
+                    <span className="statistics-employee">
+                      <MemberAvatar memberId={member.memberId} url={member.avatarUrl} name={member.name} className="statistics-avatar" />
+                      <span><MemberProfileLink memberId={member.memberId}><strong>{member.name}</strong></MemberProfileLink><small>{member.active ? 'Активный' : 'Бывший'}</small></span>
+                    </span>
+                    <span data-label="План">{formatDuration(member.plannedMinutes)}</span>
+                    <span data-label="Предварительно">{formatDuration(member.estimatedMinutes)}</span>
+                    <span data-label="Подтверждено">{confirmedDuration(member.workedMinutes, member.confirmedShifts)}</span>
+                    <span data-label="Без подтверждения">
+                      {member.pendingShifts}
+                      {member.firstPendingShiftId && correction?.canOpen(organization.locationId ?? undefined) && (
+                        <button type="button" className="app-secondary statistics-review-button" onClick={event => { event.stopPropagation(); correction.open(member.firstPendingShiftId!, organization.locationId ?? undefined) }}>Разобрать</button>
+                      )}
+                    </span>
+                  </ActionSurface>
+                ))}
+              </div>
+            ) : (
+              <div className="schedule-empty">
+                <h3>{debouncedSearch ? 'Сотрудники не найдены' : 'За выбранный период нет данных'}</h3>
+                <p>{debouncedSearch ? 'Попробуйте другое имя или почту.' : 'Попробуйте выбрать другой период или состав сотрудников.'}</p>
+              </div>
+            )}
+            {pagination && pagination.pages > 1 && (
+              <nav className="members-pagination" aria-label="Страницы статистики">
+                <button className="app-secondary" disabled={page === 1} onClick={() => setPage(value => value - 1)}>Назад</button>
+                <span>{page} / {pagination.pages} · Всего: {pagination.total}</span>
+                <button className="app-secondary" disabled={page >= pagination.pages} onClick={() => setPage(value => value + 1)}>Далее</button>
+              </nav>
+            )}
+          </>
+        )}
+      </AsyncPanel>
+      {selectedMember && (
+        <AnimatedOverlay variant="modal" onClose={() => setSelectedMember(null)}>
+          {close => (
+            <DocumentDialog title="Рабочее время сотрудника" eyebrow="Статистика" scrollBody className="statistics-member-dialog" onClose={close}>
+              {detail.isLoading ? <div className="schedule-state"><span className="app-spinner" /></div> : detail.isError ? <div className="schedule-state">Не удалось загрузить данные сотрудника.</div> : detail.data && (
+                <WorkTimePanel historyPending={detail.isPlaceholderData} data={detail.data} onShift={id => { setSelectedShift(id); setAuditPage(1) }} onPage={setHistoryPage} />
+              )}
+            </DocumentDialog>
+          )}
+        </AnimatedOverlay>
+      )}
+      {selectedShift && (
+        <AnimatedOverlay variant="modal" className="schedule-modal--front" onClose={() => setSelectedShift(null)}>
+          {close => <ShiftDetailsDialog shift={shiftDetail.data?.shift} pending={shiftDetail.isLoading} error={shiftDetail.error?.message} onRetry={() => void shiftDetail.refetch()} timezone={organization.timezone} locationId={organization.locationId ?? undefined} page={auditPage} onPage={setAuditPage} onClose={close} />}
+        </AnimatedOverlay>
+      )}
+    </section>
+  )
 }

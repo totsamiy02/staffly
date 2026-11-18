@@ -8,6 +8,7 @@ import { prisma } from '../db.ts'
 import { mediaUrl } from '../storage/image-service.ts'
 import { ApiError } from '../api-error.ts'
 import { getMembership } from './access/permissions.ts'
+import { detachOpenTasks } from '../requests/task-assignment.ts'
 
 // Domain-separated key keeps invitation material encrypted across navigation/restarts.
 function codeKey() {
@@ -200,6 +201,10 @@ async function acceptInvitation(userId: string, userEmail: string, lookup: { id:
     // Older departures may have retained roles or placements. A fresh invitation
     // must never reactivate these privileges, including across other points.
     if (existing?.leftAt) {
+      await detachOpenTasks(tx, {
+        organizationId: invite.organizationId, memberId: existing.id, actorMemberId: existing.id,
+        comment: 'При повторном вступлении снято назначение из прошлого периода работы.',
+      })
       await revokeMemberAccess(tx, invite.organizationId, existing.id, new Date())
       await tx.memberPosition.deleteMany({ where: { memberId: existing.id } })
     }

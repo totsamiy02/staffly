@@ -9,6 +9,7 @@ import { calculateWorkTime } from '../../../shared/work-time.ts'
 import { statisticsShiftWhere } from './range.ts'
 
 export type StatisticsOptions = {
+  search?: string
   from?: string
   to?: string
   memberState: 'active' | 'all' | 'former'
@@ -40,8 +41,9 @@ type Row = IdentityRow & {
   firstPendingShiftId: string | null;
 };
 
-async function aggregate(organizationId: string, _timezone: string, options: Pick<StatisticsOptions, 'from' | 'to' | 'memberState'>, memberId?: string) {
+async function aggregate(organizationId: string, _timezone: string, options: Pick<StatisticsOptions, 'from' | 'to' | 'memberState' | 'search'>, memberId?: string) {
   const asOf = new Date();
+  const search = options.search?.trim().replace(/[\\%_]/g, '\\$&');
   return prisma.$transaction(async db => {
     const identities = await db.$queryRaw<IdentityRow[]>(Prisma.sql`
     SELECT
@@ -57,6 +59,7 @@ async function aggregate(organizationId: string, _timezone: string, options: Pic
     LEFT JOIN location_members lm ON lm.member_id = m.id AND lm.location_id = ${scopedLocationId(organizationId) ?? null}::uuid
     WHERE m.organization_id = ${organizationId}::uuid
       AND u.deleted_at IS NULL
+      AND (${search ?? null}::text IS NULL OR concat_ws(' ', u.last_name, u.first_name, u.middle_name, u.email) ILIKE ${`%${search ?? ''}%`})
       AND (${scopedLocationId(organizationId) ?? null}::uuid IS NULL OR EXISTS (SELECT 1 FROM location_members lm WHERE lm.member_id = m.id AND lm.location_id = ${scopedLocationId(organizationId) ?? null}::uuid) OR EXISTS (SELECT 1 FROM work_shifts hs WHERE hs.member_id = m.id AND hs.location_id = ${scopedLocationId(organizationId) ?? null}::uuid) OR m.id = ${memberId ?? null}::uuid)
       AND (${memberId ?? null}::uuid IS NULL OR m.id = ${memberId ?? null}::uuid)
       AND (${options.memberState} = 'all' OR (${options.memberState} = 'active' AND CASE WHEN ${scopedLocationId(organizationId) ?? null}::uuid IS NULL THEN m.left_at IS NULL ELSE m.left_at IS NULL AND (lm.left_at IS NULL AND lm.member_id IS NOT NULL OR EXISTS (SELECT 1 FROM location_transfers t WHERE t.member_id = m.id AND t.to_location_id = ${scopedLocationId(organizationId) ?? null}::uuid AND t.temporary AND t.end_at > NOW())) END) OR (${options.memberState} = 'former' AND CASE WHEN ${scopedLocationId(organizationId) ?? null}::uuid IS NULL THEN m.left_at IS NOT NULL ELSE m.left_at IS NOT NULL OR (lm.left_at IS NOT NULL OR lm.member_id IS NULL) AND NOT EXISTS (SELECT 1 FROM location_transfers t WHERE t.member_id = m.id AND t.to_location_id = ${scopedLocationId(organizationId) ?? null}::uuid AND t.temporary AND t.end_at > NOW()) END))
@@ -120,6 +123,7 @@ export async function organizationStatistics(userId: string, organizationId: str
     const a = left[options.sort]
     const b = right[options.sort]
     const comparison = typeof a === 'string' && typeof b === 'string' ? a.localeCompare(b, 'ru') : Number(a) - Number(b)
+    if (comparison === 0) return left.memberId.localeCompare(right.memberId)
     return options.direction === 'asc' ? comparison : -comparison
   })
   const offset = (options.page - 1) * options.limit

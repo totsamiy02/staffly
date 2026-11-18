@@ -13,7 +13,7 @@ import { EventIcon, EventScope, EventState } from './event-elements.tsx'
 export default function EventDetail({ organizationId, eventId, onClose, onEdit }: { organizationId: string; eventId: string; onClose: () => void; onEdit: (event: StaffEvent) => void }) {
   const query = useEvent(organizationId, eventId), actions = useEventActions(organizationId), toast = useToast()
   const [confirm, setConfirm] = useState(false)
-  const event = query.data?.event
+  const event = query.isSuccess ? query.data.event : undefined
   async function cancel() {
     if (!event) return
     try { await actions.cancel.mutateAsync({ id: event.id, revision: event.revision }); setConfirm(false); toast('Событие отменено', 'success') } catch { /* Inline error retains the dialog. */ }

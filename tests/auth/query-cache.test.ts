@@ -43,3 +43,23 @@ test('session bootstrap cannot abort an in-flight public catalog while private r
   assert.deepEqual(client.getQueryData(['public-guide-catalog', '']), ['newly published article']);
   client.clear();
 });
+
+test('organization access changes refresh every tenant query while retaining other organizations and public data', async () => {
+  const { applyLiveHints } = await import('../../src/app/live-query.ts');
+  const client = new QueryClient();
+  const tenantKeys = [
+    ['document', 'tenant', 'document-id'],
+    ['document-progress', 'tenant', 'document-id', 1],
+    ['request', 'tenant', 'request-id'],
+    ['events', 'tenant', {}],
+    ['event', 'tenant', 'event-id'],
+    ['schedule', 'tenant', 'month'],
+    ['future-tenant-feature', 'tenant', 'resource-id'],
+  ];
+  const unrelated = [['document', 'another-tenant', 'id'], ['public-guide-catalog', '']];
+  for (const key of [...tenantKeys, ...unrelated]) client.setQueryData(key, { label: 'previous snapshot' });
+  await applyLiveHints(client, [{ topic: 'organization', organizationId: 'tenant' }]);
+  for (const key of tenantKeys) assert.equal(client.getQueryState(key)?.isInvalidated, true, JSON.stringify(key));
+  for (const key of unrelated) assert.equal(client.getQueryState(key)?.isInvalidated, false, JSON.stringify(key));
+  client.clear();
+});

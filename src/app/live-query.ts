@@ -28,6 +28,9 @@ const hintKeys: Record<string, string[]> = {
 export function liveHintMatches(hint: { topic: string; organizationId?: string }, queryKey: readonly unknown[]) {
     const key = String(queryKey[0])
     if (key === 'private-media') return ['organization', 'profile'].includes(hint.topic)
+    // Roles, point membership and tenant lifecycle can change access to any
+    // organization query, including a feature added after this routing table.
+    if (hint.topic === 'organization' && hint.organizationId && queryKey[1] === hint.organizationId) return true
     if (key === 'requests' && (hint.topic === 'requests-mine' && queryKey[2] !== 'mine' || hint.topic === 'requests-review' && queryKey[2] === 'mine')) return false
     const matches = hintKeys[hint.topic]?.includes(key)
     return Boolean(matches && (!hint.organizationId || ['organizations', 'notifications', 'account-notifications', 'shift-notifications', 'invitations'].includes(key) || queryKey[1] === hint.organizationId || key === 'personal-documents' && !queryKey[1]))

@@ -17,15 +17,19 @@ export default function ScheduleTabs({ organization }: { organization: Organizat
   if (organization.locationId) timesheetParams.set('location', organization.locationId)
   const timesheetHref = `${base}/timesheet${timesheetParams.size ? `?${timesheetParams}` : ''}`
   const planning = subscription.available('planning')
+  const canViewTimesheet = canAccess(organization, 'timesheets.view')
+  const canPreviewReport = canAccess(organization, 'reports.preview')
+  const timesheetAvailable = canViewTimesheet && subscription.available('timesheets')
+    || canPreviewReport && subscription.available('reports')
   return <div className="schedule-navigation"><SegmentedNav className="schedule-module-tabs" label="Разделы расписания" continuityKey={`schedule:${organization.id}:${organization.locationId}`}>
     {(canAccess(organization,'schedule.view') || canAccess(organization,'schedule.own') || canAccess(organization,'coverage.view')) && <NavLink end to={base}>Календарь</NavLink>}
     {canAccess(organization,'statistics.own') && <NavLink to={`${base}/work-time${timesheetParams.size ? `?${timesheetParams}` : ''}`}>Рабочее время</NavLink>}
-    {(canAccess(organization,'statistics.view') || canAccess(organization,'reports.preview')) && <NavLink to={`${base}/statistics${timesheetParams.size ? `?${timesheetParams}` : ''}`}>{canAccess(organization,'statistics.view')?'Статистика':'Отчёты'}</NavLink>}
+    {canAccess(organization,'statistics.view') && <NavLink to={`${base}/statistics${timesheetParams.size ? `?${timesheetParams}` : ''}`}>Статистика</NavLink>}
 
     {canAccess(organization,'schedule.history') && <NavLink to={`${base}/history`}>История смен</NavLink>}
-    {canAccess(organization,'timesheets.view') && (subscription.available('timesheets')
+    {(canViewTimesheet || canPreviewReport) && (timesheetAvailable
       ? <NavLink to={timesheetHref}>Табель</NavLink>
-      : <button type="button" disabled={subscription.pending} onClick={() => subscription.request({ feature: 'timesheets' })}>Табель<LockBadge plan="BUSINESS" /></button>)}
+      : <button type="button" disabled={subscription.pending} onClick={() => subscription.request({ feature: canPreviewReport ? 'reports' : 'timesheets' })}>Табель<LockBadge plan={canPreviewReport ? 'TEAM' : 'BUSINESS'} /></button>)}
   </SegmentedNav><div className="schedule-navigation__tools" aria-label="Инструменты расписания">
     {((settings.data?.discussionEnabled || !!drafts.data?.drafts.length) || canAccess(organization,'drafts.view')) && <button type="button" disabled={subscription.pending} onClick={() => planning ? navigate(`${base}/drafts?location=${organization.locationId}`) : subscription.request({ feature: 'planning' })}>Согласование графика{!planning && <LockBadge plan="BUSINESS" />}</button>}
     {canAccess(organization,'coverage.view') && <button type="button" disabled={subscription.pending} onClick={() => planning ? navigate(`${base}/demand?location=${organization.locationId}`) : subscription.request({ feature: 'planning' })}>Потребность{!planning && <LockBadge plan="BUSINESS" />}</button>}

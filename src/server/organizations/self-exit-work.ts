@@ -12,6 +12,7 @@ import { mutatePlannedShift } from '../schedule/service.ts'
 import { checkMonthlyWorkload } from '../schedule/workload.ts'
 import { locationContext } from './location-context.ts'
 import { mediaUrl } from '../storage/image-service.ts'
+import { assignOpenTask, hasTaskAssignee, taskAssignees } from '../requests/task-assignment.ts'
 
 type DB = Prisma.TransactionClient
 
@@ -50,7 +51,7 @@ export async function exitWorkFor(db: DB, actor: Actor, exitId: string, pointId?
     const canAssign = hasPermission(actor, request.status === 'PENDING' ? reviewPermission(request.systemCodeSnapshot) : 'requests.resolve', request.locationId)
     if (!canAssign) continue
     const available = task
-      ? context.members.some(member => task.assignees.includes(member.id) && hasPermission(member, 'requests.own', request.locationId))
+      ? hasTaskAssignee(context, request.locationId, task)
       : request.status === 'PENDING' && reviewersFromContext(context, request).length > 0
     if (available || (!task && request.status !== 'PENDING')) continue
     tasks.push({
@@ -155,7 +156,7 @@ export async function exitCandidates(userId: string, organizationId: string, exi
           ]
         } : {
           id: {
-            in: context!.members.filter(member => hasPermission(member, 'requests.own', resource.locationId)).map(member => member.id)
+            in: taskAssignees(context!, resource.locationId).map(member => member.id)
           }
         }),
         user: {
@@ -175,9 +176,6 @@ export async function exitCandidates(userId: string, organizationId: string, exi
       let reason: string | null = null
       try {
         if (shift) await eligible(db, shift, person.id, [shift.id])
-        else if (!context?.members.some(m => m.id === person.id && hasPermission(m, 'requests.own', resource.locationId))) {
-          reason = 'Нет доступа к задачам в этой точке.'
-        }
       } catch (error) {
         if (!(error instanceof ApiError)) throw error
         reason = error.message
@@ -266,32 +264,8 @@ export async function assignExitTask(userId: string, organizationId: string, exi
       throw new ApiError(409, 'ASSIGNMENT_CHANGED', 'Задача уже обработана или недоступна.')
     }
     const current = await db.organizationRequest.findUniqueOrThrow({ where: { id: requestId } })
-    if (current.updatedAt.toISOString() !== input.updatedAt) throw new ApiError(409, 'REQUEST_CHANGED', 'Задача изменилась. Обновите список.')
     const context = await loadReviewerContext(db, organizationId)
-    if (!context.members.some(member => member.id === input.memberId && hasPermission(member, 'requests.own', current.locationId))) {
-      throw new ApiError(409, 'ASSIGNEE_UNAVAILABLE', 'Исполнитель больше недоступен в этой точке.')
-    }
     const task = taskOutcome(current.outcome)!
-    await db.organizationRequest.update({ where: { id: requestId }, data: { selfExitId: null, outcome: { ...task, assignees: [input.memberId] } } })
-    await db.requestEvent.create({
-      data: {
-        requestId,
-        actorMemberId: actor.id,
-        type: 'CHANGED',
-        comment: 'Задача передана новому исполнителю после выхода сотрудника.',
-        changes: { selfExitId: exitId, previousAssignees: task.assignees, memberId: input.memberId }
-      }
-    })
-    const target = context.members.find(member => member.id === input.memberId)!
-    await db.accountNotification.create({
-      data: {
-        organizationId,
-        userId: target.userId,
-        requestId,
-        type: 'REQUEST_APPROVED',
-        title: 'Вам передана задача',
-        message: current.typeNameSnapshot
-      }
-    })
+    await assignOpenTask(db, actor, context, current, task, input)
   }, { timeout: 15000 })
 }

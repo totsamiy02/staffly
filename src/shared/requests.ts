@@ -71,6 +71,7 @@ export type RequestEvent = {
 }
 export type StaffRequest = RequestMutation & {
   canTransferReview?: boolean
+  canAssignTask?: boolean
   canReview?: boolean
   canCompleteTask?: boolean
   isOwn: boolean

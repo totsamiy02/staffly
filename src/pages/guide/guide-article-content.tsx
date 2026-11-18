@@ -1,4 +1,5 @@
-import { usePublishedContent,usePublishedGuideCatalog,PublishedMarkdown } from '../../features/public-content/content.tsx'
+import PublishedMarkdown from '../../features/public-content/published-markdown.tsx'
+import { usePublishedContent,usePublishedGuideCatalog } from '../../features/public-content/content.tsx'
 import GuideExampleBlock from './guide-example-block.tsx'
 import type { GuideArticle } from './content/types.ts'
 import GuideIcon from './guide-icon.tsx'

@@ -19,6 +19,7 @@ import DocumentDialog from '../../../../component/ui/modal/document-dialog.tsx';
 import RequestErrorMessage, { RequestErrorState } from '../../../../component/ui/request-error-message.tsx';
 import OperationStatus, { type OperationState } from '../../../../component/ui/operation-status.tsx';
 import ScheduleSectionHeader from '../shared/schedule-section-header.tsx';
+import TimesheetReports from './timesheet-reports.tsx';
 import './timesheet.scss';
 const statuses: Record<string, string> = { OPEN: 'Сверка', CLOSED: 'Зафиксирован' };
 const eventNames: Record<string, string> = { SUBMIT: 'Передан на проверку', RETURN: 'Возвращён в работу', CLOSE: 'Версия зафиксирована', REOPEN: 'Открыт повторно', CONFIRM: 'Факт подтверждён по плану', CORRECTION: 'Исправление', LATE_ABSENCE: 'Позднее изменение отсутствия', REVIEW_REMOVED: 'Открыт для сверки' };
@@ -95,6 +96,13 @@ export default function TimesheetPage({ organization }: {
   if (subscription.pending) return <div className="route-loading" role="status">Проверяем доступ…</div>;
   if (subscription.error) return <RequestErrorState error={subscription.error} onRetry={() => subscription.refresh?.()} />;
   const tariffRejected = !query.isFetching && (query.error as { code?: string } | null)?.code === 'SUBSCRIPTION_FEATURE_REQUIRED';
+  const reportsPermitted = canAccess(organization, 'reports.preview');
+  if ((!available || !permitted || tariffRejected) && reportsPermitted && subscription.available('reports')) {
+    return <section className="schedule-page timesheet-page">
+      <ScheduleSectionHeader organization={organization} title="Табель и отчёты" description="Проверьте часы и отсутствия в предпросмотре перед выгрузкой Excel" />
+      <TimesheetReports organization={organization} month={month} />
+    </section>;
+  }
   if (!available || tariffRejected) {
     return <Navigate replace to={`/app/organizations/${organization.id}/schedule${organization.locationId ? `?location=${organization.locationId}` : ''}`} />;
   }
@@ -321,6 +329,7 @@ export default function TimesheetPage({ organization }: {
           {reasonAction && <ReasonDialog key={`${month}:${reasonAction}`} action={reasonAction} busy={busy} error={error} onClose={() => { setReasonAction(null); setError(null); }} onSubmit={async reason => Boolean(await act(reasonAction, reason))} />}
         </>}
     </>}
+    {reportsPermitted && <TimesheetReports organization={organization} month={month} compact />}
   </section>;
 }
 function ReasonDialog({ action, busy, error, onClose, onSubmit }: {

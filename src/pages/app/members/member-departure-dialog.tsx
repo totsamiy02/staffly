@@ -78,6 +78,10 @@ export default function MemberDepartureDialog({ organization, memberId, scope, o
           {affectedCoverage.length > 0 && <div className="departure-warning"><strong>Потребность останется незакрытой</strong><p>Отмена выбранных смен увеличит нехватку сотрудников в {affectedCoverage.length} интервалах.</p><details><summary>Посмотреть интервалы</summary>{affectedCoverage.map((s, i) => <p key={i}>{displayDate(s.date)} · {shiftTimeRange(s.startAt, s.endAt, s.timezone)} · {s.locationName} · {s.positionName}</p>)}</details></div>}
         </> : <div className="departure-consequences">
           <article><strong>Заявки на рассмотрении · {data.pendingRequests}</strong><p>Сохранятся для решения руководителя и останутся в истории.</p>{data.pendingRequests > 0 && <a className="departure-link" href={`${root}/requests?location=${data.locationId}&tab=incoming`} target="_blank" rel="noreferrer">Открыть заявки</a>}</article>
+          {scope === 'organization' && <article>
+            <strong>Незавершённые задачи</strong>
+            <p>Назначения сотрудника будут сняты. Руководители с доступом к заявкам увидят задачи без исполнителей в очереди «Под контролем».</p>
+          </article>}
           <article><strong>Связанные изменения смен · {data.closingRequests}</strong><p>Заявки на изменение отменяемых или передаваемых смен закроются с записью причины.</p></article>
           <article><strong>Передачи и обмены · {data.offers}</strong><p>Активные предложения с участием сотрудника закроются; резервирование смен будет снято.</p></article>
           <article><strong>Предварительные графики · {data.drafts.length}</strong><p>{data.drafts.length ? 'Назначения требуют проверки в согласовании графика. Графики и обсуждения сохраняются; применить недопустимое назначение система не позволит.' : 'Связанных незавершённых графиков нет.'}</p>{data.drafts.map(d => d.canOpen ? <a key={d.id} className="departure-link" href={`${root}/schedule/drafts/${d.id}?location=${d.locationId}`} target="_blank" rel="noreferrer">{d.title}</a> : <p key={d.id}>{d.title} · обратитесь к руководителю точки</p>)}</article>

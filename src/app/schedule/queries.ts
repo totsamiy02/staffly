@@ -25,9 +25,10 @@ export function useShiftNotifications() {
   return useQuery({ ...liveQueryOptions, queryKey: ['shift-notifications'], queryFn: () => apiRequest<{ notifications: ShiftNotification[] }>('/shift-notifications'), enabled: Boolean(user) })
 }
 
-type StatisticsParams = { from?: string; to?: string; memberState?: 'active' | 'all' | 'former'; sort?: string; direction?: 'asc' | 'desc'; page?: number; limit?: number; historyOrder?: 'asc' | 'desc' }
+type StatisticsParams = { search?: string; from?: string; to?: string; memberState?: 'active' | 'all' | 'former'; sort?: string; direction?: 'asc' | 'desc'; page?: number; limit?: number; historyOrder?: 'asc' | 'desc' }
 function queryString(params: StatisticsParams) {
   const query = new URLSearchParams()
+  if (params.search) query.set('search', params.search)
   if (params.from) query.set('from', params.from)
   if (params.to) query.set('to', params.to)
   query.set('memberState', params.memberState ?? 'active')

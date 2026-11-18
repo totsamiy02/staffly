@@ -17,6 +17,7 @@ import { ApiError } from '../api-error.ts'
 import { assertCanChangeRole, assertCanRemoveMember, getMembership } from './access/permissions.ts'
 import { bindOrganizationLogoDraft, bindProfileImage, mediaUrl } from '../storage/image-service.ts'
 import { seedSystemRequestTypes } from '../requests/service.ts'
+import { detachOpenTasks } from '../requests/task-assignment.ts'
 
 type NewLocation = {name:string;city:string;address:string;timezone:string;teamNames?:string[]} & LocationProfile
 export type CreateOrganizationInput = {initialPlan?:'FREE'|'TRIAL';name:string;description:string|null;timezone:string;industry?:string|null;contactEmail?:string|null;phone?:string|null;website?:string|null;address?:string|null;logoUploadId?:string|null;creationKey?:string;firstLocation?:NewLocation;locations?:NewLocation[]}
@@ -242,6 +243,10 @@ export async function removeMember(actorUserId: string, organizationId: string, 
     await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId}, 1))::text`
     await tx.documentAcknowledgement.updateMany({ where: { memberId: target.id, acknowledgedAt: null, cancelledAt: null, document: { organizationId } }, data: { cancelledAt: now } })
     await tx.workShift.updateMany({ where: { organizationId, memberId: target.id, status: 'SCHEDULED', scheduledStartAt: { gt: now } }, data: { status: 'CANCELLED', cancelledAt: now, cancelledByMemberId: actor.id, cancellationReason: 'Сотрудник покинул организацию' } })
+    await detachOpenTasks(tx, {
+      organizationId, memberId: target.id, actorMemberId: actor.id,
+      comment: 'Исполнитель исключён из организации. Назначение снято.',
+    })
     await revokeMemberAccess(tx, organizationId, target.id, now)
     await tx.organizationMember.update({ where: { id: target.id }, data: { leftAt: now } })
     await recordSecurityEvent(tx, { action: 'MEMBER_DEPARTED', userId: actorUserId, organizationId, resourceType: 'MEMBER', resourceId: target.id })

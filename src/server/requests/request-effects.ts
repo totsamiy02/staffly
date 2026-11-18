@@ -121,9 +121,23 @@ async function approveCustom(context: DecisionContext) {
  if(decision==='APPROVED'&&!current.systemCodeSnapshot){
       const zone = (await tx.organizationLocation.findUniqueOrThrow({where:{id:current.locationId},select:{timezone:true}})).timezone
       const deadline = definition.action === 'TASK' ? addCalendarDays(localDay(new Date(), zone), definition.taskDeadlineDays ?? 7) : undefined
-      const outcome={...(deadline ? {deadline} : {}),kind:definition.action,status:definition.action==='TASK'?'OPEN':'DONE',text:current.comment??current.typeNameSnapshot,createdAt:new Date().toISOString(),assignees:definition.recipientMemberIds}
+      const recipients = await tx.organizationMember.findMany({
+        where: { organizationId, id: { in: definition.recipientMemberIds }, leftAt: null, user: { deletedAt: null } },
+        select: { id: true, userId: true },
+      })
+      const activeIds = new Set(recipients.map(member => member.id))
+      const assignees = definition.action === 'TASK'
+        ? definition.recipientMemberIds.filter(id => activeIds.has(id))
+        : definition.recipientMemberIds
+      const outcome = {
+        ...(deadline ? { deadline } : {}),
+        kind: definition.action,
+        status: definition.action === 'TASK' ? 'OPEN' : 'DONE',
+        text: current.comment ?? current.typeNameSnapshot,
+        createdAt: new Date().toISOString(),
+        assignees,
+      }
       await tx.organizationRequest.update({where:{id:requestId},data:{outcome}})
-      const recipients=await tx.organizationMember.findMany({where:{organizationId,id:{in:definition.recipientMemberIds},leftAt:null}})
       if(recipients.length)await publishRequestNotices(tx, recipients.map(p=>({organizationId,userId:p.userId,requestId,type:'REQUEST_APPROVED',title:definition.action==='TASK'?'Назначена задача по обращению':'Результат обращения',message:current.typeNameSnapshot})))
     }
 }

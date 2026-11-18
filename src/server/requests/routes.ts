@@ -1,6 +1,7 @@
 import { balanceListQuery, getVacationBalance, listVacationBalances, setupVacationBalance, changeVacationBalance, vacationBalanceHistory } from './vacation-balances.ts'
 import { vacationBalanceSetup, vacationBalanceChange } from '../../shared/vacation-balance.ts'
 import { reviewTransferCandidates, transferReview, transferReviewBody } from './reviewer-transfer.ts'
+import { assignUnstaffedTask, taskAssignmentBody, taskAssignmentCandidates } from './task-assignment.ts'
 import { auditSensitiveAccess } from '../security/journal.ts'
 import express,{ Router,type Request } from 'express'
 import { z } from 'zod'
@@ -70,6 +71,15 @@ router.post('/organizations/:organizationId/requests/:requestId/transfer-review'
   const { organizationId, requestId } = parse(requestParams, request.params)
   const input = parse(transferReviewBody, request.body)
   response.json(mutationResponse(await transferReview(auth(request).userId, organizationId, requestId, input)))
+})
+router.get('/organizations/:organizationId/requests/:requestId/task-assignee', async (request, response) => {
+  const { organizationId, requestId } = parse(requestParams, request.params)
+  response.set('Cache-Control', 'private, no-store').json(await taskAssignmentCandidates(auth(request).userId, organizationId, requestId))
+})
+router.post('/organizations/:organizationId/requests/:requestId/task-assignee', mutationLimiter, async (request, response) => {
+  const { organizationId, requestId } = parse(requestParams, request.params)
+  await assignUnstaffedTask(auth(request).userId, organizationId, requestId, parse(taskAssignmentBody, request.body))
+  response.status(204).end()
 })
 router.post('/organizations/:organizationId/requests/:requestId/complete-task',mutationLimiter,async(q,s)=>{const {organizationId,requestId}=parse(requestParams,q.params);await completeRequestTask(auth(q).userId,organizationId,requestId);s.status(204).end()})
 router.get('/organizations/:organizationId/request-types', async (request, response) => { const { organizationId } = parse(organizationRequestParams, request.params); response.json(typesResponse(await listRequestTypes(auth(request).userId, organizationId, request.query.includeInactive === 'true'))) })

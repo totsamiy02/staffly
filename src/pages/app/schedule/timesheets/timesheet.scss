@@ -226,3 +226,30 @@
 @media (prefers-reduced-motion: reduce) {
   .timesheet-disclosure__collapse, .timesheet-disclosure__chevron { transition: none; }
 }
+
+.timesheet-report-entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 20px;
+  border: 1px solid var(--theme-border, #dedde3);
+  border-radius: 10px;
+  background: var(--theme-surface, #fff);
+
+  > div { display: grid; gap: 8px; min-width: 0; }
+  h3 { margin: 0; font-size: 16px; font-weight: 600; }
+  p { max-width: 650px; margin: 0; color: var(--theme-muted, #64616c); font-size: 13px; line-height: 1.6; }
+  small { color: var(--theme-muted, #64616c); font-size: 12px; line-height: 1.5; }
+  > button { flex-shrink: 0; min-height: 40px; font-size: 12px; }
+}
+
+@media (max-width: 650px) {
+  .timesheet-report-entry {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 16px;
+    padding: 16px;
+    > button { width: 100%; min-height: 44px; }
+  }
+}

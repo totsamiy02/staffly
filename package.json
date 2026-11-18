@@ -13,14 +13,14 @@
     "dev:all": "concurrently -k \"npm run dev:server\" \"tsx scripts/wait-for-api.ts && npm run dev\" \"tsx scripts/wait-for-api.ts && npm run admin:maintenance -- --watch\"",
     "start:server": "NODE_ENV=production tsx --env-file=src/server/.env src/server/index.ts",
     "prestart:server": "prisma generate",
-    "prebuild": "node scripts/copy-pdf-assets.mjs && prisma generate",
+    "prebuild": "node scripts/apply-dependency-patches.mjs --check && node scripts/copy-pdf-assets.mjs && prisma generate",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
     "test:setup": "node --env-file=src/server/.env scripts/setup-test-db.mjs && PRISMA_ENV_FILE=src/server/.env.test prisma migrate deploy",
     "test": "node --import tsx tests/performance/load-test.mjs --tests=only",
     "storage:audit": "node --env-file=src/server/.env --import tsx scripts/storage-audit.ts",
-    "predev": "node scripts/copy-pdf-assets.mjs",
+    "predev": "node scripts/apply-dependency-patches.mjs --check && node scripts/copy-pdf-assets.mjs",
     "start:worker": "NODE_ENV=production tsx --env-file=src/server/.env src/server/worker.ts",
     "load:test": "node --import tsx tests/performance/load-test.mjs",
     "test:isolated": "node --import tsx tests/performance/load-test.mjs --tests=only",
@@ -48,7 +48,8 @@
     "admin:observer": "node --import tsx scripts/service-observer.ts",
     "admin:release:record": "node --import tsx scripts/record-release-check.ts",
     "test:timesheet": "node --import tsx tests/performance/load-test.mjs --profile=timesheet",
-    "test:personnel": "node --import tsx tests/performance/load-test.mjs --profile=personnel"
+    "test:personnel": "node --import tsx tests/performance/load-test.mjs --profile=personnel",
+    "postinstall": "node scripts/apply-dependency-patches.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1158.0",

@@ -5,7 +5,7 @@ export async function modalScenarios({ page, origin, fixture, capture }) {
     ['document-form', base + '/documents', /Загрузить документ/],
     ['folder-form', base + '/documents', /Создать папку/],
     ['shift-form', base + '/schedule', /Добавить смену/],
-    ['report-form', base + '/schedule/statistics', /Выгрузить Excel/],
+    ['report-form', base + '/schedule/timesheet', /Открыть предпросмотр/],
     ['location-form', base + '/settings?section=locations', /Добавить точку/],
     ['role-form', base + '/settings?section=roles', /Создать роль/, '.access-role-page'],
     ['request-type', base + '/requests?tab=mine', /Создать заявку/],
@@ -13,6 +13,7 @@ export async function modalScenarios({ page, origin, fixture, capture }) {
   for (const [name, route, button, inline] of cases) {
     await page.goto(origin + route, { waitUntil: 'domcontentloaded' })
     await page.locator('main:not(.app-loading):not(.route-loading)').first().waitFor()
+    if (name === 'report-form') await page.getByRole('button', { name: 'Настраиваемые отчёты', exact: true }).click()
     const trigger = page.getByRole('button', { name: button }).first()
     try {
       await trigger.waitFor({ timeout: 10000 }); await trigger.focus(); await page.keyboard.press('Enter')

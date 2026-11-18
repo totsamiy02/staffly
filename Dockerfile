@@ -1,6 +1,8 @@
 FROM node:24-bookworm-slim AS build
 WORKDIR /app
 COPY package*.json ./
+COPY scripts/apply-dependency-patches.mjs ./scripts/apply-dependency-patches.mjs
+COPY scripts/patches/picomatch-4.0.7.mjs ./scripts/patches/picomatch-4.0.7.mjs
 RUN npm ci
 COPY . .
 RUN npm run build

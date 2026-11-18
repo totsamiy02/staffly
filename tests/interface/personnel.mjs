@@ -52,7 +52,7 @@ export async function runPersonnel({ prisma, env, root, output, options, tempora
         await dialog.getByRole('button',{name:'Закрыть',exact:true}).click()
         await ep.goto(origin+'/app');await ep.getByPlaceholder('XXXX-XXXX-XXXX').fill(code);await ep.getByRole('button',{name:'Проверить код',exact:true}).click();await ep.getByRole('button',{name:'Присоединиться',exact:true}).click();await expect(ep.locator('.organization-card').filter({hasText:org.name})).toBeVisible()
       }
-      let member,shift,document
+      let member,shift,document,unfinishedTask
       try{
         await check('owner invites and employee accepts a one-use code',async()=>{await invite();member=await prisma.organizationMember.findUniqueOrThrow({where:{organizationId_userId:{organizationId:org.id,userId:employee.id}}});assert.equal(member.role,'MEMBER')})
         const {checkPersonnelCard}=await import('./personnel-card.mjs');await checkPersonnelCard({op,ep,mp,origin,base,location,org,member,employee,prisma,check,expect,tokens,output,viewport,theme})
@@ -124,12 +124,39 @@ export async function runPersonnel({ prisma, env, root, output, options, tempora
         await check('owner excludes employee despite a lost response; archive and history remain',async()=>{
           // Synthetic pre-existing elevated role proves that rehire does not restore it.
           await prisma.locationMember.update({where:{locationId_memberId:{locationId:org.locationId,memberId:member.id}},data:{role:'ADMIN'}})
+          const taskType = await prisma.requestType.create({
+            data: { organizationId: org.id, name: 'Передача инструкций', dateMode: 'NONE', requiresComment: false },
+          })
+          unfinishedTask = await prisma.organizationRequest.create({ data: {
+            organizationId: org.id, locationId: org.locationId, createdByMemberId: managerMember.id, requestTypeId: taskType.id,
+            typeNameSnapshot: taskType.name, status: 'APPROVED', formSnapshot: { version: 1, visibility: 'TEAM' },
+            outcome: { kind: 'TASK', status: 'OPEN', text: 'Передать инструкции к открытию точки', assignees: [member.id] },
+          } })
           await op.goto(origin+base+'/employees'+location);const row=op.locator('.member-row').filter({hasText:employee.firstName});await row.getByRole('button',{name:'Действия с сотрудником Сотрудник',exact:true}).click();await row.getByRole('button',{name:'Исключить из организации',exact:true}).click()
           const dialog=op.locator('.member-departure');const lost=async route=>{if(route.request().method()==='POST'){const response=await route.fetch();assert(response.ok());await route.abort('failed')}else await route.continue()}
           await expect(dialog.locator('.departure-lifecycle')).toContainText('Период работы завершится');await dialog.evaluate(node=>{node.scrollTop=0});await dialog.screenshot({path:path.join(output,viewport+'-'+theme+'-exclude.png')});await op.route('**/api/organizations/*/members/*/departure?*',lost);await dialog.getByRole('button',{name:'Исключить сотрудника',exact:true}).click();await expect(dialog.locator('[role=alert]')).toBeVisible();await op.unroute('**/api/organizations/*/members/*/departure?*',lost)
           await op.goto(origin+base+'/employees'+location+'&tab=archive');await expect(op.getByRole('heading',{name:'Архив сотрудников',exact:true})).toBeVisible();const heading=await op.locator('.workspace-page-heading').boundingBox(),tabs=await op.locator('.members-navigation').boundingBox();assert(heading&&tabs&&tabs.y>=heading.y+heading.height,'Archive tabs belong below the page heading');const card=op.locator('.member-archive-card').filter({hasText:employee.firstName});await expect(card).toBeVisible();await card.getByText('Периоды работы',{exact:true}).click();assert.deepEqual((await new AxeBuilder({page:op}).include('.members-page').analyze()).violations,[]);const archiveShot=viewport+'-'+theme+'-archive.png';await op.evaluate(()=>window.scrollTo({top:0,behavior:'instant'}));await op.screenshot({path:path.join(output,archiveShot),fullPage:true});result.screenshots.push(archiveShot);await card.getByRole('button',{name:'Рабочая история',exact:true}).click();await expect(op.locator('.member-profile-dialog')).toBeVisible();const periods=op.locator('.member-profile-about .employment-periods');await periods.getByRole('button',{name:/Периоды работы/}).click();await expect(periods.locator('li')).toHaveCount(1);await op.screenshot({path:path.join(output,viewport+'-'+theme+'-profile-periods.png')});await op.keyboard.press('Escape')
           assert((await prisma.organizationMember.findUniqueOrThrow({where:{id:member.id}})).leftAt);assert.equal((await prisma.workShift.findUniqueOrThrow({where:{id:shift.id}})).memberId,member.id)
           await ep.goto(origin+base+'/documents'+location);await expect(ep.locator('main:not(.app-loading):not(.route-loading)').first()).toContainText(/Организация не найдена|Нет доступа/)
+        })
+        await check('manager reassigns an unfinished task from the attention queue after exclusion', async () => {
+          await mp.goto(origin + base + location)
+          const panel = mp.getByRole('region', { name: 'Требует внимания' })
+          await panel.getByRole('button', { name: /^Под контролем/ }).click()
+          const task = panel.locator('.attention-row').filter({ hasText: 'Передача инструкций' })
+          await expect(task).toContainText('Нет доступного исполнителя')
+          await task.getByRole('link', { name: 'Открыть задачу', exact: true }).click()
+          const drawer = mp.locator('.request-detail-dialog')
+          await drawer.getByRole('button', { name: 'Назначить исполнителя', exact: true }).click()
+          const form = drawer.getByRole('form', { name: 'Назначение исполнителя', exact: true })
+          await form.getByRole('combobox', { name: 'Новый исполнитель', exact: true }).click()
+          await expect(mp.getByRole('option', { name: employee.firstName, exact: true })).toHaveCount(0)
+          await mp.getByRole('option', { name: manager.firstName, exact: true }).click()
+          await form.getByRole('button', { name: 'Назначить исполнителя', exact: true }).click()
+          await expect(drawer).toContainText('Задача передана новому исполнителю.')
+          await expect(drawer.getByRole('button', { name: 'Назначить исполнителя', exact: true })).toHaveCount(0)
+          const taskAfter = await prisma.organizationRequest.findUniqueOrThrow({ where: { id: unfinishedTask.id } })
+          assert.deepEqual(taskAfter.outcome.assignees, [managerMember.id])
         })
         await check('rehire preserves identity, periods and acknowledgement without restoring old powers',async()=>{
           await invite();const returned=await prisma.organizationMember.findUniqueOrThrow({where:{organizationId_userId:{organizationId:org.id,userId:employee.id}}});assert.equal(returned.id,member.id);assert.equal(returned.leftAt,null);assert.equal(await prisma.memberEmploymentPeriod.count({where:{memberId:member.id}}),2);assert((await prisma.documentAcknowledgement.findFirstOrThrow({where:{documentId:document.id,memberId:member.id}})).acknowledgedAt)
@@ -205,7 +232,7 @@ export async function runPersonnel({ prisma, env, root, output, options, tempora
         })
       }finally{for(const context of contexts)await context.close()}
     }
-    assert.equal(result.checks.length,32,'Every mandatory personnel scenario must execute in both viewports')
+    assert.equal(result.checks.length,34,'Every mandatory personnel scenario must execute in both viewports')
     assert.equal(result.errors.length,0,JSON.stringify(result.errors));result.status='passed';await save();return result
   }catch(error){result.status='failed';result.errors.push({message:error.message});await save();throw error}
   finally{await browser.close();await server.close()}

@@ -5,7 +5,8 @@ import { randomUUID } from 'node:crypto';
 import { prisma } from '../../src/server/db.ts';
 import { createBusinessOrganization } from '../support/business-organization.ts';
 import { locationContext } from '../../src/server/organizations/location-context.ts';
-import { memberStatistics } from '../../src/server/schedule/time/statistics.ts';
+import { memberStatistics, organizationStatistics } from '../../src/server/schedule/time/statistics.ts';
+import { statisticsQuery } from '../../src/server/schedule/schemas.ts';
 import { buildReport } from '../../src/server/schedule/reports/report-service.ts';
 import { defaultReportConfig } from '../../src/app/schedule/reports/reporting.ts';
 import { readTimesheet, actOnTimesheet, readTimesheetVersion } from '../../src/server/schedule/timesheets/service.ts';
@@ -14,6 +15,53 @@ import { saveTimeCorrection } from '../../src/server/schedule/time/time-correcti
 after(() => prisma.$disconnect());
 const month = '2025-10';
 const options = { from: '2025-10-01', to: '2025-11-01', memberState: 'all', sort: 'name', direction: 'asc', page: 1, limit: 50 } as const;
+
+it('statistics search covers all pages, treats SQL wildcard characters literally and retains point and permission boundaries', async () => {
+  const f = await fixture();
+  const users = await prisma.user.createManyAndReturn({
+    data: Array.from({ length: 26 }, (_, index) => ({
+      email: `search-${index}-${randomUUID()}@example.test`,
+      firstName: `Тестовый ${String(index).padStart(2, '0')}`,
+    })),
+  });
+  const members = await prisma.organizationMember.createManyAndReturn({
+    data: users.map(user => ({ organizationId: f.org.id, userId: user.id })),
+  });
+  await prisma.locationMember.createMany({
+    data: members.map(member => ({ organizationId: f.org.id, locationId: f.org.locationId, memberId: member.id })),
+  });
+  const read = (search: string, page = 1) => f.scope(() => organizationStatistics(f.user.id, f.org.id, {
+    ...options, search, page, limit: 25,
+  }));
+  const first = await read('ТЕСТОВЫЙ');
+  assert.equal(first.pagination.total, 26);
+  assert.equal(first.pagination.pages, 2);
+  assert.equal(first.members.length, 25);
+  const second = await read('тестовый', 2);
+  assert.equal(second.members.length, 1);
+  assert(!first.members.some(member => member.memberId === second.members[0].memberId));
+  const byMail = await read(users[25].email);
+  assert.equal(byMail.pagination.total, 1);
+  assert.equal(byMail.members[0].userId, users[25].id);
+  await prisma.user.updateMany({ where: { id: { in: users.map(user => user.id) } }, data: { firstName: 'Одинаковый' } });
+  const stableIds = members.map(member => member.id).sort((left, right) => left.localeCompare(right));
+  assert.deepEqual((await read('Одинаковый')).members.map(member => member.memberId), stableIds.slice(0, 25));
+  assert.deepEqual((await read('Одинаковый', 2)).members.map(member => member.memberId), stableIds.slice(25));
+  await prisma.user.update({ where: { id: users[0].id }, data: { firstName: 'Литерал %_ тест' } });
+  const literal = await read('%_');
+  assert.equal(literal.pagination.total, 1);
+  assert.equal(literal.members[0].userId, users[0].id);
+  assert.equal((await read('несуществующий сотрудник')).pagination.total, 0);
+  const removed = members.find(member => member.userId === users[1].id)!;
+  await prisma.locationMember.delete({ where: { locationId_memberId: { locationId: f.org.locationId, memberId: removed.id } } });
+  assert.equal((await read(users[1].email)).pagination.total, 0);
+  const stranger = await prisma.user.create({ data: { email: `outside-${randomUUID()}@example.test` } });
+  await assert.rejects(
+    f.scope(() => organizationStatistics(stranger.id, f.org.id, { ...options, search: users[0].email })),
+    (error: unknown) => Boolean(error && typeof error === 'object' && 'code' in error && error.code === 'ORGANIZATION_NOT_FOUND'),
+  );
+  assert(!statisticsQuery.safeParse({ search: 'x'.repeat(201) }).success);
+});
 async function fixture() {
   const user = await prisma.user.create({ data: { email: `accounting-${randomUUID()}@example.test` } });
   const org = await createBusinessOrganization(user.id, { name: 'Единый учёт', timezone: 'Europe/Moscow', description: null });

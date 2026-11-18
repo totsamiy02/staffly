@@ -164,10 +164,11 @@ export async function runWorkspaceSafety({ prisma, env, root, temporary, output,
               await page.getByRole('textbox', { name: 'Поиск событий', exact: true }).fill('Сохранённый фильтр')
               await expect(page).toHaveURL(/search=/)
               await page.getByRole('link', { name: /^Документы/ }).click()
-              await expect(page.getByLabel('Область текущего списка')).toContainText('Все доступные точки')
+              await expect(page.getByRole('combobox', { name: 'Точка документа', exact: true })).toContainText('Все доступные точки')
+              assert.notEqual(new URL(page.url()).searchParams.get('pointId'), points[1].id)
               await page.getByRole('link', { name: 'События', exact: true }).click()
               await expect(page.getByRole('textbox', { name: 'Поиск событий', exact: true })).toHaveValue('Сохранённый фильтр')
-              await expect(page.getByLabel('Область текущего списка')).toContainText('Вторая точка')
+              await expect(page.getByRole('combobox', { name: 'Точка событий', exact: true })).toContainText('Вторая точка')
               await page.reload()
               await expect(page.getByRole('textbox', { name: 'Поиск событий', exact: true })).toHaveValue('Сохранённый фильтр')
               assert.equal(new URL(page.url()).searchParams.get('pointId'), points[1].id)
@@ -176,8 +177,9 @@ export async function runWorkspaceSafety({ prisma, env, root, temporary, output,
               assert.equal(overflow, false, 'Workspace overflow')
             })
             await check('export resumes the same job, reaches ready and downloads', async () => {
-              await page.goto(origin + base + '/schedule/statistics' + location)
-              await page.getByRole('button', { name: /Выгрузка Excel|Выгрузить Excel|Выгрузить|Скачать Excel|Экспорт/ }).first().click()
+              await page.goto(origin + base + '/schedule/timesheet' + location)
+              await page.getByRole('button', { name: 'Настраиваемые отчёты', exact: true }).click()
+              await page.getByRole('button', { name: 'Открыть предпросмотр', exact: true }).click()
               const report = page.getByRole('dialog', { name: 'Выгрузка Excel', exact: true })
               await expect(report.getByRole('button', { name: 'Подготовить .xlsx', exact: true })).toBeEnabled({ timeout: 20000 })
               const before = await prisma.reportExport.count()
@@ -186,7 +188,7 @@ export async function runWorkspaceSafety({ prisma, env, root, temporary, output,
               const job = await prisma.reportExport.findFirstOrThrow({ orderBy: { createdAt: 'desc' } })
               await report.getByRole('button', { name: 'Закрыть', exact: true }).first().click()
               await expect(report).toBeHidden()
-              await page.getByRole('button', { name: /Выгрузка Excel|Выгрузить Excel|Выгрузить|Скачать Excel|Экспорт/ }).first().click()
+              await page.getByRole('button', { name: 'Открыть предпросмотр', exact: true }).click()
               await expect(report.getByLabel('Состояние операции')).toContainText(job.id)
               assert.equal(await prisma.reportExport.count(), before + 1)
               for (let attempt = 0; attempt < 4; attempt++) {
@@ -458,6 +460,11 @@ export async function runWorkspaceSafety({ prisma, env, root, temporary, output,
               await page.getByRole('button', { name: 'Выйти', exact: true }).click()
               await expect.poll(() => page.evaluate(() => Object.keys(sessionStorage).filter(key => ['staffly:form-draft:', 'staffly:module-filters:', 'staffly:module-route:', 'staffly:report-job:'].some(prefix => key.startsWith(prefix))).length)).toBe(0)
             })
+            if (!options.checks || options.checks.includes('lifecycle:')) {
+              const { checkLifecycleBoundaries } = await import('./lifecycle-boundaries.mjs')
+              await page.goto(origin + base + location)
+              await checkLifecycleBoundaries({ browser, page, origin, base, location, fixture, prisma, check, expect, result, output, name, viewport })
+            }
           } finally { await context.close() }
         }
       } finally { await browser.close() }

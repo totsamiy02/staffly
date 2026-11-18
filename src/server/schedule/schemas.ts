@@ -54,6 +54,7 @@ export const cancelledShiftsQuery = historyPaginationQuery.extend({
 })
 
 export const statisticsQuery = z.object({
+  search: z.string().trim().max(200).optional(),
   historyOrder: z.enum(['asc', 'desc']).default('desc'),
   from: date.optional(),
   to: date.optional(),

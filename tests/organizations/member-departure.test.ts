@@ -6,6 +6,11 @@ import { createBusinessOrganization as createOrganization } from '../support/bus
 import { previewDeparture, confirmDeparture, departureCandidates } from '../../src/server/organizations/departure-service.ts'
 import { activeTarget } from '../../src/server/schedule/service.ts'
 import { locationContext } from '../../src/server/organizations/location-context.ts'
+import { acceptCodeInvitation, createCodeInvitation } from '../../src/server/organizations/invitation-service.ts'
+import { assignUnstaffedTask, taskAssignmentCandidates } from '../../src/server/requests/task-assignment.ts'
+import { getRequest } from '../../src/server/requests/request-queries.ts'
+import { resolveRequest } from '../../src/server/requests/request-transitions.ts'
+import { listAttention } from '../../src/server/attention/service.ts'
 import type { DepartureInput } from '../../src/app/organizations/departure.ts'
 
 const orgs: string[] = [], users: string[] = []
@@ -23,6 +28,20 @@ async function fixture() {
 }
 const input = (token: string, overrides: Partial<DepartureInput> = {}): DepartureInput => ({ scope: 'organization', token, reason: '', choices: [], keepCurrent: false, acknowledgeDrafts: false, acknowledgeWorkload: false, ...overrides })
 const code = (wanted: string) => (error: unknown) => (error as { code?: string }).code === wanted
+
+async function taskFor(f: Awaited<ReturnType<typeof fixture>>, assignees: string[], status: 'OPEN' | 'DONE' = 'OPEN') {
+  const type = await prisma.requestType.create({
+    data: { organizationId: f.org.id, name: randomUUID(), dateMode: 'NONE', requiresComment: false },
+  })
+  return prisma.organizationRequest.create({ data: {
+    organizationId: f.org.id, locationId: f.org.locationId, createdByMemberId: f.owner.id, requestTypeId: type.id,
+    typeNameSnapshot: 'Передать инструкции', status: 'APPROVED',
+    formSnapshot: { version: 1, visibility: 'TEAM' },
+    outcome: { kind: 'TASK', status, text: 'Передать инструкции', deadline: '2026-12-31', assignees },
+  } })
+}
+
+const attention = { filter: 'all', pointId: 'all', page: 1, pageSize: 30 } as const
 
 describe('employee departure preview and atomic decisions', () => {
   before(async () => {
@@ -46,6 +65,88 @@ describe('employee departure preview and atomic decisions', () => {
     assert.ok((await prisma.organizationMember.findUniqueOrThrow({ where: { id: f.leaving.id } })).leftAt)
     assert.equal((await prisma.workShift.findUniqueOrThrow({ where: { id: past.id } })).status, 'SCHEDULED')
     assert.equal(await prisma.accessAudit.count({ where: { organizationId: f.org.id, action: 'MEMBER_EXCLUDED' } }), 1)
+  })
+  it('detaches unfinished assignments, preserves other assignees and lets a request manager reassign once', async () => {
+    const f = await fixture()
+    const [owner, employee, replacement] = f.people
+    const open = await taskFor(f, [f.leaving.id])
+    await prisma.organizationRequest.update({
+      where: { id: open.id }, data: { authorMemberId: f.replacement.id },
+    })
+    const shared = await taskFor(f, [f.leaving.id, f.replacement.id])
+    const done = await taskFor(f, [f.leaving.id], 'DONE')
+    const preview = await f.preview()
+    await f.confirm(input(preview.token))
+    const read = (id: string) => prisma.organizationRequest.findUniqueOrThrow({ where: { id } })
+    const detached = await read(open.id)
+    assert.deepEqual(detached.outcome, { ...open.outcome as object, assignees: [] })
+    assert.deepEqual((await read(shared.id)).outcome, { ...shared.outcome as object, assignees: [f.replacement.id] })
+    assert.deepEqual((await read(done.id)).outcome, done.outcome)
+
+    const queue = await listAttention(owner.id, f.org.id, { ...attention, scope: 'control' })
+    assert.equal(queue.items.find(item => item.sourceId === open.id)?.reason, 'Нет доступного исполнителя')
+    const details = await f.scoped(() => getRequest(owner.id, f.org.id, open.id))
+    assert.equal(details.request.canAssignTask, true)
+    assert.ok(details.request.events.some(event => event.actorMemberId === f.owner.id && event.comment?.includes('Назначение снято')))
+    assert.equal((await f.scoped(() => getRequest(owner.id, f.org.id, shared.id))).request.canAssignTask, false)
+    const candidates = await f.scoped(() => taskAssignmentCandidates(owner.id, f.org.id, open.id))
+    assert.ok(candidates.members.some(member => member.id === f.replacement.id))
+    assert.ok(!candidates.members.some(member => member.id === f.leaving.id))
+    const updatedAt = detached.updatedAt.toISOString()
+    const assign = (memberId: string, revision = updatedAt) =>
+      f.scoped(() => assignUnstaffedTask(owner.id, f.org.id, open.id, { memberId, updatedAt: revision }))
+    await assert.rejects(f.scoped(() => assignUnstaffedTask(replacement.id, f.org.id, open.id, { memberId: f.replacement.id, updatedAt })), code('INSUFFICIENT_PERMISSIONS'))
+    await assert.rejects(assign(f.leaving.id), code('ASSIGNEE_UNAVAILABLE'))
+    await assert.rejects(assign(f.replacement.id, new Date(0).toISOString()), code('REQUEST_CHANGED'))
+    const concurrent = await Promise.allSettled([assign(f.replacement.id), assign(f.replacement.id)])
+    assert.equal(concurrent.filter(result => result.status === 'fulfilled').length, 1)
+    assert.ok(concurrent.some(result => result.status === 'rejected' && code('ASSIGNMENT_CHANGED')(result.reason)))
+    assert.deepEqual((await read(open.id)).outcome, { ...open.outcome as object, assignees: [f.replacement.id] })
+    assert.equal(await prisma.accountNotification.count({ where: { requestId: open.id, userId: replacement.id } }), 1)
+
+    const invite = await f.scoped(() => createCodeInvitation(owner.id, f.org.id))
+    await acceptCodeInvitation(employee.id, employee.email, invite.code)
+    const afterRehire = await listAttention(employee.id, f.org.id, { ...attention, scope: 'mine' })
+    assert.ok(!afterRehire.items.some(item => [open.id, shared.id].includes(item.sourceId)))
+  })
+
+  it('cleans up legacy open assignments before reactivating membership', async () => {
+    const f = await fixture()
+    const [owner, employee, replacement] = f.people
+    await prisma.user.update({ where: { id: replacement.id }, data: { firstName: null } })
+    const preview = await f.preview()
+    await f.confirm(input(preview.token))
+    const legacy = await taskFor(f, [f.leaving.id])
+    const candidateList = await f.scoped(() => taskAssignmentCandidates(owner.id, f.org.id, legacy.id))
+    assert.deepEqual(candidateList.members.find(member => member.id === f.replacement.id), {
+      id: f.replacement.id, name: 'Сотрудник',
+    })
+    assert.ok(!candidateList.members.some(member => member.id === f.leaving.id))
+    const invite = await f.scoped(() => createCodeInvitation(owner.id, f.org.id))
+    await acceptCodeInvitation(employee.id, employee.email, invite.code)
+    const current = await prisma.organizationRequest.findUniqueOrThrow({ where: { id: legacy.id } })
+    assert.deepEqual(current.outcome, { ...legacy.outcome as object, assignees: [] })
+    const queue = await listAttention(employee.id, f.org.id, { ...attention, scope: 'mine' })
+    assert.ok(!queue.items.some(item => item.sourceId === legacy.id))
+  })
+
+  it('does not assign a newly approved task to the former recipient from a pending workflow', async () => {
+    const f = await fixture()
+    const [owner] = f.people
+    const pendingTask = await taskFor(f, [])
+    await prisma.organizationRequest.update({
+      where: { id: pendingTask.id },
+      data: {
+        status: 'PENDING',
+        createdByMemberId: f.replacement.id,
+        formSnapshot: { version: 1, visibility: 'TEAM', action: 'TASK', recipientMemberIds: [f.leaving.id] },
+      },
+    })
+    const preview = await f.preview()
+    await f.confirm(input(preview.token))
+    const approved = await f.scoped(() => resolveRequest(owner.id, f.org.id, pendingTask.id, 'APPROVED', null))
+    assert.deepEqual((approved.outcome as { assignees: string[] }).assignees, [])
+    assert.equal((await f.scoped(() => getRequest(owner.id, f.org.id, pendingTask.id))).request.canAssignTask, true)
   })
   it('requires a fresh preview and explicit decisions; rolls back all changes on error', async () => {
     const f = await fixture(), s = await f.shift(), p = await f.preview()

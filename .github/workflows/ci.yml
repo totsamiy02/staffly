@@ -194,7 +194,7 @@ jobs:
           PERSONNEL_THEME: ${{ matrix.theme }}
           PLAYWRIGHT_BROWSERS_PATH: artifacts/browser-binaries
       - name: Verify shared modal controls and request settings
-        run: node --import tsx tests/performance/load-test.mjs --profile=workspace --checks="modal layouts,modal close protection,network error retains event,constructor protects" --browsers=chrome --viewports=desktop,mobile --theme="$PERSONNEL_THEME" --pg-bin=/usr/lib/postgresql/18/bin --output=artifacts/tests/personnel/forms
+        run: node --import tsx tests/performance/load-test.mjs --profile=workspace --checks="modal layouts,modal close protection,network error retains event,constructor protects,lifecycle:" --browsers=chrome --viewports=desktop,mobile --theme="$PERSONNEL_THEME" --pg-bin=/usr/lib/postgresql/18/bin --output=artifacts/tests/personnel/forms
         env:
           PERSONNEL_THEME: ${{ matrix.theme }}
           PLAYWRIGHT_BROWSERS_PATH: artifacts/browser-binaries

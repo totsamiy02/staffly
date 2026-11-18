@@ -17,6 +17,7 @@ import { checkMonthlyWorkload } from '../schedule/workload.ts'
 import { calculateCoverage } from '../schedule/planning/coverage.ts'
 import { addCalendarDays, startOfZonedDate } from '../schedule/timezone.ts'
 import { zonedDateAndTime } from '../../app/schedule/date-utils.ts'
+import { detachOpenTasks } from '../requests/task-assignment.ts'
 
 export const departureScope = z.enum(['organization', 'location'])
 export const departureBody = z.object({
@@ -169,6 +170,10 @@ export async function confirmDeparture(userId: string, organizationId: string, m
         })
       }
       if (input.scope === 'organization') {
+        await detachOpenTasks(tx, {
+          organizationId, memberId, actorMemberId: data.actor.id,
+          comment: 'Исполнитель исключён из организации. Назначение снято.',
+        })
         await revokeMemberAccess(tx, organizationId, memberId, data.now)
         await tx.organizationMember.update({ where: { id: memberId }, data: { leftAt: data.now } })
         await tx.documentAcknowledgement.updateMany({ where: { memberId, acknowledgedAt: null, cancelledAt: null, document: { organizationId } }, data: { cancelledAt: data.now } })

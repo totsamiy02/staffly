@@ -1,4 +1,5 @@
-import { usePublishedContent,usePublishedGuideCatalog,usePublishedGuideCatalogState,mergeGuideArticles,PublishedMarkdown } from '../../features/public-content/content.tsx'
+import PublishedMarkdown from '../../features/public-content/published-markdown.tsx'
+import { usePublishedContent,usePublishedGuideCatalog,usePublishedGuideCatalogState,mergeGuideArticles } from '../../features/public-content/content.tsx'
 import { GuideJourney, GuideModule } from './guide-journey.tsx'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'

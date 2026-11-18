@@ -26,7 +26,15 @@ export default function DocumentDrawer({ organizationId, documentId, manager, po
   const [error, setError] = useState(''), [fileAction, setFileAction] = useState<'download' | null>(null)
   const [showRecipients, setShowRecipients] = useState(false), [progressPage, setProgressPage] = useState(1), [confirmCancel, setConfirmCancel] = useState<string | null>(null)
   const fileBusy = fileAction !== null
-  const progress = useQuery({ ...liveQueryOptions, queryKey: ['document-progress', organizationId, documentId, progressPage, pointId ?? locationId], queryFn: () => apiRequest<{ recipients: Recipient[]; pagination: { pages: number; total: number } }>(`${documentPath(organizationId, documentId)}/progress?page=${progressPage}${pointId ? `&locationId=${pointId}` : ''}`), enabled: manager && Boolean(doc.data?.document.canControl) && showRecipients && Boolean(doc.data), retry: false })
+  const progress = useQuery({
+    ...liveQueryOptions,
+    queryKey: ['document-progress', organizationId, documentId, progressPage, pointId ?? locationId],
+    queryFn: () => apiRequest<{ recipients: Recipient[]; pagination: { pages: number; total: number } }>(
+      `${documentPath(organizationId, documentId)}/progress?page=${progressPage}${pointId ? `&locationId=${pointId}` : ''}`,
+    ),
+    enabled: doc.isSuccess && manager && Boolean(doc.data.document.canControl) && showRecipients,
+    retry: false,
+  })
   const ack = useMutation({ mutationFn: () => apiRequest(`${documentPath(organizationId, documentId)}/acknowledge${pointId ? `?locationId=${pointId}` : ''}`, { method: 'POST' }), onSuccess: async () => { await refresh(); toast('Ознакомление подтверждено.') } })
   const cancel = useMutation({ mutationFn: (id: string) => apiRequest(`${documentPath(organizationId, documentId)}/acknowledgements/${id}/cancel${pointId ? `?locationId=${pointId}` : ''}`, { method: 'POST' }), onSuccess: async () => { setConfirmCancel(null); await refresh() } })
   async function openFile() {
@@ -45,7 +53,7 @@ export default function DocumentDrawer({ organizationId, documentId, manager, po
     }
     await refresh()
   }
-  const item = doc.data?.document, own = item?.acknowledgement
+  const item = doc.isSuccess ? doc.data.document : undefined, own = item?.acknowledgement
   const extension = item?.fileName.split('.').at(-1)?.toLowerCase() ?? ''
   const activeProgress = item?.progress
 
@@ -58,7 +66,13 @@ export default function DocumentDrawer({ organizationId, documentId, manager, po
       {confirmCancel === recipient.id && <AnimatedOverlay variant="modal" dismissible={!cancel.isPending} onClose={() => setConfirmCancel(null)}>{close => <ConfirmationDialog title="Отменить ознакомление?" resource={recipient.member.name} description="Требование подтвердить ознакомление будет отменено. Документ и история сохранятся." confirmLabel="Отменить ознакомление" pendingLabel="Отменяем…" busy={cancel.isPending} error={cancel.error?.message} onClose={close} onConfirm={() => cancel.mutate(recipient.id)} />}</AnimatedOverlay>}
     </article>)}
     {cancel.error && <p className="form-inline-error" role="alert"><RequestErrorMessage error={cancel.error.message} /></p>}
-    {progress.data && progress.data.pagination.pages > 1 && <div className="document-pagination"><button className="app-secondary" disabled={progressPage === 1} onClick={() => setProgressPage(progressPage - 1)}>Назад</button><span>{progressPage}/{progress.data.pagination.pages}</span><button className="app-secondary" disabled={progressPage === progress.data.pagination.pages} onClick={() => setProgressPage(progressPage + 1)}>Далее</button></div>}
+    {progress.isSuccess && progress.data.pagination.pages > 1 && (
+      <div className="document-pagination">
+        <button className="app-secondary" disabled={progressPage === 1} onClick={() => setProgressPage(progressPage - 1)}>Назад</button>
+        <span>{progressPage}/{progress.data.pagination.pages}</span>
+        <button className="app-secondary" disabled={progressPage === progress.data.pagination.pages} onClick={() => setProgressPage(progressPage + 1)}>Далее</button>
+      </div>
+    )}
     <footer><button className="app-secondary" onClick={() => setShowRecipients(false)}>Вернуться к документу</button></footer>
   </DocumentDialog>
 

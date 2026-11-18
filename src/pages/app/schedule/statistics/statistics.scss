@@ -1,0 +1,96 @@
+.schedule-page.statistics-page {
+  .schedule-section-header .schedule-navigation { margin: 0; }
+  .statistics-toolbar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 0;
+
+    > .staffly-select { width: 170px; }
+    .staffly-control { min-height: 40px; font-size: 13px; border-radius: 8px; }
+    .work-time-rules-button { margin-left: auto; min-height: 40px; }
+  }
+
+  .statistics-range.staffly-segmented {
+    width: auto;
+    margin: 0;
+    > button { min-height: 34px; padding: 7px 13px; font-size: 12px; white-space: nowrap; }
+  }
+
+  .statistics-month {
+    display: grid;
+    grid-template-columns: minmax(120px, 1fr) 100px;
+    gap: 8px;
+    .staffly-select { width: 100%; min-width: 0; }
+  }
+
+  .statistics-list-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-top: 20px;
+    > span { color: var(--theme-muted, #64616c); font-size: 12px; white-space: nowrap; }
+  }
+
+  .statistics-search {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: min(100%, 360px);
+    min-width: 0;
+    margin: 0;
+    padding: 0 12px;
+    border: 1px solid var(--theme-border, #dedde3);
+    border-radius: 8px;
+    background: var(--theme-surface, #fff);
+    color: var(--theme-muted, #64616c);
+
+    &:focus-within { outline: 2px solid var(--theme-focus, #777); outline-offset: 2px; }
+    > svg { width: 17px; height: 17px; flex-shrink: 0; }
+    > input {
+      width: 100%; min-width: 0; min-height: 40px; padding: 9px 0;
+      border: 0; border-radius: 0; outline: 0; box-shadow: none;
+      background: transparent; color: var(--theme-text-strong, #222); font-size: 13px;
+      &::placeholder { color: var(--theme-muted, #64616c); opacity: 1; }
+      &:focus-visible { outline: none; box-shadow: none; }
+    }
+  }
+
+  .work-time-totals { margin: 20px 0; padding-bottom: 20px; }
+  .statistics-table { margin-top: 16px; border-radius: 10px; }
+  .statistics-table__head, .statistics-table__row { min-width: 0; }
+  .statistics-table__head button { padding: 12px 16px; font-size: 11px; font-weight: 550; }
+  .statistics-table__row > span { padding: 14px 16px; min-height: 76px; font-size: 13px; }
+  .statistics-table__row > span.statistics-employee { gap: 10px; }
+  .statistics-employee > span { display: grid; min-width: 0; gap: 5px; }
+  .statistics-employee strong { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+  .statistics-avatar { width: 36px; height: 36px; flex: 0 0 36px; }
+}
+
+@media (max-width: 1000px) {
+  .schedule-page.statistics-page {
+    .statistics-table__head, .statistics-table__row { grid-template-columns: minmax(170px, 1.5fr) repeat(4, minmax(85px, 1fr)); }
+    .statistics-table__head button, .statistics-table__row > span { padding-inline: 12px; }
+  }
+}
+
+@media (max-width: 700px) {
+  .schedule-page.statistics-page {
+    .statistics-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+    .statistics-range.staffly-segmented { grid-column: 1 / -1; width: 100%; > button { flex: 1; min-height: 38px; } }
+    .statistics-month { grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    .statistics-toolbar > .staffly-select { width: 100%; min-width: 0; }
+    .statistics-toolbar .staffly-control, .statistics-toolbar .work-time-rules-button { min-height: 44px; }
+    .statistics-toolbar .work-time-rules-button { width: 100%; margin: 0; padding-inline: 8px; font-size: 12px; }
+    .statistics-list-toolbar { flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+    .statistics-search { width: 100%; > input { min-height: 44px; } }
+    .statistics-table { overflow: visible; }
+    .statistics-table__head { display: none; }
+    .statistics-table__row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; padding: 16px; }
+    .statistics-table__row > span { min-height: 0; padding: 0; }
+    .statistics-table__row > span.statistics-employee { grid-column: 1 / -1; }
+    .statistics-table__row > span[data-label]::before { content: attr(data-label); color: var(--theme-muted, #64616c); font-size: 11px; }
+  }
+}

@@ -41,7 +41,7 @@ import ModuleIcon from '../../../../component/ui/module-icon.tsx'
 import '../schedule.scss'
 import '../schedule-redesign.scss'
 
-const RequestForm = lazy(() => import('../../requests/requests-page.tsx').then(module => ({ default: module.RequestForm })))
+const RequestForm = lazy(() => import('../../requests/request-form.tsx').then(module => ({ default: module.RequestForm })))
 
 const weekDays = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
 const shiftPlural = new Intl.PluralRules('ru')
